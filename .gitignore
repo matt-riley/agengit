@@ -1,0 +1,22 @@
+# Zig build artifacts
+zig-out/
+.zig-cache/
+*.o
+
+# agit store directories (do not track)
+.agit/
+.regent/
+
+# Editor and OS
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Test artifacts
+/tmp/
+
+# Local config overrides
+*.local
