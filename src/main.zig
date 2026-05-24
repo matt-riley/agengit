@@ -1,6 +1,46 @@
 const std = @import("std");
+const clap = @import("clap");
+
+const cli = struct {
+    const init_cmd = @import("cli/init.zig");
+    const uninstall = @import("cli/uninstall.zig");
+    const doctor = @import("cli/doctor.zig");
+    const status = @import("cli/status.zig");
+    const sessions = @import("cli/sessions.zig");
+    const log_cmd = @import("cli/log.zig");
+    const show = @import("cli/show.zig");
+    const blame = @import("cli/blame.zig");
+    const cat = @import("cli/cat.zig");
+    const completion = @import("cli/completion.zig");
+};
 
 pub const version = "0.1.0";
+
+const SubCommand = enum {
+    init,
+    uninstall,
+    doctor,
+    status,
+    sessions,
+    log,
+    show,
+    blame,
+    cat,
+    version,
+    completion,
+    help,
+};
+
+const top_parsers = .{
+    .command = clap.parsers.enumeration(SubCommand),
+};
+
+const top_params = clap.parseParamsComptime(
+    \\-h, --help     Display this help and exit.
+    \\-V, --version  Print version and exit.
+    \\<command>
+    \\
+);
 
 pub fn main(init: std.process.Init) !void {
     var stdout_buf: [4096]u8 = undefined;
@@ -8,45 +48,73 @@ pub fn main(init: std.process.Init) !void {
     var stdout = std.Io.File.stdout().writer(init.io, &stdout_buf);
     var stderr = std.Io.File.stderr().writer(init.io, &stderr_buf);
 
-    var args_iter = try std.process.Args.Iterator.initAllocator(init.minimal.args, init.gpa);
-    defer args_iter.deinit();
+    var iter = try init.minimal.args.iterateAllocator(init.gpa);
+    defer iter.deinit();
 
-    _ = args_iter.next(); // skip argv[0] (program name)
+    _ = iter.next(); // skip argv[0]
 
-    const cmd = args_iter.next() orelse {
-        try printUsage(&stdout);
-        try stdout.flush();
+    var diag = clap.Diagnostic{};
+    var res = clap.parseEx(clap.Help, &top_params, top_parsers, &iter, .{
+        .diagnostic = &diag,
+        .allocator = init.gpa,
+        .terminating_positional = 0,
+    }) catch |err| {
+        try diag.reportToFile(init.io, .stderr(), err);
+        try stderr.flush();
         std.process.exit(1);
     };
+    defer res.deinit();
 
-    if (std.mem.eql(u8, cmd, "version") or
-        std.mem.eql(u8, cmd, "--version") or
-        std.mem.eql(u8, cmd, "-V"))
-    {
+    if (res.args.version != 0) {
         try stdout.interface.print("agit {s}\n", .{version});
         try stdout.flush();
         return;
     }
 
-    if (std.mem.eql(u8, cmd, "--help") or
-        std.mem.eql(u8, cmd, "-h") or
-        std.mem.eql(u8, cmd, "help"))
-    {
+    if (res.args.help != 0 or res.positionals[0] == null) {
         try printUsage(&stdout);
         try stdout.flush();
+        if (res.positionals[0] == null and res.args.help == 0) {
+            std.process.exit(1);
+        }
         return;
     }
 
-    try stderr.interface.print("error: unknown command '{s}'\n\nRun 'agit --help' for usage.\n", .{cmd});
-    try stderr.flush();
-    std.process.exit(1);
+    const cmd = res.positionals[0].?;
+
+    switch (cmd) {
+        .version => {
+            try stdout.interface.print("agit {s}\n", .{version});
+            try stdout.flush();
+        },
+        .help => {
+            try printUsage(&stdout);
+            try stdout.flush();
+        },
+        .init => try cli.init_cmd.run(init.io, init.gpa, &iter),
+        .uninstall => try cli.uninstall.run(init.io, init.gpa, &iter),
+        .doctor => try cli.doctor.run(init.io, init.gpa, &iter),
+        .status => try cli.status.run(init.io, init.gpa, &iter),
+        .sessions => try cli.sessions.run(init.io, init.gpa, &iter),
+        .log => try cli.log_cmd.run(init.io, init.gpa, &iter),
+        .show => try cli.show.run(init.io, init.gpa, &iter),
+        .blame => try cli.blame.run(init.io, init.gpa, &iter),
+        .cat => try cli.cat.run(init.io, init.gpa, &iter),
+        .completion => try cli.completion.run(init.io, init.gpa, &iter),
+    }
+
+    try stdout.flush();
 }
 
 fn printUsage(w: *std.Io.File.Writer) !void {
     try w.interface.writeAll(
         \\agit - AI agent version control
         \\
-        \\Usage: agit <command> [options]
+        \\Usage: agit [options] <command> [command-options]
+        \\
+        \\Options:
+        \\  -h, --help     Display this help and exit.
+        \\  -V, --version  Print version and exit.
         \\
         \\Commands:
         \\  init          Set up agit in the current repository
@@ -72,4 +140,10 @@ test "version is non-empty" {
 
 test "version starts with a digit" {
     try std.testing.expect(version[0] >= '0' and version[0] <= '9');
+}
+
+// Pull util module tests into the main test binary.
+test {
+    _ = @import("util/file_lock.zig");
+    _ = @import("util/exe_path.zig");
 }

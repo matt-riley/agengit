@@ -3,7 +3,16 @@
     .version = "0.1.0",
     .minimum_zig_version = "0.16.0",
     .fingerprint = 0xc11f7144fb5ec6c,
-    .dependencies = .{},
+    .dependencies = .{
+        .clap = .{
+            .url = "https://github.com/Hejsil/zig-clap/archive/refs/tags/0.12.0.tar.gz",
+            .hash = "clap-0.12.0-oBajB7foAQDqlSwaSG5g0yq7xGbQARUsBk5T64gAOqP5",
+        },
+        .zqlite = .{
+            .url = "https://github.com/karlseguin/zqlite.zig/archive/refs/heads/master.tar.gz",
+            .hash = "zqlite-0.0.1-RWLaY64xnAAxsD2YNT8QqPMJUuaFv2GOzFRR4aGypJv3",
+        },
+    },
     .paths = .{
         "build.zig",
         "build.zig.zon",

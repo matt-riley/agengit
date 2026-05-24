@@ -4,10 +4,17 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const clap_dep = b.dependency("clap", .{ .target = target, .optimize = optimize });
+    const zqlite_dep = b.dependency("zqlite", .{ .target = target, .optimize = optimize });
+
     const root_module = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
+        .imports = &.{
+            .{ .name = "clap", .module = clap_dep.module("clap") },
+            .{ .name = "zqlite", .module = zqlite_dep.module("zqlite") },
+        },
     });
 
     const exe = b.addExecutable(.{
@@ -26,14 +33,16 @@ pub fn build(b: *std.Build) void {
     const run_step = b.step("run", "Run agit");
     run_step.dependOn(&run_cmd.step);
 
-    const test_module = b.createModule(.{
-        .root_source_file = b.path("src/main.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-
     const unit_tests = b.addTest(.{
-        .root_module = test_module,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "clap", .module = clap_dep.module("clap") },
+                .{ .name = "zqlite", .module = zqlite_dep.module("zqlite") },
+            },
+        }),
     });
 
     const run_unit_tests = b.addRunArtifact(unit_tests);
