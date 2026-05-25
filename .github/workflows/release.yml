@@ -3,6 +3,13 @@ name: Release
 on:
   push:
     branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  # Queue release runs so a newer push cannot cancel an in-flight publish
+  # before the Homebrew tap update lands.
+  group: ${{ github.workflow }}:${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -12,6 +19,8 @@ permissions:
 jobs:
   release-please:
     uses: matt-riley/matt-riley-ci/.github/workflows/release-please.yml@main
+    secrets:
+      token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
 
   build:
     name: Build (${{ matrix.target }})
@@ -68,34 +77,21 @@ jobs:
           gh release upload "${{ needs.release-please.outputs.tag_name }}" checksums.txt \
             --repo "${{ github.repository }}" --clobber
 
-  publish:
-    name: Publish release
-    needs: [release-please, checksums]
-    if: needs.release-please.outputs.release_created == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Mark release as published
-        run: |
-          gh release edit "${{ needs.release-please.outputs.tag_name }}" --draft=false \
-            --repo "${{ github.repository }}"
-        env:
-          GH_TOKEN: ${{ github.token }}
-
   homebrew:
     name: Update homebrew tap
-    needs: [release-please, publish]
+    needs: [release-please, build, checksums]
     if: needs.release-please.outputs.release_created == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Generate and push formula
         env:
           TAG: ${{ needs.release-please.outputs.tag_name }}
-          TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN || secrets.TAP_TOKEN }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           if [ -z "${TAP_TOKEN:-}" ]; then
-            echo "::warning::TAP_TOKEN secret not set — homebrew tap not updated. Add a PAT with contents:write to matt-riley/homebrew-tools as TAP_TOKEN in this repo."
+            echo "::warning::HOMEBREW_TAP_GITHUB_TOKEN secret not set — homebrew tap not updated. Add a PAT with contents:write to matt-riley/homebrew-tools as HOMEBREW_TAP_GITHUB_TOKEN in this repo."
             exit 0
           fi
           VERSION="${TAG#v}"
