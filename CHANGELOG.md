@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.11.0](https://github.com/matt-riley/agengit/compare/v1.10.0...v1.11.0) (2026-05-25)
+
+
+### Features
+
+* **recorder:** make finalize CAS-first and add stats ([13154ac](https://github.com/matt-riley/agengit/commit/13154acc5525c26f2a9b92ec04ae049117ad7bd8))
+* **store:** implement ADR 007 reconcile and incremental reindex ([#43](https://github.com/matt-riley/agengit/issues/43)) ([7436c11](https://github.com/matt-riley/agengit/commit/7436c11d1f2f82ae9650bedcf2670386eb32e9b4))
+
+
+### Bug Fixes
+
+* write Codex hooks in matcher group format ([dd5a345](https://github.com/matt-riley/agengit/commit/dd5a34546a639b557f3bca13b0e7f3132e70f29f))
+
 ## [1.10.0](https://github.com/matt-riley/agengit/compare/v1.9.0...v1.10.0) (2026-05-25)
 
 
