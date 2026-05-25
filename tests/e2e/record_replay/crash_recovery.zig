@@ -48,6 +48,7 @@ fn findStagingFile(sandbox: *harness.Sandbox) ![]u8 {
     defer walker.deinit();
     while (try walker.next(io)) |entry| {
         if (entry.kind != .file) continue;
+        if (std.mem.indexOfScalar(u8, entry.path, '/')) |_| continue;
         if (!std.mem.endsWith(u8, entry.path, ".json")) continue;
         if (std.mem.endsWith(u8, entry.path, ".json.lock")) continue;
         return std.fmt.allocPrint(gpa, "{s}/{s}", .{ tmp_abs, entry.path });
