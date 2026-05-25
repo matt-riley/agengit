@@ -1,6 +1,6 @@
 .{
     .name = .agit,
-    .version = "1.7.0", // x-release-please-version
+    .version = "1.8.0", // x-release-please-version
     .minimum_zig_version = "0.16.0",
     .fingerprint = 0xc11f7144fb5ec6c,
     .dependencies = .{
