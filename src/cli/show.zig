@@ -35,9 +35,15 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
 
     var parsed = store.readStep(io, gpa, h) catch |err| {
         switch (err) {
-            error.UnknownField, error.InvalidCharacter, error.UnexpectedToken,
-            error.InvalidNumber, error.Overflow, error.InvalidEnumTag,
-            error.DuplicateField, error.MissingField, error.LengthMismatch,
+            error.UnknownField,
+            error.InvalidCharacter,
+            error.UnexpectedToken,
+            error.InvalidNumber,
+            error.Overflow,
+            error.InvalidEnumTag,
+            error.DuplicateField,
+            error.MissingField,
+            error.LengthMismatch,
             error.SyntaxError,
             => try stdout.interface.print(
                 "error: {s} is not a step object\n",

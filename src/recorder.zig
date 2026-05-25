@@ -9,6 +9,46 @@ pub const Cause = object.Cause;
 pub const StepMessage = object.StepMessage;
 pub const StepToolCall = object.StepToolCall;
 
+pub const HookFailureDetails = struct {
+    code: []const u8 = "hook_error",
+    message: []const u8 = "hook failed",
+    session_id: ?[]const u8 = null,
+    event_name: ?[]const u8 = null,
+    field: ?[]const u8 = null,
+    payload_bytes: ?usize = null,
+    max_payload_bytes: ?usize = null,
+    staging_key: ?[]const u8 = null,
+    quarantine_path: ?[]const u8 = null,
+};
+
+const HookFailureLogEntry = struct {
+    ts: i64,
+    level: []const u8 = "error",
+    context: []const u8,
+    err: []const u8,
+    code: []const u8,
+    message: []const u8,
+    session_id: ?[]const u8 = null,
+    event_name: ?[]const u8 = null,
+    field: ?[]const u8 = null,
+    payload_bytes: ?usize = null,
+    max_payload_bytes: ?usize = null,
+    staging_key: ?[]const u8 = null,
+    quarantine_path: ?[]const u8 = null,
+};
+
+pub fn logHookFailureFromCwd(
+    io: std.Io,
+    gpa: std.mem.Allocator,
+    context: []const u8,
+    err: anyerror,
+    details: HookFailureDetails,
+) void {
+    var rec = Recorder.open(io, std.Io.Dir.cwd(), gpa) catch return;
+    defer rec.deinit(io);
+    rec.logHookFailure(io, context, err, details);
+}
+
 /// Metadata identifying a coding session.
 pub const SessionMeta = struct {
     origin: []const u8,
@@ -341,34 +381,40 @@ pub const Recorder = struct {
     /// All I/O errors during logging are silently swallowed — this must never
     /// propagate errors back to the hook process.
     pub fn logError(self: *Recorder, io: std.Io, context: []const u8, err: anyerror) void {
+        self.logHookFailure(io, context, err, .{});
+    }
+
+    pub fn logHookFailure(
+        self: *Recorder,
+        io: std.Io,
+        context: []const u8,
+        err: anyerror,
+        details: HookFailureDetails,
+    ) void {
         var aw: std.Io.Writer.Allocating = .init(self.gpa);
         defer aw.deinit();
 
         std.json.Stringify.value(
-            .{
+            HookFailureLogEntry{
                 .ts = std.Io.Timestamp.now(io, .real).toMilliseconds(),
-                .level = @as([]const u8, "error"),
                 .context = context,
                 .err = @as([]const u8, @errorName(err)),
+                .code = details.code,
+                .message = details.message,
+                .session_id = details.session_id,
+                .event_name = details.event_name,
+                .field = details.field,
+                .payload_bytes = details.payload_bytes,
+                .max_payload_bytes = details.max_payload_bytes,
+                .staging_key = details.staging_key,
+                .quarantine_path = details.quarantine_path,
             },
             .{},
             &aw.writer,
         ) catch return;
         const entry_json = aw.writer.buffered();
 
-        const existing = self.store.root.readFileAlloc(io, "log/hook-error.log", self.gpa, .unlimited) catch |e| switch (e) {
-            error.FileNotFound => null,
-            else => return,
-        };
-        defer if (existing) |e| self.gpa.free(e);
-
-        var af = self.store.root.createFileAtomic(io, "log/hook-error.log", .{ .replace = true, .make_path = false }) catch return;
-        defer af.deinit(io);
-        if (existing) |e| af.file.writeStreamingAll(io, e) catch return;
-        af.file.writeStreamingAll(io, entry_json) catch return;
-        af.file.writeStreamingAll(io, "\n") catch return;
-        af.file.sync(io) catch return;
-        af.replace(io) catch return;
+        self.appendHookLog(io, entry_json) catch return;
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
@@ -446,14 +492,97 @@ pub const Recorder = struct {
 
         const data = self.store.root.readFileAlloc(io, path, self.gpa, .unlimited) catch |err| switch (err) {
             error.FileNotFound => return null,
-            else => return err,
+            else => {
+                var quarantine_buf: [128]u8 = undefined;
+                const quarantine_path = self.quarantineStagingByRename(io, key, path, &quarantine_buf) catch null;
+                self.logHookFailure(io, "recorder-finalize", err, .{
+                    .code = "corrupt_staging",
+                    .message = "failed to read staging file during finalize",
+                    .staging_key = key[0..],
+                    .quarantine_path = quarantine_path,
+                });
+                return error.CorruptStaging;
+            },
         };
         defer self.gpa.free(data);
 
-        // Delete while still holding the lock.
-        self.store.root.deleteFile(io, path) catch {};
+        const parsed = std.json.parseFromSlice(TurnState, self.gpa, data, .{
+            .allocate = .alloc_always,
+        }) catch |err| {
+            var quarantine_buf: [128]u8 = undefined;
+            const quarantine_path = try self.quarantineStagingData(io, key, path, data, &quarantine_buf);
+            self.logHookFailure(io, "recorder-finalize", err, .{
+                .code = "corrupt_staging",
+                .message = "failed to parse staging file during finalize",
+                .staging_key = key[0..],
+                .quarantine_path = quarantine_path,
+            });
+            return error.CorruptStaging;
+        };
 
-        return std.json.parseFromSlice(TurnState, self.gpa, data, .{ .allocate = .alloc_always }) catch null;
+        // Delete while still holding the lock, after the staging data is known-good.
+        self.store.root.deleteFile(io, path) catch {};
+        return parsed;
+    }
+
+    fn appendHookLog(self: *Recorder, io: std.Io, entry_json: []const u8) !void {
+        var lock = try file_lock_mod.LockFile.acquire(io, self.store.root, "log/hook-error.log.lock", .{});
+        defer lock.release(io);
+
+        var file = try self.store.root.createFile(io, "log/hook-error.log", .{
+            .read = true,
+            .truncate = false,
+        });
+        defer file.close(io);
+
+        const offset = try file.length(io);
+        try file.writePositionalAll(io, entry_json, offset);
+        try file.writePositionalAll(io, "\n", offset + entry_json.len);
+        try file.sync(io);
+    }
+
+    fn quarantineStagingPath(
+        self: *Recorder,
+        io: std.Io,
+        key: *const [64]u8,
+        path_buf: []u8,
+    ) ![]const u8 {
+        try self.store.root.createDirPath(io, "log/corrupt-staging");
+        const timestamp = std.Io.Timestamp.now(io, .real).toMilliseconds();
+        return std.fmt.bufPrint(path_buf, "log/corrupt-staging/{d}-{s}.json", .{ timestamp, key.* });
+    }
+
+    fn quarantineStagingData(
+        self: *Recorder,
+        io: std.Io,
+        key: *const [64]u8,
+        staging_path: []const u8,
+        data: []const u8,
+        path_buf: []u8,
+    ) ![]const u8 {
+        const quarantine_path = try self.quarantineStagingPath(io, key, path_buf);
+        var af = try self.store.root.createFileAtomic(io, quarantine_path, .{
+            .replace = false,
+            .make_path = false,
+        });
+        defer af.deinit(io);
+        try af.file.writeStreamingAll(io, data);
+        try af.file.sync(io);
+        try af.link(io);
+        try self.store.root.deleteFile(io, staging_path);
+        return quarantine_path;
+    }
+
+    fn quarantineStagingByRename(
+        self: *Recorder,
+        io: std.Io,
+        key: *const [64]u8,
+        staging_path: []const u8,
+        path_buf: []u8,
+    ) ![]const u8 {
+        const quarantine_path = try self.quarantineStagingPath(io, key, path_buf);
+        try std.Io.Dir.rename(self.store.root, staging_path, self.store.root, quarantine_path, io);
+        return quarantine_path;
     }
 };
 
@@ -680,7 +809,7 @@ test "recordAssistantAndFinalize: idempotent on duplicate turn_id" {
     try std.testing.expect(head1.?.eql(head2.?));
 }
 
-test "recordAssistantAndFinalize: corrupt staging file is treated as empty" {
+test "recordAssistantAndFinalize: corrupt staging file is quarantined and logged" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const io = std.testing.io;
@@ -699,11 +828,29 @@ test "recordAssistantAndFinalize: corrupt staging file is treated as empty" {
     try f.writeStreamingAll(io, "not-valid-json!!!");
     f.close(io);
 
-    // Finalize should succeed, treating the corrupt state as empty.
-    try rec.recordAssistantAndFinalize(io, meta, "t1", .{ .content = "ok" }, &.{});
+    try std.testing.expectError(
+        error.CorruptStaging,
+        rec.recordAssistantAndFinalize(io, meta, "t1", .{ .content = "ok" }, &.{}),
+    );
 
     const head = try rec.store.readRef(io, gpa, meta.origin, meta.session_id);
-    try std.testing.expect(head != null);
+    try std.testing.expect(head == null);
+
+    _ = rec.store.root.statFile(io, staging_path, .{}) catch |err| switch (err) {
+        error.FileNotFound => {},
+        else => return err,
+    };
+
+    var quarantine_dir = try rec.store.root.openDir(io, "log/corrupt-staging", .{ .iterate = true });
+    defer quarantine_dir.close(io);
+    var it = quarantine_dir.iterate();
+    const entry = (try it.next(io)) orelse return error.MissingQuarantineFile;
+    try std.testing.expectEqualStrings(".json", entry.name[entry.name.len - 5 ..]);
+
+    const log = try rec.store.root.readFileAlloc(io, "log/hook-error.log", gpa, .unlimited);
+    defer gpa.free(log);
+    try std.testing.expect(std.mem.indexOf(u8, log, "corrupt_staging") != null);
+    try std.testing.expect(std.mem.indexOf(u8, log, "log/corrupt-staging/") != null);
 }
 
 test "logError: writes a JSON line to hook-error.log" {
@@ -742,4 +889,32 @@ test "logError: appends to existing log" {
 
     try std.testing.expect(std.mem.indexOf(u8, log, "ctx-1") != null);
     try std.testing.expect(std.mem.indexOf(u8, log, "ctx-2") != null);
+}
+
+test "logError: repeated writes preserve one line per failure" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+
+    var rec = try makeRecorder(io, tmp.dir, gpa);
+    defer rec.deinit(io);
+
+    rec.logError(io, "ctx-1", error.Unexpected);
+    rec.logError(io, "ctx-2", error.OutOfMemory);
+    rec.logHookFailure(io, "ctx-3", error.InvalidFieldType, .{
+        .code = "invalid_field_type",
+        .message = "invalid field",
+        .field = "session_id",
+    });
+
+    const log = try rec.store.root.readFileAlloc(io, "log/hook-error.log", gpa, .unlimited);
+    defer gpa.free(log);
+
+    var lines: usize = 0;
+    for (log) |byte| {
+        if (byte == '\n') lines += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 3), lines);
+    try std.testing.expect(std.mem.indexOf(u8, log, "invalid_field_type") != null);
 }

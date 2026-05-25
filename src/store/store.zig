@@ -251,13 +251,22 @@ pub const Store = struct {
 
         if (!matches) return false;
 
+        const new_hex = new_hash.toHex();
+        const new_hex_str: []const u8 = &new_hex;
+        if (try self.index.queryStepHash(origin, session_id, step.turn_id)) |existing_hex| {
+            if (!std.mem.eql(u8, &existing_hex, new_hex_str)) return false;
+        }
+
+        // Keep related SQLite writes in one transaction. The ref write remains
+        // the source of truth; `agit reindex` repairs the index if a crash lands
+        // after the ref is replaced but before the transaction commits.
+        try self.index.db.transaction();
+        errdefer self.index.db.rollback();
+
         // Write the new ref atomically (still under lock).
         try ref.writeRefToPath(io, self.root, path, new_hash);
 
         // Update the index (still under lock — same atomic window as the ref write).
-        const new_hex = new_hash.toHex();
-        const new_hex_str: []const u8 = &new_hex;
-
         try self.index.upsertSession(origin, session_id, new_hex_str);
 
         const parent_hex_buf = if (step.parent) |p| p else null;
@@ -270,6 +279,8 @@ pub const Store = struct {
             step.tree,
             step.timestamp,
         );
+
+        try self.index.db.commit();
 
         return true;
     }
@@ -327,6 +338,49 @@ test "store casRef creates and updates ref plus index" {
 
     // Verify ref.
     const head = try s.readRef(io, std.testing.allocator, "github.com/u/r", "sess-1");
+    try std.testing.expect(head != null);
+    try std.testing.expect(h1.eql(head.?));
+}
+
+test "store casRef refuses duplicate turn id with different hash" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+
+    var s = try Store.open(io, tmp.dir, gpa);
+    defer s.deinit(io);
+
+    const step1 = Step{
+        .parent = null,
+        .tree = "a" ** 64,
+        .session_id = "sess-1",
+        .origin = "github.com/u/r",
+        .turn_id = "t1",
+        .causes = &.{},
+        .timestamp = 1000,
+    };
+    const h1 = try s.writeStep(io, gpa, step1);
+    try std.testing.expect(try s.casRef(io, gpa, step1.origin, step1.session_id, null, h1, &step1));
+
+    var h1_hex = h1.toHex();
+    const existing = try s.index.queryStepHash(step1.origin, step1.session_id, step1.turn_id);
+    try std.testing.expect(existing != null);
+    try std.testing.expectEqualStrings(&h1_hex, &existing.?);
+
+    const step2 = Step{
+        .parent = &h1_hex,
+        .tree = "b" ** 64,
+        .session_id = "sess-1",
+        .origin = "github.com/u/r",
+        .turn_id = "t1",
+        .causes = &.{},
+        .timestamp = 1001,
+    };
+    const h2 = try s.writeStep(io, gpa, step2);
+    try std.testing.expect(!try s.casRef(io, gpa, step2.origin, step2.session_id, h1, h2, &step2));
+
+    const head = try s.readRef(io, gpa, step1.origin, step1.session_id);
     try std.testing.expect(head != null);
     try std.testing.expect(h1.eql(head.?));
 }

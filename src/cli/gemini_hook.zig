@@ -7,39 +7,70 @@ const hook = @import("../hook.zig");
 /// Entry point. Always exits cleanly — errors are logged to stderr.
 pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator) !void {
     _ = iter;
-    runInner(io, gpa) catch |err| {
-        hook.logError(io, "gemini-hook", @errorName(err));
-    };
+    runInner(io, gpa) catch {};
 }
 
 fn runInner(io: std.Io, gpa: std.mem.Allocator) !void {
-    const data = try hook.readStdin(io, gpa);
+    var diagnostic: hook.Diagnostic = .{};
+
+    const data = hook.readStdin(io, gpa) catch |err| {
+        if (err == error.HookPayloadTooLarge) diagnostic = hook.Diagnostic.oversized();
+        hook.reportFailure(io, gpa, "gemini-hook", err, diagnostic, null);
+        return err;
+    };
     defer gpa.free(data);
 
+    processPayload(io, gpa, data, &diagnostic) catch |err| {
+        hook.reportFailure(io, gpa, "gemini-hook", err, diagnostic, data);
+        return err;
+    };
+}
+
+fn processPayload(
+    io: std.Io,
+    gpa: std.mem.Allocator,
+    data: []const u8,
+    diagnostic: *hook.Diagnostic,
+) !void {
     const parsed = try std.json.parseFromSlice(std.json.Value, gpa, data, .{
         .allocate = .alloc_always,
     });
     defer parsed.deinit();
 
-    const root = parsed.value.object;
+    const root = try hook.requireObject(parsed.value, diagnostic);
 
-    const session_id = switch (root.get("session_id") orelse return error.MissingSessionId) {
-        .string => |s| s,
-        else => return error.InvalidSessionId,
-    };
-
-    const event = switch (root.get("hook_event_name") orelse return error.MissingEventName) {
-        .string => |s| s,
-        else => return error.InvalidEventName,
-    };
+    const session_id = try hook.requireString(root, "session_id", diagnostic);
+    _ = try hook.requireString(root, "cwd", diagnostic);
+    const event = try hook.requireString(root, "hook_event_name", diagnostic);
 
     const meta: SessionMeta = .{ .origin = "gemini", .session_id = session_id };
 
     if (std.mem.eql(u8, event, "AfterTool")) {
-        const tool_name = switch (root.get("tool_name") orelse std.json.Value{ .string = "unknown" }) {
+        const maybe_tool_name = root.get("tool_name");
+        const malformed_reason: ?[]const u8 = if (maybe_tool_name) |value| switch (value) {
+            .string => null,
+            else => "invalid tool_name",
+        } else "missing tool_name";
+        const tool_name = if (maybe_tool_name) |value| switch (value) {
             .string => |s| s,
             else => "unknown",
-        };
+        } else "unknown";
+
+        var rec = try Recorder.open(io, std.Io.Dir.cwd(), gpa);
+        defer rec.deinit(io);
+
+        try rec.upsertSession(meta);
+
+        if (malformed_reason) |reason| {
+            const args = try std.json.Stringify.valueAlloc(gpa, std.json.Value{ .object = root }, .{});
+            defer gpa.free(args);
+            try rec.recordToolUse(io, meta, "", .{
+                .tool_name = tool_name,
+                .args = args,
+                .result = reason,
+            });
+            return;
+        }
 
         const tool_input_val = root.get("tool_input") orelse std.json.Value.null;
         const tool_input_str = try std.json.Stringify.valueAlloc(gpa, tool_input_val, .{});
@@ -56,10 +87,6 @@ fn runInner(io: std.Io, gpa: std.mem.Allocator) !void {
         };
         defer if (tool_response_allocated) gpa.free(tool_response_str);
 
-        var rec = try Recorder.open(io, std.Io.Dir.cwd(), gpa);
-        defer rec.deinit(io);
-
-        try rec.upsertSession(meta);
         try rec.recordToolUse(io, meta, "", .{
             .tool_name = tool_name,
             .args = tool_input_str,
@@ -67,17 +94,16 @@ fn runInner(io: std.Io, gpa: std.mem.Allocator) !void {
         });
     } else if (std.mem.eql(u8, event, "AfterAgent")) {
         // Gemini uses "response" for the agent's final output.
-        const content = switch (root.get("response") orelse std.json.Value{ .string = "" }) {
-            .string => |s| s,
-            else => "",
-        };
+        const content = (try hook.optionalString(root, "response", diagnostic)) orelse "";
 
         var rec = try Recorder.open(io, std.Io.Dir.cwd(), gpa);
         defer rec.deinit(io);
 
         try rec.recordAssistantAndFinalize(io, meta, "", .{ .content = content }, &.{});
+    } else {
+        diagnostic.* = hook.Diagnostic.unknownEvent();
+        return error.UnknownEventName;
     }
-    // Unknown events are silently ignored.
 }
 
 test "parse gemini after tool fixture" {
