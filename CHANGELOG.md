@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.0](https://github.com/matt-riley/agengit/compare/v1.11.1...v1.12.0) (2026-05-25)
+
+
+### Features
+
+* **hooks:** add structured payload diagnostics ([05eae69](https://github.com/matt-riley/agengit/commit/05eae6991f4f12c0bdc5d93cd76e9be6ae3d2128))
+
 ## [1.11.1](https://github.com/matt-riley/agengit/compare/v1.11.0...v1.11.1) (2026-05-25)
 
 
