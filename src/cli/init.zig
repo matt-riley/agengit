@@ -490,7 +490,10 @@ fn makeGeminiHook(aa: std.mem.Allocator, exe: []const u8, subcmd: []const u8) !s
     const cmd = try std.mem.concat(aa, u8, &.{ exe, " ", subcmd });
     var obj = std.json.ObjectMap.empty;
     try obj.put(aa, "command", std.json.Value{ .string = cmd });
-    return std.json.Value{ .object = obj };
+
+    var arr = std.json.Array.init(aa);
+    try arr.append(std.json.Value{ .object = obj });
+    return std.json.Value{ .array = arr };
 }
 
 test "setClaudeHooks installs all managed events on empty root" {
@@ -613,8 +616,8 @@ test "setGeminiHooks installs all managed events on empty root" {
     try setGeminiHooks(aa, &root, "/bin/agit");
 
     const hooks = root.get("hooks").?.object;
-    try std.testing.expect(hooks.get("AfterTool") != null);
-    try std.testing.expect(hooks.get("AfterAgent") != null);
+    try std.testing.expect(hooks.get("AfterTool").?.array.items.len == 1);
+    try std.testing.expect(hooks.get("AfterAgent").?.array.items.len == 1);
     try std.testing.expectEqualStrings("/bin/agit", root.get("_agit").?.object.get("binary").?.string);
 }
 
@@ -626,8 +629,11 @@ test "setGeminiHooks preserves user hooks on other event names" {
 
     var user_obj = std.json.ObjectMap.empty;
     try user_obj.put(aa, "command", std.json.Value{ .string = "/bin/user-gemini-hook" });
+    var user_arr = std.json.Array.init(aa);
+    try user_arr.append(std.json.Value{ .object = user_obj });
+
     var existing_hooks = std.json.ObjectMap.empty;
-    try existing_hooks.put(aa, "BeforeTool", std.json.Value{ .object = user_obj });
+    try existing_hooks.put(aa, "BeforeTool", std.json.Value{ .array = user_arr });
 
     var root = std.json.ObjectMap.empty;
     try root.put(aa, "hooks", std.json.Value{ .object = existing_hooks });
@@ -635,6 +641,6 @@ test "setGeminiHooks preserves user hooks on other event names" {
     try setGeminiHooks(aa, &root, "/bin/agit");
 
     const hooks = root.get("hooks").?.object;
-    try std.testing.expect(hooks.get("AfterTool") != null);
-    try std.testing.expect(hooks.get("BeforeTool") != null);
+    try std.testing.expect(hooks.get("AfterTool").?.array.items.len == 1);
+    try std.testing.expect(hooks.get("BeforeTool").?.array.items.len == 1);
 }

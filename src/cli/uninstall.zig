@@ -201,7 +201,12 @@ fn removeSimpleHooks(aa: std.mem.Allocator, root: *std.json.ObjectMap, binary: [
             },
             .array => {
                 var event_changed = false;
-                const filtered = try filterSimpleMatcherGroups(aa, v.array, binary, &event_changed);
+                var filtered = try filterFlatCommandArray(aa, v.array, binary, &event_changed);
+                if (!event_changed) {
+                    // Try Codex-style nested matcher groups
+                    filtered = try filterSimpleMatcherGroups(aa, v.array, binary, &event_changed);
+                }
+
                 if (event_changed) {
                     changed = true;
                     if (filtered.items.len > 0) {
@@ -218,6 +223,23 @@ fn removeSimpleHooks(aa: std.mem.Allocator, root: *std.json.ObjectMap, binary: [
         try root.put(aa, "hooks", std.json.Value{ .object = new_hooks });
     }
     return changed;
+}
+
+fn filterFlatCommandArray(
+    aa: std.mem.Allocator,
+    arr: std.json.Array,
+    binary: []const u8,
+    changed: *bool,
+) std.mem.Allocator.Error!std.json.Array {
+    var filtered = std.json.Array.init(aa);
+    for (arr.items) |item| {
+        if (isSimpleAgitCommand(item, binary)) {
+            changed.* = true;
+            continue;
+        }
+        try filtered.append(item);
+    }
+    return filtered;
 }
 
 fn filterSimpleMatcherGroups(
@@ -389,6 +411,28 @@ test "removeSimpleHooks removes agit-managed Codex/Gemini hooks" {
     try std.testing.expect(changed);
     const remaining = root.get("hooks").?.object;
     try std.testing.expect(remaining.get("Stop") == null);
+}
+
+test "removeSimpleHooks removes agit-managed Gemini array hooks" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const aa = arena.allocator();
+
+    var stop_obj = std.json.ObjectMap.empty;
+    try stop_obj.put(aa, "command", std.json.Value{ .string = "/bin/agit gemini-hook" });
+    var stop_arr = std.json.Array.init(aa);
+    try stop_arr.append(std.json.Value{ .object = stop_obj });
+
+    var hooks_obj = std.json.ObjectMap.empty;
+    try hooks_obj.put(aa, "AfterTool", std.json.Value{ .array = stop_arr });
+    var root = std.json.ObjectMap.empty;
+    try root.put(aa, "hooks", std.json.Value{ .object = hooks_obj });
+
+    const changed = try removeSimpleHooks(aa, &root, "/bin/agit");
+    try std.testing.expect(changed);
+    const remaining = root.get("hooks").?.object;
+    try std.testing.expect(remaining.get("AfterTool") == null);
 }
 
 test "removeSimpleHooks removes agit-managed Codex matcher group hooks" {
