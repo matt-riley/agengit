@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.0](https://github.com/matt-riley/agengit/compare/v1.7.0...v1.8.0) (2026-05-25)
+
+
+### Features
+
+* **locking:** implement robust concurrent lock handling ([5cc76eb](https://github.com/matt-riley/agengit/commit/5cc76eb4c6fab87dd3d7fdaa892f4d29aa33f95c))
+
 ## [1.7.0](https://github.com/matt-riley/agengit/compare/v1.6.0...v1.7.0) (2026-05-25)
 
 
