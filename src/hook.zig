@@ -156,6 +156,10 @@ pub fn readPayload(io: std.Io, gpa: std.mem.Allocator) !ReadPayloadResult {
     return parsePayloadData(gpa, data);
 }
 
+pub fn parsePayloadBytes(gpa: std.mem.Allocator, data: []const u8) !ReadPayloadResult {
+    return parsePayloadData(gpa, try gpa.dupe(u8, data));
+}
+
 /// Write a best-effort error line to stderr. Never propagates errors.
 fn logError(io: std.Io, context: []const u8, msg: []const u8) void {
     var buf: [512]u8 = undefined;
