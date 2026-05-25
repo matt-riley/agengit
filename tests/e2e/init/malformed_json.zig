@@ -14,10 +14,10 @@ test "init/malformed_json" {
     // Without --force, malformed JSON means no agents are available for installation.
     // The command succeeds but reports that nothing can be installed.
     try std.testing.expectEqual(@as(u8, 0), result.exit_code);
-    
+
     // The output should indicate no agents are available to install.
     try std.testing.expect(std.mem.indexOf(u8, result.stdout, "no agents selected or available") != null);
-    
+
     // The config file should be unchanged.
     const config = try readHome(&sandbox, ".claude/settings.json");
     defer std.testing.allocator.free(config);
