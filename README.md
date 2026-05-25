@@ -71,7 +71,7 @@ If none of those agents are installed, `agit init` politely shrugs and does noth
 ## Everyday commands
 
 ```sh
-# Check that the store and agent hook config look healthy.
+# Check that the store, ref/index consistency, and agent hook config look healthy.
 agit doctor
 
 # Include currently held lock files.
@@ -98,6 +98,9 @@ agit cat <hash>
 
 # Rebuild the SQLite index from objects if it gets out of step.
 agit reindex
+
+# Or incrementally replay steps newer than a known step hash.
+agit reindex --from <step-hash>
 
 # Generate shell completions.
 agit completion bash

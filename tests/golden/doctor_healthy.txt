@@ -1,4 +1,5 @@
   ✓ .agit/ store: ok
+  ✓ ref/index drift: none detected
   - .agitignore: not present (using default snapshot skips)
   ✓ .agit/tmp staging: ok
   - claude: not installed
