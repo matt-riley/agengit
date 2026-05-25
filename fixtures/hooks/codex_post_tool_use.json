@@ -1,0 +1,9 @@
+{
+  "session_id": "codex-sess-001",
+  "cwd": "/home/user/myproject",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "bash",
+  "tool_input": { "command": "cat src/auth.py" },
+  "tool_use_id": "tool-001",
+  "tool_response": "import hashlib\n\ndef authenticate(user, password):\n    return hashlib.sha256(password.encode()).hexdigest()\n"
+}

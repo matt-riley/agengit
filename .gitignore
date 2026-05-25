@@ -5,7 +5,6 @@ zig-out/
 
 # agit store directories (do not track)
 .agit/
-.regent/
 
 # Editor and OS
 .DS_Store

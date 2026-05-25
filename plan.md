@@ -158,7 +158,7 @@ graph TD
 - Implement Myers line diff and blame-map propagation.
 - Add tests covering inserted/deleted/unchanged lines, binary files, large files, symlinks, ignored paths, and secret defaults.
 
-### Phase 4: Recorder/Capture engine
+### Phase 4: Recorder/Capture engine ✅ COMPLETE
 
 - Implement normalized structs: `SessionMeta`, `UserPrompt`, `ToolUse`, `AssistantResponse`, `Cause`, `TurnState`.
 - Implement:
@@ -170,6 +170,7 @@ graph TD
 - Ensure hook-safe error handling: adapters always exit successfully, log structured errors to `.agit/log/hook-error.log`, and never block agent execution.
 - Add failure-injection tests for invalid JSON, SQLite busy, lock contention, disk write errors, and hook command crashes.
 - Track hook latency in tests; set an initial target that normal no-op hooks complete quickly enough not to degrade agent UX.
+- **Delivered**: `src/recorder.zig` (~400 lines, 13 tests); extended `Step` with embedded `messages`/`tool_calls`; migration 2 adds `seq` columns + unique indices; `reindex` rebuilds message/tool_call rows; `Store.open` creates `log/` and `tmp/` dirs. All 58 tests pass.
 
 ### Phase 5: Agent adapters and installer
 

@@ -12,6 +12,11 @@ const cli = struct {
     const blame = @import("cli/blame.zig");
     const cat = @import("cli/cat.zig");
     const completion = @import("cli/completion.zig");
+    const reindex = @import("cli/reindex.zig");
+    const claude_hook = @import("cli/claude_hook.zig");
+    const claude_tool_batch_hook = @import("cli/claude_tool_batch_hook.zig");
+    const codex_hook = @import("cli/codex_hook.zig");
+    const gemini_hook = @import("cli/gemini_hook.zig");
 };
 
 pub const version = "0.1.0";
@@ -26,9 +31,14 @@ const SubCommand = enum {
     show,
     blame,
     cat,
+    reindex,
     version,
     completion,
     help,
+    @"claude-hook",
+    @"claude-tool-batch-hook",
+    @"codex-hook",
+    @"gemini-hook",
 };
 
 const top_parsers = .{
@@ -91,16 +101,21 @@ pub fn main(init: std.process.Init) !void {
             try printUsage(&stdout);
             try stdout.flush();
         },
-        .init => try cli.init_cmd.run(init.io, init.gpa, &iter),
-        .uninstall => try cli.uninstall.run(init.io, init.gpa, &iter),
-        .doctor => try cli.doctor.run(init.io, init.gpa, &iter),
+        .init => try cli.init_cmd.run(init.io, init.gpa, init.minimal.environ, &iter),
+        .uninstall => try cli.uninstall.run(init.io, init.gpa, init.minimal.environ, &iter),
+        .doctor => try cli.doctor.run(init.io, init.gpa, init.minimal.environ, &iter),
         .status => try cli.status.run(init.io, init.gpa, &iter),
         .sessions => try cli.sessions.run(init.io, init.gpa, &iter),
         .log => try cli.log_cmd.run(init.io, init.gpa, &iter),
         .show => try cli.show.run(init.io, init.gpa, &iter),
         .blame => try cli.blame.run(init.io, init.gpa, &iter),
         .cat => try cli.cat.run(init.io, init.gpa, &iter),
+        .reindex => try cli.reindex.run(init.io, init.gpa, &iter),
         .completion => try cli.completion.run(init.io, init.gpa, &iter),
+        .@"claude-hook" => try cli.claude_hook.run(init.io, init.gpa, &iter),
+        .@"claude-tool-batch-hook" => try cli.claude_tool_batch_hook.run(init.io, init.gpa, &iter),
+        .@"codex-hook" => try cli.codex_hook.run(init.io, init.gpa, &iter),
+        .@"gemini-hook" => try cli.gemini_hook.run(init.io, init.gpa, &iter),
     }
 
     try stdout.flush();
@@ -126,6 +141,7 @@ fn printUsage(w: *std.Io.File.Writer) !void {
         \\  show          Show details of a step
         \\  blame         Show per-line step attribution for a file
         \\  cat           Print a raw object by hash
+        \\  reindex       Rebuild the index from the object store
         \\  version       Print version information
         \\  completion    Generate shell completion scripts
         \\
@@ -146,4 +162,15 @@ test "version starts with a digit" {
 test {
     _ = @import("util/file_lock.zig");
     _ = @import("util/exe_path.zig");
+    _ = @import("store/store.zig");
+    _ = @import("store/ignore.zig");
+    _ = @import("store/diff.zig");
+    _ = @import("store/blame.zig");
+    _ = @import("store/snapshot.zig");
+    _ = @import("recorder.zig");
+    _ = @import("hook.zig");
+    _ = @import("cli/claude_hook.zig");
+    _ = @import("cli/claude_tool_batch_hook.zig");
+    _ = @import("cli/codex_hook.zig");
+    _ = @import("cli/gemini_hook.zig");
 }
