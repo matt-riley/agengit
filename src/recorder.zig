@@ -2,6 +2,7 @@ const std = @import("std");
 const store_mod = @import("store/store.zig");
 const object = @import("store/object.zig");
 const file_lock_mod = @import("util/file_lock.zig");
+const fs_mod = @import("util/fs.zig");
 
 pub const Hash = store_mod.Hash;
 pub const Ignorer = store_mod.Ignorer;
@@ -185,8 +186,7 @@ fn writeStagingFile(
     var af = try agit_dir.createFileAtomic(io, path, .{ .replace = true, .make_path = false });
     defer af.deinit(io);
     try af.file.writeStreamingAll(io, aw.writer.buffered());
-    try af.file.sync(io);
-    try af.replace(io);
+    try fs_mod.atomicReplace(io, &af);
 }
 
 /// The Phase 4 recorder: bridges the agent hook adapters (Phase 5) with the
@@ -539,6 +539,9 @@ pub const Recorder = struct {
         try file.writePositionalAll(io, entry_json, offset);
         try file.writePositionalAll(io, "\n", offset + entry_json.len);
         try file.sync(io);
+        var log_dir = try self.store.root.openDir(io, "log", .{});
+        defer log_dir.close(io);
+        try fs_mod.syncDir(io, log_dir);
     }
 
     fn quarantineStagingPath(
@@ -567,8 +570,7 @@ pub const Recorder = struct {
         });
         defer af.deinit(io);
         try af.file.writeStreamingAll(io, data);
-        try af.file.sync(io);
-        try af.link(io);
+        if (!try fs_mod.linkDurable(io, &af)) return error.PathAlreadyExists;
         try self.store.root.deleteFile(io, staging_path);
         return quarantine_path;
     }
@@ -581,7 +583,7 @@ pub const Recorder = struct {
         path_buf: []u8,
     ) ![]const u8 {
         const quarantine_path = try self.quarantineStagingPath(io, key, path_buf);
-        try std.Io.Dir.rename(self.store.root, staging_path, self.store.root, quarantine_path, io);
+        try fs_mod.renameDurable(io, self.store.root, staging_path, self.store.root, quarantine_path);
         return quarantine_path;
     }
 };

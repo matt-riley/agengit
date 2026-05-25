@@ -1,6 +1,6 @@
 # ADR 008: Durable writes — directory fsync on atomic replace
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-05-25
 
 ## Context
@@ -38,31 +38,34 @@ Every existing call site that does atomic replace migrates to this helper.
 Directory fsync is also added after `link()` calls used for content-addressed
 inserts (`src/store/object.zig` hard-link path).
 
-## Plan
+## Implementation
 
-1. Add `src/util/fs.zig` with:
-   - `pub fn atomicReplace(dir: std.fs.Dir, tmp_name, final_name) !void`
-   - `pub fn syncParentDir(path: []const u8) !void`
-   - `pub fn linkDurable(src: std.fs.Dir, src_name, dst: std.fs.Dir, dst_name) !void`
-2. Migrate call sites:
-   - `src/store/ref.zig:writeRefToPath`
-   - `src/store/object.zig:writeObject` and `linkObject`
-   - `src/store/snapshot.zig:writeManifest`
-   - `src/recorder.zig` hook-error log append
-   - `src/util/atomic_json.zig` (from ADR 006)
-3. Add a `--no-fsync` flag (or env var `AGIT_FSYNC=0`) used only in tests and
-   benchmarks. Production code always syncs.
-4. Document the durability guarantee in `docs/adr/001-store-directory.md` as
-   a forward reference.
+1. Added `src/util/fs.zig` with durable helpers:
+   - `atomicReplace`
+   - `linkDurable`
+   - `renameDurable`
+   - `syncDir`
+2. Migrated atomic write/link call sites in:
+   - `src/store/ref.zig`
+   - `src/store/object.zig`
+   - `src/store/snapshot.zig`
+   - `src/recorder.zig`
+   - `src/cli/init.zig`
+   - `src/cli/uninstall.zig`
+3. Added `AGIT_FSYNC=0` support (default remains fsync enabled) initialized in
+   `src/main.zig`.
+4. Added coverage and tooling:
+   - `tests/e2e/record_replay/durable_writes.zig`
+   - `bench/durable.zig`
+   - `zig build bench-durable` build step and README guidance.
 
 ## Testing
 
 - Unit tests using `std.fs.Dir` against tempdir to assert directory entries
   exist after the helper returns (sanity, not a true crash test).
-- A crash-injection test: spawn `agit` under `strace`/`ltrace` (Linux),
-  fault-inject after `rename` but before any subsequent syscall, reboot the
-  test fs (via `tmpfs` + drop_caches in CI is sufficient), assert objects
-  are still findable.
+- E2E durability flow test in `tests/e2e/record_replay/durable_writes.zig`
+  asserts that finalized refs/objects are readable via CLI paths after
+  recording.
 - Microbenchmark `zig build bench-durable` to track the cost; we expect a
   few hundred microseconds per operation on a local SSD.
 

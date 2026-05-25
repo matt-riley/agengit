@@ -1,6 +1,7 @@
 const std = @import("std");
 const hash_mod = @import("hash.zig");
 const file_lock = @import("../util/file_lock.zig");
+const fs_mod = @import("../util/fs.zig");
 
 pub const Hash = hash_mod.Hash;
 
@@ -33,8 +34,7 @@ pub fn writeRefToPath(
     defer af.deinit(io);
 
     try af.file.writeStreamingAll(io, content_buf[0..65]);
-    try af.file.sync(io);
-    try af.replace(io);
+    try fs_mod.atomicReplace(io, &af);
 }
 
 /// Read the current HEAD hash for a session. Returns null if no ref exists yet.
@@ -92,8 +92,7 @@ pub fn writeSessionRef(
     defer af.deinit(io);
 
     try af.file.writeStreamingAll(io, content_buf[0..65]);
-    try af.file.sync(io);
-    try af.replace(io);
+    try fs_mod.atomicReplace(io, &af);
 }
 
 /// Compare-and-swap: update the session HEAD ref from `expected` to `new_hash`.
@@ -153,8 +152,7 @@ pub fn casSessionRef(
     defer af.deinit(io);
 
     try af.file.writeStreamingAll(io, content_buf[0..65]);
-    try af.file.sync(io);
-    try af.replace(io);
+    try fs_mod.atomicReplace(io, &af);
 
     return true;
 }

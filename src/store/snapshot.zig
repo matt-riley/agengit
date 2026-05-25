@@ -2,6 +2,7 @@ const std = @import("std");
 const hash_mod = @import("hash.zig");
 const object = @import("object.zig");
 const ignore_mod = @import("ignore.zig");
+const fs_mod = @import("../util/fs.zig");
 
 pub const Hash = hash_mod.Hash;
 pub const Ignorer = ignore_mod.Ignorer;
@@ -109,8 +110,7 @@ fn writeTestFile(io: std.Io, dir: std.Io.Dir, rel_path: []const u8, content: []c
     }
     var af = try dir.createFileAtomic(io, rel_path, .{ .replace = true, .make_path = false });
     try af.file.writeStreamingAll(io, content);
-    try af.file.sync(io);
-    try af.replace(io);
+    try fs_mod.atomicReplace(io, &af);
 }
 
 test "isBinary: text is not binary" {
