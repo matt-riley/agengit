@@ -136,7 +136,10 @@ fn removeSimpleHooks(aa: std.mem.Allocator, root: *std.json.ObjectMap, binary: [
         if (v != .object) continue;
         const cmd = v.object.get("command") orelse continue;
         if (cmd != .string) continue;
-        if (std.mem.startsWith(u8, cmd.string, binary) and n_to_remove < to_remove.len) {
+        const is_agit_cmd = std.mem.eql(u8, cmd.string, binary) or
+            (std.mem.startsWith(u8, cmd.string, binary) and
+                cmd.string.len > binary.len and cmd.string[binary.len] == ' ');
+        if (is_agit_cmd and n_to_remove < to_remove.len) {
             to_remove[n_to_remove] = entry.key_ptr.*;
             n_to_remove += 1;
             changed = true;
@@ -174,4 +177,138 @@ fn writeFileAtomic(io: std.Io, path: []const u8, content: []const u8) !void {
     defer af.deinit(io);
     try af.file.writeStreamingAll(io, content);
     try af.replace(io);
+}
+
+test "removeClaude removes agit-managed hooks and returns changed" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const aa = arena.allocator();
+
+    // Build a root object as if agit init had written it.
+    var stop_entry_obj = std.json.ObjectMap.empty;
+    try stop_entry_obj.put(aa, "type", std.json.Value{ .string = "command" });
+    try stop_entry_obj.put(aa, "command", std.json.Value{ .string = "/bin/agit" });
+    try stop_entry_obj.put(aa, "args", std.json.Value{ .array = std.json.Array.init(aa) });
+
+    var inner_hooks = std.json.Array.init(aa);
+    try inner_hooks.append(std.json.Value{ .object = stop_entry_obj });
+    var group_obj = std.json.ObjectMap.empty;
+    try group_obj.put(aa, "hooks", std.json.Value{ .array = inner_hooks });
+
+    var stop_arr = std.json.Array.init(aa);
+    try stop_arr.append(std.json.Value{ .object = group_obj });
+
+    var hooks_obj = std.json.ObjectMap.empty;
+    try hooks_obj.put(aa, "Stop", std.json.Value{ .array = stop_arr });
+
+    var root = std.json.ObjectMap.empty;
+    try root.put(aa, "hooks", std.json.Value{ .object = hooks_obj });
+
+    const changed = try removeClaude(aa, &root, "/bin/agit");
+    try std.testing.expect(changed);
+    // The Stop event should be gone.
+    const remaining = root.get("hooks").?.object;
+    try std.testing.expect(remaining.get("Stop") == null);
+}
+
+test "removeClaude on empty root returns not changed" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const aa = arena.allocator();
+    var root = std.json.ObjectMap.empty;
+    const changed = try removeClaude(aa, &root, "/bin/agit");
+    try std.testing.expect(!changed);
+}
+
+test "removeClaude preserves user hooks on other events" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const aa = arena.allocator();
+
+    // Agit hook on Stop.
+    var agit_entry_obj = std.json.ObjectMap.empty;
+    try agit_entry_obj.put(aa, "type", std.json.Value{ .string = "command" });
+    try agit_entry_obj.put(aa, "command", std.json.Value{ .string = "/bin/agit" });
+    try agit_entry_obj.put(aa, "args", std.json.Value{ .array = std.json.Array.init(aa) });
+    var agit_inner = std.json.Array.init(aa);
+    try agit_inner.append(std.json.Value{ .object = agit_entry_obj });
+    var agit_group = std.json.ObjectMap.empty;
+    try agit_group.put(aa, "hooks", std.json.Value{ .array = agit_inner });
+    var stop_arr = std.json.Array.init(aa);
+    try stop_arr.append(std.json.Value{ .object = agit_group });
+
+    // User hook on PreTool.
+    var user_entry_obj = std.json.ObjectMap.empty;
+    try user_entry_obj.put(aa, "type", std.json.Value{ .string = "command" });
+    try user_entry_obj.put(aa, "command", std.json.Value{ .string = "/bin/mytool" });
+    try user_entry_obj.put(aa, "args", std.json.Value{ .array = std.json.Array.init(aa) });
+    var user_inner = std.json.Array.init(aa);
+    try user_inner.append(std.json.Value{ .object = user_entry_obj });
+    var user_group = std.json.ObjectMap.empty;
+    try user_group.put(aa, "hooks", std.json.Value{ .array = user_inner });
+    var pre_tool_arr = std.json.Array.init(aa);
+    try pre_tool_arr.append(std.json.Value{ .object = user_group });
+
+    var hooks_obj = std.json.ObjectMap.empty;
+    try hooks_obj.put(aa, "Stop", std.json.Value{ .array = stop_arr });
+    try hooks_obj.put(aa, "PreTool", std.json.Value{ .array = pre_tool_arr });
+    var root = std.json.ObjectMap.empty;
+    try root.put(aa, "hooks", std.json.Value{ .object = hooks_obj });
+
+    const changed = try removeClaude(aa, &root, "/bin/agit");
+    try std.testing.expect(changed);
+    const remaining = root.get("hooks").?.object;
+    // agit's Stop entry removed; user's PreTool entry preserved.
+    try std.testing.expect(remaining.get("Stop") == null);
+    try std.testing.expect(remaining.get("PreTool") != null);
+}
+
+test "removeSimpleHooks removes agit-managed Codex/Gemini hooks" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const aa = arena.allocator();
+
+    var stop_obj = std.json.ObjectMap.empty;
+    try stop_obj.put(aa, "command", std.json.Value{ .string = "/bin/agit codex-hook" });
+    var hooks_obj = std.json.ObjectMap.empty;
+    try hooks_obj.put(aa, "Stop", std.json.Value{ .object = stop_obj });
+    var root = std.json.ObjectMap.empty;
+    try root.put(aa, "hooks", std.json.Value{ .object = hooks_obj });
+
+    const changed = try removeSimpleHooks(aa, &root, "/bin/agit");
+    try std.testing.expect(changed);
+    const remaining = root.get("hooks").?.object;
+    try std.testing.expect(remaining.get("Stop") == null);
+}
+
+test "removeSimpleHooks does not remove commands from a different binary" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const aa = arena.allocator();
+
+    var stop_obj = std.json.ObjectMap.empty;
+    try stop_obj.put(aa, "command", std.json.Value{ .string = "/bin/other-tool codex-hook" });
+    var hooks_obj = std.json.ObjectMap.empty;
+    try hooks_obj.put(aa, "Stop", std.json.Value{ .object = stop_obj });
+    var root = std.json.ObjectMap.empty;
+    try root.put(aa, "hooks", std.json.Value{ .object = hooks_obj });
+
+    const changed = try removeSimpleHooks(aa, &root, "/bin/agit");
+    try std.testing.expect(!changed);
+    try std.testing.expect(root.get("hooks").?.object.get("Stop") != null);
+}
+
+test "removeSimpleHooks on empty root returns not changed" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const aa = arena.allocator();
+    var root = std.json.ObjectMap.empty;
+    const changed = try removeSimpleHooks(aa, &root, "/bin/agit");
+    try std.testing.expect(!changed);
 }

@@ -54,3 +54,29 @@ fn runInner(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator
         return error.UnknownSubcommand;
     }
 }
+
+test "parse claude user prompt fixture" {
+    const gpa = std.testing.allocator;
+    const data = @embedFile("../fixtures/hooks/claude_user_prompt.json");
+    const parsed = try std.json.parseFromSlice(hook.ClaudeUserPayload, gpa, data, .{
+        .allocate = .alloc_always,
+        .ignore_unknown_fields = true,
+    });
+    defer parsed.deinit();
+    try std.testing.expectEqualStrings("abc123def456", parsed.value.session_id);
+    try std.testing.expectEqualStrings("Write a function to calculate factorial", parsed.value.prompt);
+    try std.testing.expectEqualStrings("UserPromptSubmit", parsed.value.hook_event_name);
+}
+
+test "parse claude stop fixture" {
+    const gpa = std.testing.allocator;
+    const data = @embedFile("../fixtures/hooks/claude_stop.json");
+    const parsed = try std.json.parseFromSlice(hook.ClaudeStopPayload, gpa, data, .{
+        .allocate = .alloc_always,
+        .ignore_unknown_fields = true,
+    });
+    defer parsed.deinit();
+    try std.testing.expectEqualStrings("abc123def456", parsed.value.session_id);
+    try std.testing.expectEqualStrings("Stop", parsed.value.hook_event_name);
+    try std.testing.expect(parsed.value.last_assistant_message.len > 0);
+}
