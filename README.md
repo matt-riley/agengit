@@ -6,7 +6,7 @@ It watches supported coding agents, records the prompts/tools/responses that sha
 
 ## Status
 
-`agit` is early, sharp-edged, and useful-in-progress. The CLI is currently `0.1.0`, and both the command output and on-disk format may change before a stable release.
+`agit` is early, sharp-edged, and useful-in-progress. The CLI is currently `1.6.0`, and both the command output and on-disk format may change before a stable release. <!-- x-release-please-version -->
 
 Today it focuses on local capture for:
 
@@ -63,6 +63,8 @@ agit init
 ```
 
 `agit init` looks for `claude`, `codex`, and `gemini` on your `PATH`. For each one it finds, it writes hook configuration into that agent's user config and saves a `*.agit.bak` backup first.
+
+Existing config files must be valid JSON objects. If a config file is malformed, `agit init` refuses to overwrite it; fix the JSON or rerun `agit init --force` to back up and replace that config deliberately.
 
 If none of those agents are installed, `agit init` politely shrugs and does nothing.
 
@@ -130,6 +132,8 @@ The canonical data lives in the object store; `index.db` is a query helper that 
 Snapshots are intentionally conservative. By default `agit` skips `.git/`, `.agit/`, common dependency/build/cache directories, common secret-looking files, symlinks, binary files, and files larger than 10 MiB.
 
 You can add project-specific ignore rules in `.agitignore` at the repository root. The matcher is intentionally simple today: exact paths, trailing-slash directory prefixes, and single-`*` glob patterns.
+
+Skipped files are not written into the captured tree. Use `agit show <step-hash>` to inspect what a step did capture, and use `agit doctor` plus `.agit/log/hook-error.log` when capture state looks corrupt or incomplete.
 
 Secret filtering is a safety net, not a force field. Keep `.agit/` private unless you have reviewed what it contains.
 

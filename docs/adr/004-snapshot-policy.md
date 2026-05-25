@@ -51,9 +51,12 @@ Apply these hard limits:
 
 Allow repository-specific ignore rules in `.agitignore`.
 
+Skipped files are omitted from the tree object rather than represented as placeholder entries. Users inspect the captured set with `agit show <step-hash>` and inspect capture health with `agit doctor` plus `.agit/log/hook-error.log`.
+
 ## Consequences
 
 - Snapshots are bounded and avoid common generated directories.
+- Skip decisions keep tree objects compact, but the absence of a file can mean either "unchanged/unseen" or "intentionally skipped"; diagnostics should focus on corrupt capture state rather than listing every skipped path.
 - Secret filtering is best-effort and must not be described as a complete guarantee.
 - Users should treat `.agit/` as private local history unless they have reviewed it.
 - Future richer ignore behavior should preserve the safe defaults unless users explicitly opt in.

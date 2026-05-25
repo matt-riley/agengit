@@ -18,7 +18,7 @@ pub const BlameEntry = struct {
 /// When obtained via `readBlame`, the returned `std.json.Parsed(BlameMap)`
 /// owns all memory; call `parsed.deinit()` to release it.
 pub const BlameMap = struct {
-    @"type": []const u8 = "blame",
+    type: []const u8 = "blame",
     path: []const u8,
     lines: []const BlameEntry,
 };
@@ -174,7 +174,7 @@ test "writeBlame and readBlame round-trip" {
     var parsed = try readBlame(io, tmp.dir, gpa, h);
     defer parsed.deinit();
 
-    try std.testing.expectEqualStrings("blame", parsed.value.@"type");
+    try std.testing.expectEqualStrings("blame", parsed.value.type);
     try std.testing.expectEqualStrings("a.zig", parsed.value.path);
     try std.testing.expectEqual(@as(usize, 2), parsed.value.lines.len);
     try std.testing.expectEqualStrings(step_hex, parsed.value.lines[0].step);

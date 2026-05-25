@@ -174,6 +174,8 @@ test {
     _ = @import("cli/claude_tool_batch_hook.zig");
     _ = @import("cli/codex_hook.zig");
     _ = @import("cli/gemini_hook.zig");
+    _ = @import("cli/reindex.zig");
     _ = @import("cli/init.zig");
     _ = @import("cli/uninstall.zig");
+    _ = @import("cli/doctor.zig");
 }
