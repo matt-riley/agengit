@@ -313,10 +313,17 @@ fn logReleaseError(self: *LockFile, io: std.Io, err: anyerror) void {
         return;
     }
 
+    self.dir.createDirPath(io, "log") catch {
+        var stderr_buf: [512]u8 = undefined;
+        var stderr = std.Io.File.stderr().writer(io, &stderr_buf);
+        stderr.interface.writeAll("[agit lock release] failed to create log directory\n") catch {};
+        stderr.flush() catch {};
+        return;
+    };
+
     var file = self.dir.createFile(io, "log/hook-error.log", .{
         .read = true,
         .truncate = false,
-        .make_path = true,
     }) catch {
         var stderr_buf: [512]u8 = undefined;
         var stderr = std.Io.File.stderr().writer(io, &stderr_buf);
