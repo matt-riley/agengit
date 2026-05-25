@@ -5,6 +5,10 @@ DESCRIPTION:
     Set up agit hooks for installed agent CLIs.
 
 OPTIONS:
+    --agent <name>
+        Install only the specified agent (claude, codex, gemini). Can be repeated.
+    --dry-run
+        Show what would be installed without making changes.
     --force
         Back up and replace malformed/non-object existing JSON config.
     -h, --help
@@ -13,6 +17,10 @@ OPTIONS:
 EXAMPLES:
     # install hooks for available agents
     agit init
+    # preview installation without writing
+    agit init --dry-run
+    # install only Codex hooks
+    agit init --agent codex
     # reinstall even if config exists
     agit init --force
 
