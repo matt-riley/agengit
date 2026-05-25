@@ -1,7 +1,7 @@
 const std = @import("std");
 const exe_path_mod = @import("../util/exe_path.zig");
-const fs_mod = @import("../util/fs.zig");
 const home_mod = @import("../util/home.zig");
+const atomic_json_mod = @import("../util/atomic_json.zig");
 
 pub fn run(
     io: std.Io,
@@ -24,6 +24,7 @@ pub fn run(
     defer gpa.free(home);
     const exe = try exe_path_mod.getAlloc(io, gpa);
     defer gpa.free(exe);
+    const crash_after_tmp_write = shouldCrashAfterTmpWrite(environ);
 
     const has_claude = detectBinary(io, gpa, "claude");
     const has_codex = detectBinary(io, gpa, "codex");
@@ -36,13 +37,13 @@ pub fn run(
     }
 
     if (has_claude) {
-        try installClaude(io, gpa, home, exe, options, &stdout);
+        try installClaude(io, gpa, home, exe, options, crash_after_tmp_write, &stdout);
     }
     if (has_codex) {
-        try installCodex(io, gpa, home, exe, options, &stdout);
+        try installCodex(io, gpa, home, exe, options, crash_after_tmp_write, &stdout);
     }
     if (has_gemini) {
-        try installGemini(io, gpa, home, exe, options, &stdout);
+        try installGemini(io, gpa, home, exe, options, crash_after_tmp_write, &stdout);
     }
 
     try stdout.flush();
@@ -94,15 +95,9 @@ fn homePath(gpa: std.mem.Allocator, home: []const u8, subpath: []const u8) ![]u8
     return std.mem.concat(gpa, u8, &.{ home, "/", subpath });
 }
 
-/// Back up `path` to `path.agit.bak` if the file exists.
-fn backupIfExists(io: std.Io, gpa: std.mem.Allocator, path: []const u8) !bool {
-    const content = (try readFileAllocOrNull(io, gpa, path)) orelse return false;
-    defer gpa.free(content);
-
-    const bak = try std.fmt.allocPrint(gpa, "{s}.agit.bak", .{path});
-    defer gpa.free(bak);
-    try writeFileAtomic(io, bak, content);
-    return true;
+fn shouldCrashAfterTmpWrite(environ: std.process.Environ) bool {
+    const raw = environ.getPosix("AGIT_CRASH_AFTER") orelse return false;
+    return std.mem.eql(u8, std.mem.trim(u8, raw, " \t\r\n"), "tmp_write");
 }
 
 fn installClaude(
@@ -111,6 +106,7 @@ fn installClaude(
     home: []const u8,
     exe: []const u8,
     options: InitOptions,
+    crash_after_tmp_write: bool,
     stdout: *std.Io.File.Writer,
 ) !void {
     const config_path = try homePath(gpa, home, ".claude/settings.json");
@@ -120,23 +116,48 @@ fn installClaude(
 
     std.Io.Dir.cwd().createDirPath(io, dir_path) catch |err| switch (err) {
         error.PathAlreadyExists => {},
-        else => return err,
+        else => {
+            reportDirError(io, stdout, "Claude Code", dir_path, err);
+            return err;
+        },
     };
-    try backupConfigOrReport(io, gpa, config_path, stdout);
-
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
     const aa = arena.allocator();
 
-    var root = loadOrEmptyObject(io, aa, config_path, options) catch |err| {
-        reportConfigLoadError(io, stdout, config_path, err);
+    const loaded = atomic_json_mod.loadObject(io, aa, config_path) catch |err| {
+        reportReadError(io, stdout, "Claude Code", config_path, err);
         return err;
+    };
+    var root = switch (loaded) {
+        .missing => std.json.Value{ .object = .empty },
+        .object => |value| blk: {
+            try backupConfigOrReport(io, aa, config_path, false, stdout);
+            break :blk value;
+        },
+        .malformed => |diag| blk: {
+            if (!options.force) {
+                reportMalformedConfig(io, stdout, "Claude Code", diag);
+                return error.InvalidConfigJson;
+            }
+            try backupConfigOrReport(io, aa, config_path, true, stdout);
+            break :blk std.json.Value{ .object = .empty };
+        },
+        .not_object => blk: {
+            if (!options.force) {
+                reportRootNotObject(io, stdout, "Claude Code", config_path);
+                return error.ConfigRootNotObject;
+            }
+            try backupConfigOrReport(io, aa, config_path, true, stdout);
+            break :blk std.json.Value{ .object = .empty };
+        },
     };
     try setClaudeHooks(aa, &root.object, exe);
 
-    const json_str = try std.json.Stringify.valueAlloc(aa, root, .{ .whitespace = .indent_2 });
-    writeFileAtomic(io, config_path, json_str) catch |err| {
-        reportWriteError(io, stdout, config_path, err);
+    atomic_json_mod.writeAtomic(io, aa, config_path, root, .{
+        .crash_after_tmp_write = crash_after_tmp_write,
+    }) catch |err| {
+        reportWriteError(io, stdout, "Claude Code", config_path, err);
         return err;
     };
 
@@ -149,6 +170,7 @@ fn installCodex(
     home: []const u8,
     exe: []const u8,
     options: InitOptions,
+    crash_after_tmp_write: bool,
     stdout: *std.Io.File.Writer,
 ) !void {
     const config_path = try homePath(gpa, home, ".codex/hooks.json");
@@ -158,23 +180,48 @@ fn installCodex(
 
     std.Io.Dir.cwd().createDirPath(io, dir_path) catch |err| switch (err) {
         error.PathAlreadyExists => {},
-        else => return err,
+        else => {
+            reportDirError(io, stdout, "Codex CLI", dir_path, err);
+            return err;
+        },
     };
-    try backupConfigOrReport(io, gpa, config_path, stdout);
-
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
     const aa = arena.allocator();
 
-    var root = loadOrEmptyObject(io, aa, config_path, options) catch |err| {
-        reportConfigLoadError(io, stdout, config_path, err);
+    const loaded = atomic_json_mod.loadObject(io, aa, config_path) catch |err| {
+        reportReadError(io, stdout, "Codex CLI", config_path, err);
         return err;
+    };
+    var root = switch (loaded) {
+        .missing => std.json.Value{ .object = .empty },
+        .object => |value| blk: {
+            try backupConfigOrReport(io, aa, config_path, false, stdout);
+            break :blk value;
+        },
+        .malformed => |diag| blk: {
+            if (!options.force) {
+                reportMalformedConfig(io, stdout, "Codex CLI", diag);
+                return error.InvalidConfigJson;
+            }
+            try backupConfigOrReport(io, aa, config_path, true, stdout);
+            break :blk std.json.Value{ .object = .empty };
+        },
+        .not_object => blk: {
+            if (!options.force) {
+                reportRootNotObject(io, stdout, "Codex CLI", config_path);
+                return error.ConfigRootNotObject;
+            }
+            try backupConfigOrReport(io, aa, config_path, true, stdout);
+            break :blk std.json.Value{ .object = .empty };
+        },
     };
     try setCodexHooks(aa, &root.object, exe);
 
-    const json_str = try std.json.Stringify.valueAlloc(aa, root, .{ .whitespace = .indent_2 });
-    writeFileAtomic(io, config_path, json_str) catch |err| {
-        reportWriteError(io, stdout, config_path, err);
+    atomic_json_mod.writeAtomic(io, aa, config_path, root, .{
+        .crash_after_tmp_write = crash_after_tmp_write,
+    }) catch |err| {
+        reportWriteError(io, stdout, "Codex CLI", config_path, err);
         return err;
     };
 
@@ -187,6 +234,7 @@ fn installGemini(
     home: []const u8,
     exe: []const u8,
     options: InitOptions,
+    crash_after_tmp_write: bool,
     stdout: *std.Io.File.Writer,
 ) !void {
     const config_path = try homePath(gpa, home, ".gemini/settings.json");
@@ -196,31 +244,62 @@ fn installGemini(
 
     std.Io.Dir.cwd().createDirPath(io, dir_path) catch |err| switch (err) {
         error.PathAlreadyExists => {},
-        else => return err,
+        else => {
+            reportDirError(io, stdout, "Gemini CLI", dir_path, err);
+            return err;
+        },
     };
-    try backupConfigOrReport(io, gpa, config_path, stdout);
-
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
     const aa = arena.allocator();
 
-    var root = loadOrEmptyObject(io, aa, config_path, options) catch |err| {
-        reportConfigLoadError(io, stdout, config_path, err);
+    const loaded = atomic_json_mod.loadObject(io, aa, config_path) catch |err| {
+        reportReadError(io, stdout, "Gemini CLI", config_path, err);
         return err;
+    };
+    var root = switch (loaded) {
+        .missing => std.json.Value{ .object = .empty },
+        .object => |value| blk: {
+            try backupConfigOrReport(io, aa, config_path, false, stdout);
+            break :blk value;
+        },
+        .malformed => |diag| blk: {
+            if (!options.force) {
+                reportMalformedConfig(io, stdout, "Gemini CLI", diag);
+                return error.InvalidConfigJson;
+            }
+            try backupConfigOrReport(io, aa, config_path, true, stdout);
+            break :blk std.json.Value{ .object = .empty };
+        },
+        .not_object => blk: {
+            if (!options.force) {
+                reportRootNotObject(io, stdout, "Gemini CLI", config_path);
+                return error.ConfigRootNotObject;
+            }
+            try backupConfigOrReport(io, aa, config_path, true, stdout);
+            break :blk std.json.Value{ .object = .empty };
+        },
     };
     try setGeminiHooks(aa, &root.object, exe);
 
-    const json_str = try std.json.Stringify.valueAlloc(aa, root, .{ .whitespace = .indent_2 });
-    writeFileAtomic(io, config_path, json_str) catch |err| {
-        reportWriteError(io, stdout, config_path, err);
+    atomic_json_mod.writeAtomic(io, aa, config_path, root, .{
+        .crash_after_tmp_write = crash_after_tmp_write,
+    }) catch |err| {
+        reportWriteError(io, stdout, "Gemini CLI", config_path, err);
         return err;
     };
 
     try stdout.interface.print("agit init: wrote Gemini CLI hooks to {s}\n", .{config_path});
 }
 
-fn backupConfigOrReport(io: std.Io, gpa: std.mem.Allocator, path: []const u8, stdout: *std.Io.File.Writer) !void {
-    _ = backupIfExists(io, gpa, path) catch |err| {
+fn backupConfigOrReport(
+    io: std.Io,
+    aa: std.mem.Allocator,
+    path: []const u8,
+    force: bool,
+    stdout: *std.Io.File.Writer,
+) !void {
+    _ = atomic_json_mod.backupOnce(io, aa, path, force) catch |err| {
         try stdout.interface.print(
             "agit init: failed to back up existing config {s}: {s}\n",
             .{ path, @errorName(err) },
@@ -230,41 +309,66 @@ fn backupConfigOrReport(io: std.Io, gpa: std.mem.Allocator, path: []const u8, st
     };
 }
 
-fn reportConfigLoadError(io: std.Io, stdout: *std.Io.File.Writer, path: []const u8, err: anyerror) void {
+fn reportMalformedConfig(
+    io: std.Io,
+    stdout: *std.Io.File.Writer,
+    agent_name: []const u8,
+    diag: atomic_json_mod.MalformedJson,
+) void {
     stdout.interface.print(
-        "agit init: refusing to overwrite {s}: {s}. Fix the JSON or rerun 'agit init --force' to back up and replace it.\n",
-        .{ path, @errorName(err) },
+        "agit init: refusing to overwrite {s} config {s}: malformed JSON at offset={d} line={d} column={d}. Fix the JSON or rerun 'agit init --force'.\n",
+        .{ agent_name, diag.path, diag.offset, diag.line, diag.column },
     ) catch {};
     stdout.flush() catch {};
     _ = io;
 }
 
-fn reportWriteError(io: std.Io, stdout: *std.Io.File.Writer, path: []const u8, err: anyerror) void {
+fn reportRootNotObject(io: std.Io, stdout: *std.Io.File.Writer, agent_name: []const u8, path: []const u8) void {
     stdout.interface.print(
-        "agit init: failed to write config {s}: {s}\n",
-        .{ path, @errorName(err) },
+        "agit init: refusing to overwrite {s} config {s}: JSON root is not an object. Rerun with '--force' to replace it.\n",
+        .{ agent_name, path },
     ) catch {};
     stdout.flush() catch {};
     _ = io;
 }
 
-/// Parse `path` as a JSON object using `aa`. Returns an empty object only when
-/// the file is missing, or when `--force` explicitly allows replacing malformed
-/// or non-object JSON. All allocations go into `aa`.
-fn loadOrEmptyObject(io: std.Io, aa: std.mem.Allocator, path: []const u8, options: InitOptions) !std.json.Value {
-    const text = (try readExistingFileAllocOrNull(io, aa, path)) orelse
-        return std.json.Value{ .object = .empty };
-    const v = std.json.parseFromSliceLeaky(std.json.Value, aa, text, .{
-        .allocate = .alloc_always,
-    }) catch {
-        if (options.force) return std.json.Value{ .object = .empty };
-        return error.InvalidConfigJson;
-    };
-    if (v != .object) {
-        if (options.force) return std.json.Value{ .object = .empty };
-        return error.ConfigRootNotObject;
-    }
-    return v;
+fn reportReadError(
+    io: std.Io,
+    stdout: *std.Io.File.Writer,
+    agent_name: []const u8,
+    path: []const u8,
+    err: anyerror,
+) void {
+    stdout.interface.print(
+        "agit init: failed to read {s} config {s}: {s}\n",
+        .{ agent_name, path, @errorName(err) },
+    ) catch {};
+    stdout.flush() catch {};
+    _ = io;
+}
+
+fn reportDirError(io: std.Io, stdout: *std.Io.File.Writer, agent_name: []const u8, dir_path: []const u8, err: anyerror) void {
+    stdout.interface.print(
+        "agit init: failed to create {s} config directory {s}: {s}\n",
+        .{ agent_name, dir_path, @errorName(err) },
+    ) catch {};
+    stdout.flush() catch {};
+    _ = io;
+}
+
+fn reportWriteError(
+    io: std.Io,
+    stdout: *std.Io.File.Writer,
+    agent_name: []const u8,
+    path: []const u8,
+    err: anyerror,
+) void {
+    stdout.interface.print(
+        "agit init: failed to write {s} config {s}: {s}\n",
+        .{ agent_name, path, @errorName(err) },
+    ) catch {};
+    stdout.flush() catch {};
+    _ = io;
 }
 
 /// Merge agit-managed entries into Claude Code settings.json hooks object.
@@ -376,135 +480,6 @@ fn makeGeminiHook(aa: std.mem.Allocator, exe: []const u8, subcmd: []const u8) !s
     var obj = std.json.ObjectMap.empty;
     try obj.put(aa, "command", std.json.Value{ .string = cmd });
     return std.json.Value{ .object = obj };
-}
-
-/// Read a file into a slice allocated with `allocator`.  Returns null if the
-/// file does not exist.  Caller owns the returned slice.
-fn readFileAllocOrNull(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !?[]u8 {
-    const file = std.Io.Dir.cwd().openFile(io, path, .{}) catch |err| switch (err) {
-        error.FileNotFound => return null,
-        else => return err,
-    };
-    defer file.close(io);
-
-    const stat = try file.stat(io);
-    if (stat.size == 0) return null;
-
-    const buf = try allocator.alloc(u8, @intCast(stat.size));
-    errdefer allocator.free(buf);
-    _ = try file.readPositionalAll(io, buf, 0);
-    return buf;
-}
-
-/// Read an existing config file into an owned slice. Unlike backup reads, an
-/// empty existing config is still returned so JSON validation can reject it.
-fn readExistingFileAllocOrNull(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !?[]u8 {
-    const file = std.Io.Dir.cwd().openFile(io, path, .{}) catch |err| switch (err) {
-        error.FileNotFound => return null,
-        else => return err,
-    };
-    defer file.close(io);
-
-    const stat = try file.stat(io);
-    const buf = try allocator.alloc(u8, @intCast(stat.size));
-    errdefer allocator.free(buf);
-    if (buf.len > 0) {
-        _ = try file.readPositionalAll(io, buf, 0);
-    }
-    return buf;
-}
-
-/// Write `content` to `path` atomically (temp-file + rename).
-fn writeFileAtomic(io: std.Io, path: []const u8, content: []const u8) !void {
-    var af = try std.Io.Dir.cwd().createFileAtomic(io, path, .{ .replace = true, .make_path = false });
-    defer af.deinit(io);
-    try af.file.writeStreamingAll(io, content);
-    try fs_mod.atomicReplace(io, &af);
-}
-
-fn testPath(io: std.Io, dir: std.Io.Dir, gpa: std.mem.Allocator, rel_path: []const u8) ![]u8 {
-    var real_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const n = try dir.realPath(io, &real_buf);
-    return std.fmt.allocPrint(gpa, "{s}/{s}", .{ real_buf[0..n], rel_path });
-}
-
-fn writeTestFile(io: std.Io, dir: std.Io.Dir, rel_path: []const u8, content: []const u8) !void {
-    var file = try dir.createFile(io, rel_path, .{});
-    defer file.close(io);
-    try file.writeStreamingAll(io, content);
-}
-
-test "loadOrEmptyObject returns empty object for missing config" {
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    const io = std.testing.io;
-    const gpa = std.testing.allocator;
-
-    const path = try testPath(io, tmp.dir, gpa, "missing.json");
-    defer gpa.free(path);
-
-    var arena = std.heap.ArenaAllocator.init(gpa);
-    defer arena.deinit();
-    const root = try loadOrEmptyObject(io, arena.allocator(), path, .{});
-
-    try std.testing.expect(root == .object);
-    try std.testing.expectEqual(@as(usize, 0), root.object.count());
-}
-
-test "loadOrEmptyObject rejects malformed existing config without force" {
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    const io = std.testing.io;
-    const gpa = std.testing.allocator;
-
-    try writeTestFile(io, tmp.dir, "bad.json", "{not-json");
-    const path = try testPath(io, tmp.dir, gpa, "bad.json");
-    defer gpa.free(path);
-
-    var arena = std.heap.ArenaAllocator.init(gpa);
-    defer arena.deinit();
-
-    try std.testing.expectError(
-        error.InvalidConfigJson,
-        loadOrEmptyObject(io, arena.allocator(), path, .{}),
-    );
-}
-
-test "loadOrEmptyObject replaces malformed config only with force" {
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    const io = std.testing.io;
-    const gpa = std.testing.allocator;
-
-    try writeTestFile(io, tmp.dir, "bad.json", "{not-json");
-    const path = try testPath(io, tmp.dir, gpa, "bad.json");
-    defer gpa.free(path);
-
-    var arena = std.heap.ArenaAllocator.init(gpa);
-    defer arena.deinit();
-    const root = try loadOrEmptyObject(io, arena.allocator(), path, .{ .force = true });
-
-    try std.testing.expect(root == .object);
-    try std.testing.expectEqual(@as(usize, 0), root.object.count());
-}
-
-test "loadOrEmptyObject rejects empty existing config without force" {
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    const io = std.testing.io;
-    const gpa = std.testing.allocator;
-
-    try writeTestFile(io, tmp.dir, "empty.json", "");
-    const path = try testPath(io, tmp.dir, gpa, "empty.json");
-    defer gpa.free(path);
-
-    var arena = std.heap.ArenaAllocator.init(gpa);
-    defer arena.deinit();
-
-    try std.testing.expectError(
-        error.InvalidConfigJson,
-        loadOrEmptyObject(io, arena.allocator(), path, .{}),
-    );
 }
 
 test "setClaudeHooks installs all managed events on empty root" {

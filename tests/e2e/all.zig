@@ -5,6 +5,7 @@ test {
     _ = @import("init/existing_user_config.zig");
     _ = @import("init/malformed_json.zig");
     _ = @import("init/force.zig");
+    _ = @import("init/crash_tmp_write.zig");
 
     _ = @import("uninstall/clean.zig");
     _ = @import("uninstall/malformed.zig");
@@ -20,4 +21,5 @@ test {
     _ = @import("doctor/healthy_store.zig");
     _ = @import("doctor/drifted_store.zig");
     _ = @import("doctor/locks.zig");
+    _ = @import("doctor/config_tmp_files.zig");
 }

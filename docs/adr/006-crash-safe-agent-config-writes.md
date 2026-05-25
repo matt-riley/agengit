@@ -1,6 +1,6 @@
 # ADR 006: Crash-safe agent config writes
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-05-25
 
 ## Context

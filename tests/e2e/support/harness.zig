@@ -78,6 +78,15 @@ pub const Sandbox = struct {
     }
 
     pub fn run(self: *Sandbox, argv: []const []const u8, stdin: ?[]const u8) !RunResult {
+        return self.runWithEnv(argv, stdin, &.{});
+    }
+
+    pub fn runWithEnv(
+        self: *Sandbox,
+        argv: []const []const u8,
+        stdin: ?[]const u8,
+        extra_env: []const []const u8,
+    ) !RunResult {
         var child_argv: std.ArrayList([]const u8) = .empty;
         defer child_argv.deinit(self.gpa);
 
@@ -86,7 +95,9 @@ pub const Sandbox = struct {
         const path_env = try std.fmt.allocPrint(self.gpa, "PATH={s}:/usr/bin:/bin", .{self.bin});
         defer self.gpa.free(path_env);
 
-        try child_argv.appendSlice(self.gpa, &.{ "/usr/bin/env", home_env, path_env, self.agit_bin });
+        try child_argv.appendSlice(self.gpa, &.{ "/usr/bin/env", home_env, path_env });
+        try child_argv.appendSlice(self.gpa, extra_env);
+        try child_argv.append(self.gpa, self.agit_bin);
         try child_argv.appendSlice(self.gpa, argv);
 
         var child = try std.process.spawn(self.io, .{
