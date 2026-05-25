@@ -74,8 +74,14 @@ pub fn snapshot(
         const blob_hash = try object.write(io, store_root, data);
         const blob_hex = blob_hash.toHex();
 
+        const norm_path = try gpa.dupe(u8, entry.path);
+        if (comptime std.fs.path.sep != '/') {
+            for (norm_path) |*c| if (c.* == std.fs.path.sep) {
+                c.* = '/';
+            };
+        }
         try entries.append(gpa, .{
-            .path = try gpa.dupe(u8, entry.path),
+            .path = norm_path,
             .blob = try gpa.dupe(u8, &blob_hex),
             .mode = "file", // executable-bit tracking deferred to a future phase
             .size = stat.size,
