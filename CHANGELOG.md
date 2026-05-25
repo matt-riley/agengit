@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.0](https://github.com/matt-riley/agengit/compare/v1.6.0...v1.7.0) (2026-05-25)
+
+
+### Features
+
+* **store:** add durable directory fsync for atomic writes ([66fdc01](https://github.com/matt-riley/agengit/commit/66fdc0154e1afe089a70d1442f4ac61948c6fa0e))
+
 ## [1.6.0](https://github.com/matt-riley/agengit/compare/v1.5.0...v1.6.0) (2026-05-25)
 
 

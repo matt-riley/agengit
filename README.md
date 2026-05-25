@@ -6,7 +6,7 @@ It watches supported coding agents, records the prompts/tools/responses that sha
 
 ## Status
 
-`agit` is early, sharp-edged, and useful-in-progress. The CLI is currently `1.6.0`, and both the command output and on-disk format may change before a stable release. <!-- x-release-please-version -->
+`agit` is early, sharp-edged, and useful-in-progress. The CLI is currently `1.7.0`, and both the command output and on-disk format may change before a stable release. <!-- x-release-please-version -->
 
 Today it focuses on local capture for:
 
