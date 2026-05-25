@@ -22,7 +22,7 @@ jobs:
           regex='^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([^)]+\))?!?: .+'
 
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+            git fetch --no-tags origin "${{ github.base_ref }}"
             range="origin/${{ github.base_ref }}..HEAD"
           else
             before="${{ github.event.before }}"
