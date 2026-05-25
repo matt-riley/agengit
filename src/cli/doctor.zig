@@ -6,6 +6,7 @@ const file_lock_mod = @import("../util/file_lock.zig");
 
 const DoctorOptions = struct {
     locks: bool = false,
+    stats: bool = false,
 };
 
 pub fn run(
@@ -58,6 +59,7 @@ pub fn run(
     try checkAgitIgnore(io, std.Io.Dir.cwd(), gpa, &stdout);
     try checkStaging(io, gpa, store.root, &stdout);
     if (options.locks) try checkLocks(io, gpa, store.root, &stdout);
+    if (options.stats) try printFinalizeStats(&store, &stdout);
 
     // --- Agent checks ---
     try checkConfigTmpFiles(io, gpa, home, "claude", ".claude/settings.json", &stdout);
@@ -76,6 +78,8 @@ fn parseOptions(iter: *std.process.Args.Iterator, stdout: *std.Io.File.Writer) !
     while (iter.next()) |arg| {
         if (std.mem.eql(u8, arg, "--locks")) {
             options.locks = true;
+        } else if (std.mem.eql(u8, arg, "--stats")) {
+            options.stats = true;
         } else if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
             try printUsage(stdout);
             return error.HelpShown;
@@ -91,14 +95,24 @@ fn parseOptions(iter: *std.process.Args.Iterator, stdout: *std.Io.File.Writer) !
 
 fn printUsage(stdout: *std.Io.File.Writer) !void {
     try stdout.interface.writeAll(
-        \\Usage: agit doctor [--locks]
+        \\Usage: agit doctor [--locks] [--stats]
         \\
         \\Check store health and agent hook configuration.
         \\
         \\Options:
         \\  --locks      List currently held lock files with age and executable path.
+        \\  --stats      Print finalize retry/object-write counters.
         \\  -h, --help   Display this help and exit.
         \\
+    );
+}
+
+fn printFinalizeStats(store: *const store_mod.Store, stdout: *std.Io.File.Writer) !void {
+    const retries = try store.index.readMetaCounter(store_mod.finalize_retries_metric_key);
+    const objects = try store.index.readMetaCounter(store_mod.finalize_objects_metric_key);
+    try stdout.interface.print(
+        "  - finalize stats: retries_total={d} objects_written_total={d}\n",
+        .{ retries, objects },
     );
 }
 

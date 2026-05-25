@@ -197,11 +197,16 @@ fn writeStagingFile(
 ///   2. `recordToolUse`      — appended to the same staging file (zero or more times)
 ///   3. `recordAssistantAndFinalize` — consumes the staging file, takes a
 ///       workspace snapshot, writes a Step object, and advances the session HEAD ref.
+pub const RecorderOptions = struct {
+    max_finalize_retries: u32 = 5,
+};
+
 pub const Recorder = struct {
     gpa: std.mem.Allocator,
     store: store_mod.Store,
     repo_dir: std.Io.Dir,
     ignorer: Ignorer,
+    max_finalize_retries: u32,
 
     /// Open a Recorder anchored at the nearest repository root.
     ///
@@ -209,6 +214,15 @@ pub const Recorder = struct {
     /// opens the Store and loads `.agitignore` patterns.  Returns
     /// `error.StoreNotFound` if the filesystem root is reached first.
     pub fn open(io: std.Io, cwd: std.Io.Dir, gpa: std.mem.Allocator) !Recorder {
+        return openWithOptions(io, cwd, gpa, .{});
+    }
+
+    pub fn openWithOptions(
+        io: std.Io,
+        cwd: std.Io.Dir,
+        gpa: std.mem.Allocator,
+        options: RecorderOptions,
+    ) !Recorder {
         var repo_dir = try findStoreRoot(io, cwd);
         errdefer repo_dir.close(io);
 
@@ -223,6 +237,7 @@ pub const Recorder = struct {
             .store = s,
             .repo_dir = repo_dir,
             .ignorer = ignorer,
+            .max_finalize_retries = @max(@as(u32, 1), options.max_finalize_retries),
         };
     }
 
@@ -273,7 +288,7 @@ pub const Recorder = struct {
     /// already committed (e.g. after a crash between CAS and index insert), this
     /// call re-inserts the message/tool_call rows without creating a duplicate.
     ///
-    /// Returns `error.CasConflict` if three consecutive concurrent writers
+    /// Returns `error.CasConflict` if `max_finalize_retries` consecutive concurrent writers
     /// prevent the CAS from landing — this is expected to be vanishingly rare in
     /// sequential hook models.
     pub fn recordAssistantAndFinalize(
@@ -326,45 +341,38 @@ pub const Recorder = struct {
 
         const timestamp = std.Io.Timestamp.now(io, .real).toMilliseconds();
 
-        // CAS loop — up to three retries to handle rare concurrent writers.
+        var expected_parent = try self.store.readRef(io, self.gpa, meta.origin, meta.session_id);
         var attempt: u32 = 0;
-        while (attempt < 3) : (attempt += 1) {
-            const current_head = try self.store.readRef(io, self.gpa, meta.origin, meta.session_id);
-
-            // Build parent string from current HEAD (stack-allocated, valid for this iteration).
-            var parent_hex_buf: [64]u8 = undefined;
-            const parent_str: ?[]const u8 = if (current_head) |h| blk: {
-                parent_hex_buf = h.toHex();
-                break :blk parent_hex_buf[0..];
-            } else null;
-
-            const step = object.Step{
-                .parent = parent_str,
-                .tree = tree_hex[0..],
-                .session_id = meta.session_id,
+        while (attempt < self.max_finalize_retries) : (attempt += 1) {
+            const result = try self.store.commitFinalizedStep(io, self.gpa, .{
                 .origin = meta.origin,
+                .session_id = meta.session_id,
                 .turn_id = turn_id,
-                .causes = all_causes.items,
+                .tree_hash = tree_hex[0..],
                 .timestamp = timestamp,
+                .causes = all_causes.items,
                 .messages = msgs.items,
                 .tool_calls = staging_val.tool_calls,
-            };
+                .expected_parent = expected_parent,
+                .retry_delta = @intCast(attempt),
+            });
 
-            const step_hash = try self.store.writeStep(io, self.gpa, step);
-            const ok = try self.store.casRef(
-                io,
-                self.gpa,
-                meta.origin,
-                meta.session_id,
-                current_head,
-                step_hash,
-                &step,
-                msgs.items,
-                staging_val.tool_calls,
-            );
-
-            if (!ok) continue;
-            return;
+            switch (result) {
+                .committed => return,
+                .parent_moved => |next_parent| {
+                    expected_parent = next_parent;
+                    continue;
+                },
+                .duplicate_turn => |existing_hex| {
+                    for (msgs.items, 0..) |msg, i| {
+                        try self.store.index.insertMessage(&existing_hex, @intCast(i), msg.role, msg.content);
+                    }
+                    for (staging_val.tool_calls, 0..) |tc, i| {
+                        try self.store.index.insertToolCall(&existing_hex, @intCast(i), tc.tool_name, tc.args, tc.result);
+                    }
+                    return;
+                },
+            }
         }
         return error.CasConflict;
     }
@@ -592,6 +600,7 @@ fn makeRecorder(io: std.Io, dir: std.Io.Dir, gpa: std.mem.Allocator) !Recorder {
         .store = s,
         .repo_dir = try dir.openDir(io, ".", .{}),
         .ignorer = ignorer,
+        .max_finalize_retries = 5,
     };
 }
 
@@ -648,14 +657,11 @@ test "findStoreRoot: walks up to find .agit" {
 }
 
 test "findStoreRoot: returns StoreNotFound when no .agit present" {
-    // Use /tmp which is guaranteed to not have .agit/ at the filesystem root.
-    // We create a fresh tmpDir (no .agit) and rely on the root-detection loop.
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
     const io = std.testing.io;
 
-    // tmp.dir has no .agit — eventually findStoreRoot hits filesystem root.
-    try std.testing.expectError(error.StoreNotFound, findStoreRoot(io, tmp.dir));
+    var tmp_root = try std.Io.Dir.cwd().openDir(io, "/tmp", .{});
+    defer tmp_root.close(io);
+    try std.testing.expectError(error.StoreNotFound, findStoreRoot(io, tmp_root));
 }
 
 test "recordUserPrompt: staging file contains user message" {

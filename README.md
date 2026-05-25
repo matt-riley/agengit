@@ -77,6 +77,9 @@ agit doctor
 # Include currently held lock files.
 agit doctor --locks
 
+# Print finalize retry/object-write counters.
+agit doctor --stats
+
 # See how many sessions and steps have been recorded.
 agit status
 

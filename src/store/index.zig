@@ -296,6 +296,23 @@ pub const Index = struct {
         );
     }
 
+    pub fn addMetaCounter(self: Index, key: []const u8, delta: i64) !void {
+        try self.db.exec(
+            \\insert into meta (key, value) values (?, ?)
+            \\on conflict(key) do update set
+            \\  value = cast(coalesce(meta.value, '0') as integer) + cast(excluded.value as integer)
+        , .{ key, delta });
+    }
+
+    pub fn readMetaCounter(self: Index, key: []const u8) !i64 {
+        const row = try self.db.row(
+            "select cast(value as integer) from meta where key=?",
+            .{key},
+        ) orelse return 0;
+        defer row.deinit();
+        return row.get(i64, 0);
+    }
+
     /// Return the 64-char hex hash of the step committed for this turn, or null.
     pub fn queryStepHash(
         self: Index,
