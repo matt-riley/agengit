@@ -12,6 +12,8 @@ test "init/malformed_json" {
     defer result.deinit(std.testing.allocator);
 
     try std.testing.expect(result.exit_code != 0);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, ".claude/settings.json") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "offset=") != null);
 
     const config = try readHome(&sandbox, ".claude/settings.json");
     defer std.testing.allocator.free(config);

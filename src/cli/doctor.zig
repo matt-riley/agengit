@@ -44,6 +44,9 @@ pub fn run(
     if (options.locks) try checkLocks(io, gpa, store.root, &stdout);
 
     // --- Agent checks ---
+    try checkConfigTmpFiles(io, gpa, home, "claude", ".claude/settings.json", &stdout);
+    try checkConfigTmpFiles(io, gpa, home, "codex", ".codex/hooks.json", &stdout);
+    try checkConfigTmpFiles(io, gpa, home, "gemini", ".gemini/settings.json", &stdout);
     try checkAgent(io, gpa, home, exe, "claude", ".claude/settings.json", &stdout);
     try checkAgent(io, gpa, home, exe, "codex", ".codex/hooks.json", &stdout);
     try checkAgent(io, gpa, home, exe, "gemini", ".gemini/settings.json", &stdout);
@@ -324,6 +327,58 @@ fn checkAgent(
         try stdout.interface.print(
             "  ✗ {s}: binary mismatch (config has {s}, current is {s})\n",
             .{ agent_name, stored, exe },
+        );
+    }
+}
+
+fn checkConfigTmpFiles(
+    io: std.Io,
+    gpa: std.mem.Allocator,
+    home: []const u8,
+    agent_name: []const u8,
+    rel_config: []const u8,
+    stdout: *std.Io.File.Writer,
+) !void {
+    const rel_dir = std.fs.path.dirname(rel_config) orelse return;
+    const file_base = std.fs.path.basename(rel_config);
+    const prefix = try std.fmt.allocPrint(gpa, "{s}.agit-tmp-", .{file_base});
+    defer gpa.free(prefix);
+
+    const dir_path = try std.mem.concat(gpa, u8, &.{ home, "/", rel_dir });
+    defer gpa.free(dir_path);
+
+    var config_dir = std.Io.Dir.cwd().openDir(io, dir_path, .{ .iterate = true }) catch |err| switch (err) {
+        error.FileNotFound, error.NotDir => return,
+        else => {
+            try stdout.interface.print(
+                "  - {s}: unable to scan temp config files in {s} ({s})\n",
+                .{ agent_name, dir_path, @errorName(err) },
+            );
+            return;
+        },
+    };
+    defer config_dir.close(io);
+
+    var walker = try config_dir.walk(gpa);
+    defer walker.deinit();
+
+    var leftover_count: usize = 0;
+    while (try walker.next(io)) |entry| {
+        if (entry.kind != .file) continue;
+        const name = std.fs.path.basename(entry.path);
+        if (std.mem.startsWith(u8, name, prefix)) leftover_count += 1;
+    }
+
+    if (leftover_count > 0) {
+        try stdout.interface.print(
+            "  ✗ {s}: found {d} crash-temp file{s} matching {s}* in {s}\n",
+            .{
+                agent_name,
+                leftover_count,
+                if (leftover_count == 1) "" else "s",
+                prefix,
+                dir_path,
+            },
         );
     }
 }

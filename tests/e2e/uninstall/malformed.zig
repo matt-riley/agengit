@@ -12,6 +12,8 @@ test "uninstall/malformed" {
     defer result.deinit(std.testing.allocator);
 
     try std.testing.expectEqual(@as(u8, 0), result.exit_code);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "warning: skipped malformed JSON config") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, ".claude/settings.json") != null);
 
     const config = try readHome(&sandbox, ".claude/settings.json");
     defer std.testing.allocator.free(config);

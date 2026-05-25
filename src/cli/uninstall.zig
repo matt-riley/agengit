@@ -1,7 +1,7 @@
 const std = @import("std");
 const exe_path_mod = @import("../util/exe_path.zig");
-const fs_mod = @import("../util/fs.zig");
 const home_mod = @import("../util/home.zig");
+const atomic_json_mod = @import("../util/atomic_json.zig");
 
 pub fn run(
     io: std.Io,
@@ -18,10 +18,11 @@ pub fn run(
     defer gpa.free(home);
     const exe = try exe_path_mod.getAlloc(io, gpa);
     defer gpa.free(exe);
+    const crash_after_tmp_write = shouldCrashAfterTmpWrite(environ);
 
-    try uninstallAgent(io, gpa, home, exe, ".claude/settings.json", &stdout, removeClaude);
-    try uninstallAgent(io, gpa, home, exe, ".codex/hooks.json", &stdout, removeSimpleHooks);
-    try uninstallAgent(io, gpa, home, exe, ".gemini/settings.json", &stdout, removeSimpleHooks);
+    try uninstallAgent(io, gpa, home, exe, ".claude/settings.json", crash_after_tmp_write, &stdout, removeClaude);
+    try uninstallAgent(io, gpa, home, exe, ".codex/hooks.json", crash_after_tmp_write, &stdout, removeSimpleHooks);
+    try uninstallAgent(io, gpa, home, exe, ".gemini/settings.json", crash_after_tmp_write, &stdout, removeSimpleHooks);
 
     try stdout.flush();
 }
@@ -34,6 +35,7 @@ fn uninstallAgent(
     home: []const u8,
     exe: []const u8,
     rel_config: []const u8,
+    crash_after_tmp_write: bool,
     stdout: *std.Io.File.Writer,
     removeFn: RemoveFn,
 ) !void {
@@ -44,13 +46,22 @@ fn uninstallAgent(
     defer arena.deinit();
     const aa = arena.allocator();
 
-    const text = (readFileAllocOrNull(io, aa, config_path) catch return) orelse return;
-    const root_val = std.json.parseFromSliceLeaky(std.json.Value, aa, text, .{
-        .allocate = .alloc_always,
-    }) catch return;
-    if (root_val != .object) return;
-
-    var root = root_val.object;
+    const loaded = atomic_json_mod.loadObject(io, aa, config_path) catch |err| {
+        reportReadError(io, stdout, config_path, err);
+        return err;
+    };
+    var root = switch (loaded) {
+        .missing => return,
+        .malformed => |diag| {
+            reportMalformedWarning(io, stdout, diag);
+            return;
+        },
+        .not_object => {
+            reportRootNotObjectWarning(io, stdout, config_path);
+            return;
+        },
+        .object => |value| value.object,
+    };
 
     // Identify the stored binary that was installed.
     const stored_binary: []const u8 = blk: {
@@ -70,9 +81,54 @@ fn uninstallAgent(
         return;
     }
 
-    const json_str = try std.json.Stringify.valueAlloc(aa, std.json.Value{ .object = root }, .{ .whitespace = .indent_2 });
-    try writeFileAtomic(io, config_path, json_str);
+    atomic_json_mod.writeAtomic(io, aa, config_path, std.json.Value{ .object = root }, .{
+        .crash_after_tmp_write = crash_after_tmp_write,
+    }) catch |err| {
+        reportWriteError(io, stdout, config_path, err);
+        return err;
+    };
     try stdout.interface.print("agit uninstall: removed agit hooks from {s}\n", .{config_path});
+}
+
+fn shouldCrashAfterTmpWrite(environ: std.process.Environ) bool {
+    const raw = environ.getPosix("AGIT_CRASH_AFTER") orelse return false;
+    return std.mem.eql(u8, std.mem.trim(u8, raw, " \t\r\n"), "tmp_write");
+}
+
+fn reportMalformedWarning(io: std.Io, stdout: *std.Io.File.Writer, diag: atomic_json_mod.MalformedJson) void {
+    stdout.interface.print(
+        "agit uninstall: warning: skipped malformed JSON config {s} at offset={d} line={d} column={d}\n",
+        .{ diag.path, diag.offset, diag.line, diag.column },
+    ) catch {};
+    stdout.flush() catch {};
+    _ = io;
+}
+
+fn reportRootNotObjectWarning(io: std.Io, stdout: *std.Io.File.Writer, path: []const u8) void {
+    stdout.interface.print(
+        "agit uninstall: warning: skipped non-object JSON config {s}\n",
+        .{path},
+    ) catch {};
+    stdout.flush() catch {};
+    _ = io;
+}
+
+fn reportReadError(io: std.Io, stdout: *std.Io.File.Writer, path: []const u8, err: anyerror) void {
+    stdout.interface.print(
+        "agit uninstall: failed to read config {s}: {s}\n",
+        .{ path, @errorName(err) },
+    ) catch {};
+    stdout.flush() catch {};
+    _ = io;
+}
+
+fn reportWriteError(io: std.Io, stdout: *std.Io.File.Writer, path: []const u8, err: anyerror) void {
+    stdout.interface.print(
+        "agit uninstall: failed to write config {s}: {s}\n",
+        .{ path, @errorName(err) },
+    ) catch {};
+    stdout.flush() catch {};
+    _ = io;
 }
 
 /// Remove Claude-format hook entries: each event value is an array of
@@ -157,29 +213,6 @@ fn removeSimpleHooks(aa: std.mem.Allocator, root: *std.json.ObjectMap, binary: [
         try root.put(aa, "hooks", std.json.Value{ .object = hooks_obj });
     }
     return changed;
-}
-
-fn readFileAllocOrNull(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !?[]u8 {
-    const file = std.Io.Dir.cwd().openFile(io, path, .{}) catch |err| switch (err) {
-        error.FileNotFound => return null,
-        else => return err,
-    };
-    defer file.close(io);
-
-    const stat = try file.stat(io);
-    if (stat.size == 0) return null;
-
-    const buf = try allocator.alloc(u8, @intCast(stat.size));
-    errdefer allocator.free(buf);
-    _ = try file.readPositionalAll(io, buf, 0);
-    return buf;
-}
-
-fn writeFileAtomic(io: std.Io, path: []const u8, content: []const u8) !void {
-    var af = try std.Io.Dir.cwd().createFileAtomic(io, path, .{ .replace = true, .make_path = false });
-    defer af.deinit(io);
-    try af.file.writeStreamingAll(io, content);
-    try fs_mod.atomicReplace(io, &af);
 }
 
 test "removeClaude removes agit-managed hooks and returns changed" {
