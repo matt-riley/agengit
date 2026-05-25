@@ -36,7 +36,6 @@ Download a release from <https://github.com/matt-riley/agengit/releases>, then u
 | Linux aarch64 | `agit-aarch64-linux.tar.gz` |
 | macOS arm64 | `agit-aarch64-macos.tar.gz` |
 | macOS x86_64 | `agit-x86_64-macos.tar.gz` |
-| Windows x86_64 | `agit-x86_64-windows.zip` |
 
 ```sh
 tar -xzf agit-x86_64-linux.tar.gz
@@ -153,7 +152,7 @@ zig build check-fmt
 zig build -Dtarget=x86_64-linux-musl -Doptimize=ReleaseSafe
 ```
 
-The repository also has GitHub Actions for Linux/macOS/Windows tests, release archive builds, checksums, Release Please, and an optional Homebrew tap update.
+The repository also has GitHub Actions for Linux/macOS tests, release archive builds, checksums, Release Please, and an optional Homebrew tap update.
 
 ## Design notes
 
