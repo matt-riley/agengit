@@ -115,7 +115,10 @@ pub const LockFile = struct {
 
     pub fn releaseChecked(self: *LockFile, io: std.Io) ReleaseError!void {
         const sub_path = self.sub_path_buf[0..self.sub_path_len];
-        try self.dir.deleteFile(io, sub_path);
+        self.dir.deleteFile(io, sub_path) catch |err| switch (err) {
+            error.FileNotFound => {},
+            else => return err,
+        };
         self.sub_path_len = 0;
     }
 };

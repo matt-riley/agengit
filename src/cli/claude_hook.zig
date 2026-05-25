@@ -3,6 +3,7 @@ const recorder_mod = @import("../recorder.zig");
 const Recorder = recorder_mod.Recorder;
 const SessionMeta = recorder_mod.SessionMeta;
 const hook = @import("../hook.zig");
+const event_mod = @import("../hook/event.zig");
 
 /// Entry point. Always exits cleanly — errors are logged to stderr.
 pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator) !void {
@@ -65,6 +66,7 @@ fn runInner(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator
             .event_name = payload.event_name,
             .payload = payload.raw,
             .max_payload_bytes = hook.maxHookPayloadBytes(),
+            .workspace_cwd = payload.cwd,
         });
         return err;
     };
@@ -80,36 +82,82 @@ fn processPayload(
     const root = try hook.requireObject(payload.parsed.value, diagnostic);
 
     if (std.mem.eql(u8, subcommand, "user")) {
-        const event = try hook.requireString(root, "hook_event_name", diagnostic);
-        try hook.requireEvent(event, "UserPromptSubmit", diagnostic);
-        const session_id = try hook.requireString(root, "session_id", diagnostic);
-        _ = try hook.requireString(root, "cwd", diagnostic);
+        const workspace_cwd = try hook.requireString(root, "cwd", diagnostic);
         const prompt = try hook.requireString(root, "prompt", diagnostic);
+        const preferred_turn_id = try hook.optionalString(root, "turn_id", diagnostic);
+        const source_event_id = try hook.optionalString(root, "event_id", diagnostic);
 
-        var rec = try Recorder.open(io, std.Io.Dir.cwd(), gpa);
+        var workspace = try event_mod.openWorkspaceDir(io, workspace_cwd);
+        defer workspace.dir.close(io);
+
+        var rec = try Recorder.open(io, workspace.dir, gpa);
         defer rec.deinit(io);
 
-        const meta: SessionMeta = .{
+        var normalized = try event_mod.normalize(io, gpa, &rec, root, diagnostic, .{
             .origin = "claude",
-            .session_id = session_id,
-        };
+            .expected_event_name = "UserPromptSubmit",
+            .kind = .user_prompt,
+            .source_event_id = source_event_id,
+            .preferred_turn_id = preferred_turn_id,
+        });
+        defer normalized.deinit(io, gpa);
+
+        if (workspace.used_fallback) {
+            rec.logHookFailure(io, "claude-hook", error.InvalidCwd, .{
+                .agent = "claude-hook",
+                .code = "workspace_cwd_fallback",
+                .message = "payload cwd could not be opened; used hook process cwd fallback",
+                .session_id = normalized.session_id,
+                .event_name = normalized.event_name,
+            });
+        }
+
+        const meta: SessionMeta = .{ .origin = normalized.origin, .session_id = normalized.session_id };
         try rec.upsertSession(meta);
-        try rec.recordUserPrompt(io, meta, "", .{ .content = prompt });
+        try rec.recordUserPrompt(io, meta, normalized.turn_id, .{ .content = prompt });
     } else if (std.mem.eql(u8, subcommand, "assistant")) {
-        const event = try hook.requireString(root, "hook_event_name", diagnostic);
-        try hook.requireEvent(event, "Stop", diagnostic);
-        const session_id = try hook.requireString(root, "session_id", diagnostic);
-        _ = try hook.requireString(root, "cwd", diagnostic);
+        const workspace_cwd = try hook.requireString(root, "cwd", diagnostic);
         const content = (try hook.optionalString(root, "last_assistant_message", diagnostic)) orelse "";
+        const preferred_turn_id = try hook.optionalString(root, "turn_id", diagnostic);
+        const source_event_id = try hook.optionalString(root, "event_id", diagnostic);
 
-        var rec = try Recorder.open(io, std.Io.Dir.cwd(), gpa);
+        var workspace = try event_mod.openWorkspaceDir(io, workspace_cwd);
+        defer workspace.dir.close(io);
+
+        var rec = try Recorder.open(io, workspace.dir, gpa);
         defer rec.deinit(io);
 
-        const meta: SessionMeta = .{
+        var normalized = try event_mod.normalize(io, gpa, &rec, root, diagnostic, .{
             .origin = "claude",
-            .session_id = session_id,
-        };
-        try rec.recordAssistantAndFinalize(io, meta, "", .{
+            .expected_event_name = "Stop",
+            .kind = .assistant,
+            .source_event_id = source_event_id,
+            .preferred_turn_id = preferred_turn_id,
+        });
+        defer normalized.deinit(io, gpa);
+
+        if (workspace.used_fallback) {
+            rec.logHookFailure(io, "claude-hook", error.InvalidCwd, .{
+                .agent = "claude-hook",
+                .code = "workspace_cwd_fallback",
+                .message = "payload cwd could not be opened; used hook process cwd fallback",
+                .session_id = normalized.session_id,
+                .event_name = normalized.event_name,
+            });
+        }
+
+        if (normalized.recovered_turn) {
+            rec.logHookFailure(io, "claude-hook", error.MissingActiveTurn, .{
+                .agent = "claude-hook",
+                .code = "recovery_turn_id",
+                .message = "assistant event arrived without an active turn; generated recovery turn id",
+                .session_id = normalized.session_id,
+                .event_name = normalized.event_name,
+            });
+        }
+
+        const meta: SessionMeta = .{ .origin = normalized.origin, .session_id = normalized.session_id };
+        try rec.recordAssistantAndFinalize(io, meta, normalized.turn_id, .{
             .content = content,
         }, &.{});
     } else {

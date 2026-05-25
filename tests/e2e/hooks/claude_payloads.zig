@@ -7,9 +7,18 @@ test "hooks/claude_payloads" {
 
     try sandbox.writeRepoFile(".agit/.keep", "");
 
-    const user_payload = @embedFile("../fixtures/hooks/claude_user_prompt.json");
-    const tool_payload = @embedFile("../fixtures/hooks/claude_post_tool_batch.json");
-    const stop_payload = @embedFile("../fixtures/hooks/claude_stop.json");
+    const user_payload = try std.fmt.allocPrint(std.testing.allocator,
+        \\{{"session_id":"abc123def456","transcript_path":"transcript.jsonl","cwd":"{s}","hook_event_name":"UserPromptSubmit","prompt":"Write a function to calculate factorial"}}
+    , .{sandbox.cwd});
+    defer std.testing.allocator.free(user_payload);
+    const tool_payload = try std.fmt.allocPrint(std.testing.allocator,
+        \\{{"session_id":"abc123def456","transcript_path":"transcript.jsonl","cwd":"{s}","hook_event_name":"PostToolBatch","tool_calls":[{{"tool_name":"Read","tool_input":{{"file_path":"{s}/main.py"}},"tool_use_id":"toolu_01","tool_response":"ok"}},{{"tool_name":"Bash","tool_input":{{"command":"echo 120"}},"tool_use_id":"toolu_02","tool_response":"120\n"}}]}}
+    , .{ sandbox.cwd, sandbox.cwd });
+    defer std.testing.allocator.free(tool_payload);
+    const stop_payload = try std.fmt.allocPrint(std.testing.allocator,
+        \\{{"session_id":"abc123def456","transcript_path":"transcript.jsonl","cwd":"{s}","hook_event_name":"Stop","stop_hook_active":false,"last_assistant_message":"done"}}
+    , .{sandbox.cwd});
+    defer std.testing.allocator.free(stop_payload);
 
     var user_res = try sandbox.run(&.{ "claude-hook", "user" }, user_payload);
     defer user_res.deinit(std.testing.allocator);

@@ -1,6 +1,6 @@
 # ADR 024: Hook event identity and workspace-root resolution
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-05-25
 
 ## Context
