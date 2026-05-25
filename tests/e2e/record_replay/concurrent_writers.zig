@@ -54,7 +54,10 @@ test "record_replay/concurrent_writers" {
         child.stderr = null;
 
         const term = try child.wait(io);
-        try std.testing.expect(term == .exited and term.exited == 0);
+        if (!(term == .exited and term.exited == 0)) {
+            std.debug.print("concurrent_writers child term={any}\nstdout={s}\nstderr={s}\n", .{ term, out, err });
+            return error.TestUnexpectedResult;
+        }
     }
 
     var status = try sandbox.run(&.{"status"}, null);

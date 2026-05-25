@@ -87,6 +87,25 @@ pub const Sandbox = struct {
         stdin: ?[]const u8,
         extra_env: []const []const u8,
     ) !RunResult {
+        return self.runFromCwdWithEnv(self.cwd, argv, stdin, extra_env);
+    }
+
+    pub fn runFromCwd(
+        self: *Sandbox,
+        cwd: []const u8,
+        argv: []const []const u8,
+        stdin: ?[]const u8,
+    ) !RunResult {
+        return self.runFromCwdWithEnv(cwd, argv, stdin, &.{});
+    }
+
+    pub fn runFromCwdWithEnv(
+        self: *Sandbox,
+        cwd: []const u8,
+        argv: []const []const u8,
+        stdin: ?[]const u8,
+        extra_env: []const []const u8,
+    ) !RunResult {
         var child_argv: std.ArrayList([]const u8) = .empty;
         defer child_argv.deinit(self.gpa);
 
@@ -102,7 +121,7 @@ pub const Sandbox = struct {
 
         var child = try std.process.spawn(self.io, .{
             .argv = child_argv.items,
-            .cwd = .{ .path = self.cwd },
+            .cwd = .{ .path = cwd },
             .stdin = if (stdin == null) .ignore else .pipe,
             .stdout = .pipe,
             .stderr = .pipe,

@@ -65,6 +65,19 @@ pub fn logHookFailureFromCwd(
     rec.logHookFailure(io, context, err, details);
 }
 
+pub fn logHookFailureFromDir(
+    io: std.Io,
+    gpa: std.mem.Allocator,
+    cwd: std.Io.Dir,
+    context: []const u8,
+    err: anyerror,
+    details: HookFailureDetails,
+) void {
+    var rec = Recorder.open(io, cwd, gpa) catch return;
+    defer rec.deinit(io);
+    rec.logHookFailure(io, context, err, details);
+}
+
 /// Metadata identifying a coding session.
 pub const SessionMeta = struct {
     origin: []const u8,

@@ -3,6 +3,7 @@ const recorder_mod = @import("../recorder.zig");
 const Recorder = recorder_mod.Recorder;
 const SessionMeta = recorder_mod.SessionMeta;
 const hook = @import("../hook.zig");
+const event_mod = @import("../hook/event.zig");
 
 /// Entry point. Always exits cleanly — errors are logged to stderr.
 pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator) !void {
@@ -56,6 +57,7 @@ fn runInner(io: std.Io, gpa: std.mem.Allocator) !void {
             .event_name = payload.event_name,
             .payload = payload.raw,
             .max_payload_bytes = hook.maxHookPayloadBytes(),
+            .workspace_cwd = payload.cwd,
         });
         return err;
     };
@@ -69,13 +71,40 @@ fn processPayload(
 ) !void {
     const root = try hook.requireObject(payload.parsed.value, diagnostic);
 
-    const session_id = try hook.requireString(root, "session_id", diagnostic);
-    _ = try hook.requireString(root, "cwd", diagnostic);
+    const workspace_cwd = try hook.requireString(root, "cwd", diagnostic);
     const event = try hook.requireString(root, "hook_event_name", diagnostic);
+    const preferred_turn_id = try hook.optionalString(root, "turn_id", diagnostic);
+    const source_event_id = if (std.mem.eql(u8, event, "AfterTool"))
+        try hook.optionalString(root, "tool_use_id", diagnostic)
+    else
+        try hook.optionalString(root, "event_id", diagnostic);
 
-    const meta: SessionMeta = .{ .origin = "gemini", .session_id = session_id };
+    var workspace = try event_mod.openWorkspaceDir(io, workspace_cwd);
+    defer workspace.dir.close(io);
+
+    var rec = try Recorder.open(io, workspace.dir, gpa);
+    defer rec.deinit(io);
 
     if (std.mem.eql(u8, event, "AfterTool")) {
+        var normalized = try event_mod.normalize(io, gpa, &rec, root, diagnostic, .{
+            .origin = "gemini",
+            .expected_event_name = "AfterTool",
+            .kind = .tool_use,
+            .source_event_id = source_event_id,
+            .preferred_turn_id = preferred_turn_id,
+        });
+        defer normalized.deinit(io, gpa);
+
+        if (workspace.used_fallback) {
+            rec.logHookFailure(io, "gemini-hook", error.InvalidCwd, .{
+                .agent = "gemini-hook",
+                .code = "workspace_cwd_fallback",
+                .message = "payload cwd could not be opened; used hook process cwd fallback",
+                .session_id = normalized.session_id,
+                .event_name = normalized.event_name,
+            });
+        }
+
         const maybe_tool_name = root.get("tool_name");
         const malformed_reason: ?[]const u8 = if (maybe_tool_name) |value| switch (value) {
             .string => null,
@@ -86,15 +115,24 @@ fn processPayload(
             else => "unknown",
         } else "unknown";
 
-        var rec = try Recorder.open(io, std.Io.Dir.cwd(), gpa);
-        defer rec.deinit(io);
+        if (normalized.recovered_turn) {
+            rec.logHookFailure(io, "gemini-hook", error.MissingActiveTurn, .{
+                .agent = "gemini-hook",
+                .code = "recovery_turn_id",
+                .message = "tool event arrived without an active turn; generated recovery turn id",
+                .session_id = normalized.session_id,
+                .event_name = normalized.event_name,
+            });
+        }
+
+        const meta: SessionMeta = .{ .origin = normalized.origin, .session_id = normalized.session_id };
 
         try rec.upsertSession(meta);
 
         if (malformed_reason) |reason| {
             const args = try std.json.Stringify.valueAlloc(gpa, std.json.Value{ .object = root }, .{});
             defer gpa.free(args);
-            try rec.recordToolUse(io, meta, "", .{
+            try rec.recordToolUse(io, meta, normalized.turn_id, .{
                 .tool_name = tool_name,
                 .args = args,
                 .result = reason,
@@ -117,19 +155,46 @@ fn processPayload(
         };
         defer if (tool_response_allocated) gpa.free(tool_response_str);
 
-        try rec.recordToolUse(io, meta, "", .{
+        try rec.recordToolUse(io, meta, normalized.turn_id, .{
             .tool_name = tool_name,
             .args = tool_input_str,
             .result = tool_response_str,
         });
     } else if (std.mem.eql(u8, event, "AfterAgent")) {
+        var normalized = try event_mod.normalize(io, gpa, &rec, root, diagnostic, .{
+            .origin = "gemini",
+            .expected_event_name = "AfterAgent",
+            .kind = .assistant,
+            .source_event_id = source_event_id,
+            .preferred_turn_id = preferred_turn_id,
+        });
+        defer normalized.deinit(io, gpa);
+
+        if (workspace.used_fallback) {
+            rec.logHookFailure(io, "gemini-hook", error.InvalidCwd, .{
+                .agent = "gemini-hook",
+                .code = "workspace_cwd_fallback",
+                .message = "payload cwd could not be opened; used hook process cwd fallback",
+                .session_id = normalized.session_id,
+                .event_name = normalized.event_name,
+            });
+        }
+
         // Gemini uses "response" for the agent's final output.
         const content = (try hook.optionalString(root, "response", diagnostic)) orelse "";
 
-        var rec = try Recorder.open(io, std.Io.Dir.cwd(), gpa);
-        defer rec.deinit(io);
+        if (normalized.recovered_turn) {
+            rec.logHookFailure(io, "gemini-hook", error.MissingActiveTurn, .{
+                .agent = "gemini-hook",
+                .code = "recovery_turn_id",
+                .message = "assistant event arrived without an active turn; generated recovery turn id",
+                .session_id = normalized.session_id,
+                .event_name = normalized.event_name,
+            });
+        }
 
-        try rec.recordAssistantAndFinalize(io, meta, "", .{ .content = content }, &.{});
+        const meta: SessionMeta = .{ .origin = normalized.origin, .session_id = normalized.session_id };
+        try rec.recordAssistantAndFinalize(io, meta, normalized.turn_id, .{ .content = content }, &.{});
     } else {
         diagnostic.* = hook.Diagnostic.unknownEvent();
         return error.UnknownEventName;

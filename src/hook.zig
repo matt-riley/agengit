@@ -56,6 +56,7 @@ pub const Payload = struct {
     parsed: std.json.Parsed(std.json.Value),
     session_id: ?[]const u8 = null,
     event_name: ?[]const u8 = null,
+    cwd: ?[]const u8 = null,
 
     pub fn deinit(self: *Payload, gpa: std.mem.Allocator) void {
         self.parsed.deinit();
@@ -83,6 +84,7 @@ pub const FailureContext = struct {
     parse_line: ?usize = null,
     parse_column: ?usize = null,
     max_payload_bytes: ?usize = null,
+    workspace_cwd: ?[]const u8 = null,
 };
 
 pub const Diagnostic = struct {
@@ -192,6 +194,44 @@ pub fn reportFailure(io: std.Io, gpa: std.mem.Allocator, ctx: FailureContext) vo
         generated_snippet = redactSnippetAlloc(gpa, raw) catch null;
         break :blk generated_snippet;
     } else null;
+
+    if (ctx.workspace_cwd) |workspace_cwd| {
+        const dir = std.Io.Dir.cwd().openDir(io, workspace_cwd, .{}) catch {
+            recorder_mod.logHookFailureFromCwd(io, gpa, ctx.agent, ctx.err, .{
+                .agent = ctx.agent,
+                .code = ctx.diagnostic.code,
+                .message = ctx.diagnostic.message,
+                .field = ctx.diagnostic.field,
+                .session_id = ctx.session_id,
+                .event_name = ctx.event_name,
+                .payload_bytes = ctx.payload_size orelse if (ctx.payload) |raw| raw.len else null,
+                .payload_snippet = snippet,
+                .parse_path = ctx.parse_path,
+                .parse_offset = ctx.parse_offset,
+                .parse_line = ctx.parse_line,
+                .parse_column = ctx.parse_column,
+                .max_payload_bytes = ctx.max_payload_bytes orelse maxHookPayloadBytes(),
+            });
+            return;
+        };
+        defer dir.close(io);
+        recorder_mod.logHookFailureFromDir(io, gpa, dir, ctx.agent, ctx.err, .{
+            .agent = ctx.agent,
+            .code = ctx.diagnostic.code,
+            .message = ctx.diagnostic.message,
+            .field = ctx.diagnostic.field,
+            .session_id = ctx.session_id,
+            .event_name = ctx.event_name,
+            .payload_bytes = ctx.payload_size orelse if (ctx.payload) |raw| raw.len else null,
+            .payload_snippet = snippet,
+            .parse_path = ctx.parse_path,
+            .parse_offset = ctx.parse_offset,
+            .parse_line = ctx.parse_line,
+            .parse_column = ctx.parse_column,
+            .max_payload_bytes = ctx.max_payload_bytes orelse maxHookPayloadBytes(),
+        });
+        return;
+    }
 
     recorder_mod.logHookFailureFromCwd(io, gpa, ctx.agent, ctx.err, .{
         .agent = ctx.agent,
@@ -322,6 +362,9 @@ fn parsePayloadData(gpa: std.mem.Allocator, data: []u8) !ReadPayloadResult {
         }
         if (root.get("hook_event_name")) |value| {
             if (value == .string) payload.event_name = value.string;
+        }
+        if (root.get("cwd")) |value| {
+            if (value == .string) payload.cwd = value.string;
         }
     }
     return .{ .ok = payload };
