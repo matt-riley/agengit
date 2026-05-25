@@ -30,7 +30,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.release-please.outputs.tag_name }}
+          ref: ${{ github.sha }}
 
       - uses: mlugg/setup-zig@v2
         with:
@@ -165,4 +165,3 @@ jobs:
           git add Formula/agit.rb
           git diff --staged --quiet || git commit -m "chore: update agit to ${VERSION}"
           git push
-
