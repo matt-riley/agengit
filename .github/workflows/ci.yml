@@ -5,6 +5,8 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  schedule:
+    - cron: "0 3 * * *"
 
 jobs:
   commit-messages:
@@ -70,6 +72,72 @@ jobs:
 
       - name: Check formatting
         run: zig build check-fmt
+
+  sanitizers:
+    name: Sanitizers
+    runs-on: ubuntu-latest
+    needs: commit-messages
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Run unit and e2e tests with UBSan
+        run: zig build test test-e2e -Doptimize=Debug -fsanitize-c
+
+  fuzz:
+    name: Fuzz hook payloads
+    runs-on: ubuntu-latest
+    needs: commit-messages
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Run bounded fuzz harnesses
+        env:
+          FUZZ_TIME: ${{ github.event_name == 'schedule' && '30m' || '60s' }}
+        run: zig build fuzz-hooks -- --time="${FUZZ_TIME}" --crash-dir="$PWD/dist/crash-corpus"
+
+      - name: Upload crash corpus
+        if: github.event_name == 'schedule' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crash-corpus
+          path: dist/crash-corpus
+          if-no-files-found: ignore
+
+  store-roundtrip:
+    name: Store roundtrip
+    runs-on: ubuntu-latest
+    needs: commit-messages
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Run recorder/reindex property tests
+        run: zig build test-property
+
+  smoke-doctor:
+    name: Smoke doctor
+    runs-on: ubuntu-latest
+    needs: commit-messages
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Run doctor smoke script
+        run: ./scripts/smoke-doctor.sh
 
   cross-compile:
     name: Cross-compile (${{ matrix.target }})

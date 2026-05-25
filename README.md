@@ -153,7 +153,10 @@ zig build
 zig build run -- version
 zig build test
 zig build test-e2e
+zig build test-property
+zig build fuzz-hooks -- --time=60s
 zig build bench-durable
+./scripts/smoke-doctor.sh
 zig build fmt
 zig build check-fmt
 zig build -Dtarget=x86_64-linux-musl -Doptimize=ReleaseSafe
