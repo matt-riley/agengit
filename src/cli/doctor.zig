@@ -7,6 +7,7 @@ const file_lock_mod = @import("../util/file_lock.zig");
 const DoctorOptions = struct {
     locks: bool = false,
     stats: bool = false,
+    last_hook_error: bool = false,
 };
 
 pub fn run(
@@ -60,6 +61,7 @@ pub fn run(
     try checkStaging(io, gpa, store.root, &stdout);
     if (options.locks) try checkLocks(io, gpa, store.root, &stdout);
     if (options.stats) try printFinalizeStats(&store, &stdout);
+    if (options.last_hook_error) try printLastHookError(io, gpa, store.root, &stdout);
 
     // --- Agent checks ---
     try checkConfigTmpFiles(io, gpa, home, "claude", ".claude/settings.json", &stdout);
@@ -80,6 +82,8 @@ fn parseOptions(iter: *std.process.Args.Iterator, stdout: *std.Io.File.Writer) !
             options.locks = true;
         } else if (std.mem.eql(u8, arg, "--stats")) {
             options.stats = true;
+        } else if (std.mem.eql(u8, arg, "--last-hook-error")) {
+            options.last_hook_error = true;
         } else if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
             try printUsage(stdout);
             return error.HelpShown;
@@ -95,13 +99,14 @@ fn parseOptions(iter: *std.process.Args.Iterator, stdout: *std.Io.File.Writer) !
 
 fn printUsage(stdout: *std.Io.File.Writer) !void {
     try stdout.interface.writeAll(
-        \\Usage: agit doctor [--locks] [--stats]
+        \\Usage: agit doctor [--locks] [--stats] [--last-hook-error]
         \\
         \\Check store health and agent hook configuration.
         \\
         \\Options:
         \\  --locks      List currently held lock files with age and executable path.
         \\  --stats      Print finalize retry/object-write counters.
+        \\  --last-hook-error  Pretty-print the newest hook-error log entry.
         \\  -h, --help   Display this help and exit.
         \\
     );
@@ -114,6 +119,44 @@ fn printFinalizeStats(store: *const store_mod.Store, stdout: *std.Io.File.Writer
         "  - finalize stats: retries_total={d} objects_written_total={d}\n",
         .{ retries, objects },
     );
+}
+
+fn printLastHookError(io: std.Io, gpa: std.mem.Allocator, store_root: std.Io.Dir, stdout: *std.Io.File.Writer) !void {
+    const content = store_root.readFileAlloc(io, "log/hook-error.log", gpa, .unlimited) catch |err| switch (err) {
+        error.FileNotFound => {
+            try stdout.interface.writeAll("  - last hook error: none\n");
+            return;
+        },
+        else => return err,
+    };
+    defer gpa.free(content);
+
+    const line = lastNonEmptyLine(content) orelse {
+        try stdout.interface.writeAll("  - last hook error: none\n");
+        return;
+    };
+
+    var parsed = std.json.parseFromSlice(std.json.Value, gpa, line, .{
+        .allocate = .alloc_always,
+    }) catch {
+        try stdout.interface.writeAll("  - last hook error: unreadable JSON entry\n");
+        return;
+    };
+    defer parsed.deinit();
+
+    const pretty = try std.json.Stringify.valueAlloc(gpa, parsed.value, .{ .whitespace = .indent_2 });
+    defer gpa.free(pretty);
+    try stdout.interface.print("  - last hook error:\n{s}\n", .{pretty});
+}
+
+fn lastNonEmptyLine(content: []const u8) ?[]const u8 {
+    var end = content.len;
+    while (end > 0 and (content[end - 1] == '\n' or content[end - 1] == '\r' or content[end - 1] == ' ' or content[end - 1] == '\t')) : (end -= 1) {}
+    if (end == 0) return null;
+    const start = (std.mem.lastIndexOfScalar(u8, content[0..end], '\n') orelse 0);
+    const raw = if (start == 0) content[0..end] else content[start + 1 .. end];
+    const trimmed = std.mem.trim(u8, raw, " \t\r");
+    return if (trimmed.len == 0) null else trimmed;
 }
 
 fn detectBinary(io: std.Io, gpa: std.mem.Allocator, name: []const u8) bool {
@@ -472,4 +515,14 @@ test "collectStagingDiagnostics counts pending corrupt and quarantined files" {
     try std.testing.expectEqual(@as(usize, 1), diag.corrupt_json);
     try std.testing.expectEqual(@as(usize, 1), diag.quarantined);
     try std.testing.expectEqual(@as(usize, 0), diag.unreadable);
+}
+
+test "lastNonEmptyLine returns final JSONL entry" {
+    const input =
+        \\{"one":1}
+        \\{"two":2}
+        \\
+    ;
+    const line = lastNonEmptyLine(input) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqualStrings("{\"two\":2}", line);
 }

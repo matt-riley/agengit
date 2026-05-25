@@ -76,6 +76,7 @@ overwrite it unless you run `agit init --force`.
 agit doctor                 # store + hook health checks
 agit doctor --locks         # include lock-file details
 agit doctor --stats         # print finalize/object-write counters
+agit doctor --last-hook-error  # pretty-print latest hook failure entry
 agit status                 # summarize captured state
 agit sessions               # list sessions
 agit log                    # latest session timeline
@@ -130,9 +131,12 @@ successfully so the coding agent can continue.
 For capture issues:
 
 ```sh
-agit doctor
-cat .agit/log/hook-error.log
+agit doctor --last-hook-error
+cat .agit/log/hook-error.log | jq
 ```
+
+Hook payload reads are capped at 16 MiB by default. Override with
+`AGIT_HOOK_MAX_BYTES=<bytes>` for unusually large payloads.
 
 ## Development
 

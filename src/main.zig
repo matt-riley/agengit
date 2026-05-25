@@ -2,6 +2,7 @@ const std = @import("std");
 const clap = @import("clap");
 const fs_mod = @import("util/fs.zig");
 const file_lock_mod = @import("util/file_lock.zig");
+const hook_mod = @import("hook.zig");
 
 const cli = struct {
     const init_cmd = @import("cli/init.zig");
@@ -57,6 +58,7 @@ const top_params = clap.parseParamsComptime(
 pub fn main(init: std.process.Init) !void {
     fs_mod.configureFromEnviron(init.minimal.environ);
     file_lock_mod.configureFromEnviron(init.minimal.environ);
+    hook_mod.configureFromEnviron(init.minimal.environ);
 
     var stdout_buf: [4096]u8 = undefined;
     var stderr_buf: [512]u8 = undefined;
