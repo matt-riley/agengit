@@ -14,20 +14,58 @@ fn runInner(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator
 
     const subcommand = iter.next() orelse {
         diagnostic = .{ .code = "missing_subcommand", .message = "claude hook subcommand is required" };
-        hook.reportFailure(io, gpa, "claude-hook", error.MissingSubcommand, diagnostic, null);
+        hook.reportFailure(io, gpa, .{
+            .agent = "claude-hook",
+            .err = error.MissingSubcommand,
+            .diagnostic = diagnostic,
+        });
         return error.MissingSubcommand;
     };
 
-    const data = hook.readStdin(io, gpa) catch |err| {
+    const payload_result = hook.readPayload(io, gpa) catch |err| {
         if (err == error.HookPayloadTooLarge) diagnostic = hook.Diagnostic.oversized();
-        hook.reportFailure(io, gpa, "claude-hook", err, diagnostic, null);
+        hook.reportFailure(io, gpa, .{
+            .agent = "claude-hook",
+            .err = err,
+            .diagnostic = diagnostic,
+            .max_payload_bytes = hook.maxHookPayloadBytes(),
+        });
         return err;
     };
-    defer gpa.free(data);
+    var payload = switch (payload_result) {
+        .ok => |ok| ok,
+        .err => |parse_err| {
+            var parse = parse_err;
+            defer parse.deinit(gpa);
+            diagnostic = hook.Diagnostic.invalidJson();
+            hook.reportFailure(io, gpa, .{
+                .agent = "claude-hook",
+                .err = error.InvalidPayload,
+                .diagnostic = diagnostic,
+                .payload_size = parse.raw_size,
+                .payload_snippet = parse.snippet,
+                .parse_path = parse.path,
+                .parse_offset = parse.offset,
+                .parse_line = parse.line,
+                .parse_column = parse.column,
+                .max_payload_bytes = hook.maxHookPayloadBytes(),
+            });
+            return error.InvalidPayload;
+        },
+    };
+    defer payload.deinit(gpa);
 
-    processPayload(io, gpa, subcommand, data, &diagnostic) catch |err| {
+    processPayload(io, gpa, subcommand, &payload, &diagnostic) catch |err| {
         if (err == error.LockTimeout) diagnostic = hook.Diagnostic.lockTimeout();
-        hook.reportFailure(io, gpa, "claude-hook", err, diagnostic, data);
+        hook.reportFailure(io, gpa, .{
+            .agent = "claude-hook",
+            .err = err,
+            .diagnostic = diagnostic,
+            .session_id = payload.session_id,
+            .event_name = payload.event_name,
+            .payload = payload.raw,
+            .max_payload_bytes = hook.maxHookPayloadBytes(),
+        });
         return err;
     };
 }
@@ -36,15 +74,10 @@ fn processPayload(
     io: std.Io,
     gpa: std.mem.Allocator,
     subcommand: []const u8,
-    data: []const u8,
+    payload: *const hook.Payload,
     diagnostic: *hook.Diagnostic,
 ) !void {
-    const parsed = try std.json.parseFromSlice(std.json.Value, gpa, data, .{
-        .allocate = .alloc_always,
-    });
-    defer parsed.deinit();
-
-    const root = try hook.requireObject(parsed.value, diagnostic);
+    const root = try hook.requireObject(payload.parsed.value, diagnostic);
 
     if (std.mem.eql(u8, subcommand, "user")) {
         const event = try hook.requireString(root, "hook_event_name", diagnostic);

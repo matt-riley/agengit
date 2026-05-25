@@ -13,16 +13,50 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
 fn runInner(io: std.Io, gpa: std.mem.Allocator) !void {
     var diagnostic: hook.Diagnostic = .{};
 
-    const data = hook.readStdin(io, gpa) catch |err| {
+    const payload_result = hook.readPayload(io, gpa) catch |err| {
         if (err == error.HookPayloadTooLarge) diagnostic = hook.Diagnostic.oversized();
-        hook.reportFailure(io, gpa, "gemini-hook", err, diagnostic, null);
+        hook.reportFailure(io, gpa, .{
+            .agent = "gemini-hook",
+            .err = err,
+            .diagnostic = diagnostic,
+            .max_payload_bytes = hook.maxHookPayloadBytes(),
+        });
         return err;
     };
-    defer gpa.free(data);
+    var payload = switch (payload_result) {
+        .ok => |ok| ok,
+        .err => |parse_err| {
+            var parse = parse_err;
+            defer parse.deinit(gpa);
+            diagnostic = hook.Diagnostic.invalidJson();
+            hook.reportFailure(io, gpa, .{
+                .agent = "gemini-hook",
+                .err = error.InvalidPayload,
+                .diagnostic = diagnostic,
+                .payload_size = parse.raw_size,
+                .payload_snippet = parse.snippet,
+                .parse_path = parse.path,
+                .parse_offset = parse.offset,
+                .parse_line = parse.line,
+                .parse_column = parse.column,
+                .max_payload_bytes = hook.maxHookPayloadBytes(),
+            });
+            return error.InvalidPayload;
+        },
+    };
+    defer payload.deinit(gpa);
 
-    processPayload(io, gpa, data, &diagnostic) catch |err| {
+    processPayload(io, gpa, &payload, &diagnostic) catch |err| {
         if (err == error.LockTimeout) diagnostic = hook.Diagnostic.lockTimeout();
-        hook.reportFailure(io, gpa, "gemini-hook", err, diagnostic, data);
+        hook.reportFailure(io, gpa, .{
+            .agent = "gemini-hook",
+            .err = err,
+            .diagnostic = diagnostic,
+            .session_id = payload.session_id,
+            .event_name = payload.event_name,
+            .payload = payload.raw,
+            .max_payload_bytes = hook.maxHookPayloadBytes(),
+        });
         return err;
     };
 }
@@ -30,15 +64,10 @@ fn runInner(io: std.Io, gpa: std.mem.Allocator) !void {
 fn processPayload(
     io: std.Io,
     gpa: std.mem.Allocator,
-    data: []const u8,
+    payload: *const hook.Payload,
     diagnostic: *hook.Diagnostic,
 ) !void {
-    const parsed = try std.json.parseFromSlice(std.json.Value, gpa, data, .{
-        .allocate = .alloc_always,
-    });
-    defer parsed.deinit();
-
-    const root = try hook.requireObject(parsed.value, diagnostic);
+    const root = try hook.requireObject(payload.parsed.value, diagnostic);
 
     const session_id = try hook.requireString(root, "session_id", diagnostic);
     _ = try hook.requireString(root, "cwd", diagnostic);

@@ -13,6 +13,7 @@ test {
     _ = @import("hooks/claude_payloads.zig");
     _ = @import("hooks/codex_payloads.zig");
     _ = @import("hooks/gemini_payloads.zig");
+    _ = @import("hooks/payload_diagnostics.zig");
 
     _ = @import("record_replay/concurrent_writers.zig");
     _ = @import("record_replay/crash_recovery.zig");
@@ -22,4 +23,5 @@ test {
     _ = @import("doctor/drifted_store.zig");
     _ = @import("doctor/locks.zig");
     _ = @import("doctor/config_tmp_files.zig");
+    _ = @import("doctor/last_hook_error.zig");
 }

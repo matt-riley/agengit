@@ -1,12 +1,10 @@
 const std = @import("std");
 const recorder_mod = @import("recorder.zig");
 
-/// Maximum accepted hook payload size.
-///
-/// Agent hooks run on every turn/tool event, so stdin is intentionally capped at
-/// 1 MiB to keep malformed or hostile hook input from exhausting memory. Hook
-/// entrypoints catch this error and log it without blocking the agent command.
-pub const max_hook_payload_bytes: usize = 1024 * 1024;
+/// Default maximum accepted hook payload size.
+pub const default_max_hook_payload_bytes: usize = 16 * 1024 * 1024;
+
+var configured_max_hook_payload_bytes = std.atomic.Value(usize).init(default_max_hook_payload_bytes);
 
 pub const HookInputError = error{
     HookPayloadTooLarge,
@@ -16,6 +14,75 @@ pub const ValidationError = error{
     MissingRequiredField,
     InvalidFieldType,
     UnknownEventName,
+};
+
+pub fn configureFromEnviron(environ: std.process.Environ) void {
+    const raw = environ.getPosix("AGIT_HOOK_MAX_BYTES") orelse {
+        configured_max_hook_payload_bytes.store(default_max_hook_payload_bytes, .release);
+        return;
+    };
+    const trimmed = std.mem.trim(u8, raw, " \t\r\n");
+    if (trimmed.len == 0) {
+        configured_max_hook_payload_bytes.store(default_max_hook_payload_bytes, .release);
+        return;
+    }
+    const parsed = std.fmt.parseInt(usize, trimmed, 10) catch {
+        configured_max_hook_payload_bytes.store(default_max_hook_payload_bytes, .release);
+        return;
+    };
+    configured_max_hook_payload_bytes.store(if (parsed > 0) parsed else default_max_hook_payload_bytes, .release);
+}
+
+pub fn maxHookPayloadBytes() usize {
+    return configured_max_hook_payload_bytes.load(.acquire);
+}
+
+pub const PayloadParseError = struct {
+    path: []const u8 = "stdin",
+    offset: usize,
+    line: usize,
+    column: usize,
+    snippet: []u8,
+    raw_size: usize,
+
+    pub fn deinit(self: *PayloadParseError, gpa: std.mem.Allocator) void {
+        gpa.free(self.snippet);
+        self.* = undefined;
+    }
+};
+
+pub const Payload = struct {
+    raw: []u8,
+    parsed: std.json.Parsed(std.json.Value),
+    session_id: ?[]const u8 = null,
+    event_name: ?[]const u8 = null,
+
+    pub fn deinit(self: *Payload, gpa: std.mem.Allocator) void {
+        self.parsed.deinit();
+        gpa.free(self.raw);
+        self.* = undefined;
+    }
+};
+
+pub const ReadPayloadResult = union(enum) {
+    ok: Payload,
+    err: PayloadParseError,
+};
+
+pub const FailureContext = struct {
+    agent: []const u8,
+    err: anyerror,
+    diagnostic: Diagnostic = .{},
+    session_id: ?[]const u8 = null,
+    event_name: ?[]const u8 = null,
+    payload: ?[]const u8 = null,
+    payload_size: ?usize = null,
+    payload_snippet: ?[]const u8 = null,
+    parse_path: ?[]const u8 = null,
+    parse_offset: ?usize = null,
+    parse_line: ?usize = null,
+    parse_column: ?usize = null,
+    max_payload_bytes: ?usize = null,
 };
 
 pub const Diagnostic = struct {
@@ -47,6 +114,14 @@ pub const Diagnostic = struct {
         };
     }
 
+    pub fn invalidJson() Diagnostic {
+        return .{
+            .code = "invalid_json_payload",
+            .message = "hook payload is not valid JSON",
+            .field = "$",
+        };
+    }
+
     pub fn oversized() Diagnostic {
         return .{
             .code = "oversized_payload",
@@ -64,23 +139,23 @@ pub const Diagnostic = struct {
 
 /// Read all bytes from a hook payload reader into a heap-allocated buffer.
 /// Caller owns the returned slice.
-pub fn readHookPayload(reader: *std.Io.Reader, gpa: std.mem.Allocator) ![]u8 {
-    return reader.allocRemaining(gpa, .limited(max_hook_payload_bytes)) catch |err| switch (err) {
+pub fn readHookPayload(reader: *std.Io.Reader, gpa: std.mem.Allocator, max_bytes: usize) ![]u8 {
+    return reader.allocRemaining(gpa, .limited(max_bytes)) catch |err| switch (err) {
         error.StreamTooLong => error.HookPayloadTooLarge,
         else => |e| e,
     };
 }
 
-/// Read all bytes from stdin into a heap-allocated buffer.
-/// Caller owns the returned slice.
-pub fn readStdin(io: std.Io, gpa: std.mem.Allocator) ![]u8 {
+pub fn readPayload(io: std.Io, gpa: std.mem.Allocator) !ReadPayloadResult {
+    const max_bytes = maxHookPayloadBytes();
     var read_buf: [4096]u8 = undefined;
     var stdin_reader = std.Io.File.stdin().reader(io, &read_buf);
-    return readHookPayload(&stdin_reader.interface, gpa);
+    const data = try readHookPayload(&stdin_reader.interface, gpa, max_bytes);
+    return parsePayloadData(gpa, data);
 }
 
 /// Write a best-effort error line to stderr. Never propagates errors.
-pub fn logError(io: std.Io, context: []const u8, msg: []const u8) void {
+fn logError(io: std.Io, context: []const u8, msg: []const u8) void {
     var buf: [512]u8 = undefined;
     var w = std.Io.File.stderr().writer(io, &buf);
     w.interface.print("[agit hook error] {s}: {s}\n", .{ context, msg }) catch {};
@@ -92,46 +167,46 @@ pub fn logError(io: std.Io, context: []const u8, msg: []const u8) void {
 /// Writes a durable JSONL entry into `.agit/log/hook-error.log` when the current
 /// directory belongs to an agit store, and always mirrors a short non-blocking
 /// error to stderr.
-pub fn reportFailure(
-    io: std.Io,
-    gpa: std.mem.Allocator,
-    context: []const u8,
-    err: anyerror,
-    diagnostic: Diagnostic,
-    payload: ?[]const u8,
-) void {
-    logError(io, context, @errorName(err));
+pub fn reportFailure(io: std.Io, gpa: std.mem.Allocator, ctx: FailureContext) void {
+    var stderr_msg_buf: [320]u8 = undefined;
+    const stderr_msg = if (ctx.parse_offset) |offset|
+        std.fmt.bufPrint(
+            &stderr_msg_buf,
+            "{s} at byte offset {d} (line {d}, column {d})",
+            .{
+                ctx.diagnostic.message,
+                offset,
+                ctx.parse_line orelse 0,
+                ctx.parse_column orelse 0,
+            },
+        ) catch ctx.diagnostic.message
+    else
+        ctx.diagnostic.message;
+    logError(io, ctx.agent, stderr_msg);
 
-    var parsed: ?std.json.Parsed(std.json.Value) = null;
-    defer if (parsed) |*p| p.deinit();
+    var generated_snippet: ?[]u8 = null;
+    defer if (generated_snippet) |snippet| gpa.free(snippet);
+    const snippet = if (ctx.payload_snippet) |provided| blk: {
+        break :blk provided;
+    } else if (ctx.payload) |raw| blk: {
+        generated_snippet = redactSnippetAlloc(gpa, raw) catch null;
+        break :blk generated_snippet;
+    } else null;
 
-    var session_id: ?[]const u8 = null;
-    var event_name: ?[]const u8 = null;
-    if (payload) |data| {
-        parsed = std.json.parseFromSlice(std.json.Value, gpa, data, .{
-            .allocate = .alloc_always,
-        }) catch null;
-        if (parsed) |p| {
-            if (p.value == .object) {
-                const root = p.value.object;
-                if (root.get("session_id")) |value| {
-                    if (value == .string) session_id = value.string;
-                }
-                if (root.get("hook_event_name")) |value| {
-                    if (value == .string) event_name = value.string;
-                }
-            }
-        }
-    }
-
-    recorder_mod.logHookFailureFromCwd(io, gpa, context, err, .{
-        .code = diagnostic.code,
-        .message = diagnostic.message,
-        .field = diagnostic.field,
-        .session_id = session_id,
-        .event_name = event_name,
-        .payload_bytes = if (payload) |data| data.len else null,
-        .max_payload_bytes = max_hook_payload_bytes,
+    recorder_mod.logHookFailureFromCwd(io, gpa, ctx.agent, ctx.err, .{
+        .agent = ctx.agent,
+        .code = ctx.diagnostic.code,
+        .message = ctx.diagnostic.message,
+        .field = ctx.diagnostic.field,
+        .session_id = ctx.session_id,
+        .event_name = ctx.event_name,
+        .payload_bytes = ctx.payload_size orelse if (ctx.payload) |raw| raw.len else null,
+        .payload_snippet = snippet,
+        .parse_path = ctx.parse_path,
+        .parse_offset = ctx.parse_offset,
+        .parse_line = ctx.parse_line,
+        .parse_column = ctx.parse_column,
+        .max_payload_bytes = ctx.max_payload_bytes orelse maxHookPayloadBytes(),
     });
 }
 
@@ -215,14 +290,175 @@ pub const CommonPayload = struct {
     hook_event_name: []const u8,
 };
 
+fn parsePayloadData(gpa: std.mem.Allocator, data: []u8) !ReadPayloadResult {
+    var scanner = std.json.Scanner.initCompleteInput(gpa, data);
+    defer scanner.deinit();
+    var diagnostics: std.json.Diagnostics = .{};
+    scanner.enableDiagnostics(&diagnostics);
+
+    const parsed = std.json.parseFromTokenSource(std.json.Value, gpa, &scanner, .{
+        .allocate = .alloc_always,
+    }) catch {
+        const snippet = try redactSnippetAlloc(gpa, data);
+        const raw_size = data.len;
+        gpa.free(data);
+        return .{ .err = .{
+            .offset = @intCast(diagnostics.getByteOffset()),
+            .line = @intCast(diagnostics.getLine()),
+            .column = @intCast(diagnostics.getColumn()),
+            .snippet = snippet,
+            .raw_size = raw_size,
+        } };
+    };
+
+    var payload: Payload = .{
+        .raw = data,
+        .parsed = parsed,
+    };
+    if (parsed.value == .object) {
+        const root = parsed.value.object;
+        if (root.get("session_id")) |value| {
+            if (value == .string) payload.session_id = value.string;
+        }
+        if (root.get("hook_event_name")) |value| {
+            if (value == .string) payload.event_name = value.string;
+        }
+    }
+    return .{ .ok = payload };
+}
+
+fn redactSnippetAlloc(gpa: std.mem.Allocator, payload: []const u8) ![]u8 {
+    const end = @min(payload.len, 256);
+    const snippet = try gpa.dupe(u8, payload[0..end]);
+    redactSecretsInPlace(snippet);
+    return snippet;
+}
+
+fn redactSecretsInPlace(text: []u8) void {
+    var i: usize = 0;
+    while (i < text.len) : (i += 1) {
+        if (text[i] != '"') continue;
+        const key_start = i + 1;
+        const key_end = findStringEnd(text, key_start) orelse break;
+        const key = text[key_start..key_end];
+        var cursor = key_end + 1;
+        cursor = skipWhitespace(text, cursor);
+        if (cursor >= text.len or text[cursor] != ':') {
+            i = key_end;
+            continue;
+        }
+        cursor = skipWhitespace(text, cursor + 1);
+        if (!isSensitiveKey(key)) {
+            i = key_end;
+            continue;
+        }
+        if (cursor >= text.len) break;
+
+        if (text[cursor] == '"') {
+            const value_start = cursor + 1;
+            const value_end = findStringEnd(text, value_start) orelse text.len;
+            @memset(text[value_start..value_end], '*');
+            i = value_end;
+            continue;
+        }
+
+        const value_end = findLooseValueEnd(text, cursor);
+        var j = cursor;
+        while (j < value_end) : (j += 1) {
+            if (std.ascii.isWhitespace(text[j])) continue;
+            text[j] = '*';
+        }
+        i = value_end;
+    }
+}
+
+fn findStringEnd(text: []const u8, start: usize) ?usize {
+    var i = start;
+    while (i < text.len) : (i += 1) {
+        if (text[i] == '"' and (i == start or text[i - 1] != '\\')) return i;
+    }
+    return null;
+}
+
+fn skipWhitespace(text: []const u8, start: usize) usize {
+    var i = start;
+    while (i < text.len and std.ascii.isWhitespace(text[i])) : (i += 1) {}
+    return i;
+}
+
+fn findLooseValueEnd(text: []const u8, start: usize) usize {
+    var i = start;
+    while (i < text.len) : (i += 1) {
+        if (text[i] == ',' or text[i] == '}' or text[i] == ']') return i;
+    }
+    return text.len;
+}
+
+fn isSensitiveKey(key: []const u8) bool {
+    const sensitive = [_][]const u8{
+        "token",
+        "key",
+        "secret",
+        "password",
+        "authorization",
+    };
+    for (sensitive) |needle| {
+        if (containsIgnoreCase(key, needle)) return true;
+    }
+    return false;
+}
+
+fn containsIgnoreCase(haystack: []const u8, needle: []const u8) bool {
+    if (needle.len == 0) return true;
+    if (haystack.len < needle.len) return false;
+    var i: usize = 0;
+    while (i + needle.len <= haystack.len) : (i += 1) {
+        var matched = true;
+        var j: usize = 0;
+        while (j < needle.len) : (j += 1) {
+            if (std.ascii.toLower(haystack[i + j]) != std.ascii.toLower(needle[j])) {
+                matched = false;
+                break;
+            }
+        }
+        if (matched) return true;
+    }
+    return false;
+}
+
 test "readHookPayload rejects oversized input" {
     const gpa = std.testing.allocator;
-    const oversized = try gpa.alloc(u8, max_hook_payload_bytes + 1);
+    const oversized = try gpa.alloc(u8, 64);
     defer gpa.free(oversized);
     @memset(oversized, 'x');
 
     var reader: std.Io.Reader = .fixed(oversized);
-    try std.testing.expectError(error.HookPayloadTooLarge, readHookPayload(&reader, gpa));
+    try std.testing.expectError(error.HookPayloadTooLarge, readHookPayload(&reader, gpa, 32));
+}
+
+test "parsePayloadData returns structured parse diagnostics" {
+    const gpa = std.testing.allocator;
+    const data = try gpa.dupe(u8, "{\"session_id\":\"abc\",");
+    const result = try parsePayloadData(gpa, data);
+    try std.testing.expect(result == .err);
+    var parse_err = result.err;
+    defer parse_err.deinit(gpa);
+    try std.testing.expect(parse_err.offset > 0);
+    try std.testing.expectEqual(@as(usize, 20), parse_err.raw_size);
+    try std.testing.expect(parse_err.snippet.len > 0);
+}
+
+test "redactSnippetAlloc masks sensitive values" {
+    const gpa = std.testing.allocator;
+    const payload =
+        \\{"token":"abc123","password":"hunter2","authorization":"Bearer xyz","normal":"visible"}
+    ;
+    const snippet = try redactSnippetAlloc(gpa, payload);
+    defer gpa.free(snippet);
+    try std.testing.expect(std.mem.indexOf(u8, snippet, "abc123") == null);
+    try std.testing.expect(std.mem.indexOf(u8, snippet, "hunter2") == null);
+    try std.testing.expect(std.mem.indexOf(u8, snippet, "Bearer xyz") == null);
+    try std.testing.expect(std.mem.indexOf(u8, snippet, "visible") != null);
 }
 
 test "requireString reports missing and invalid fields" {

@@ -1,6 +1,6 @@
 # ADR 011: User-friendly hook payload diagnostics
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-05-25
 
 ## Context
