@@ -179,40 +179,110 @@ fn isClaudeAgitGroup(group: std.json.Value, binary: []const u8) bool {
     return std.mem.eql(u8, cmd.string, binary);
 }
 
-/// Remove Codex/Gemini-format hook entries: each event value is an object
-/// `{command: "<binary> <subcmd>"}`.  Remove event keys where command
-/// starts with `binary + " "`.
+/// Remove Codex/Gemini-format hook entries. Gemini and older Codex configs use
+/// event objects shaped like `{command: "<binary> <subcmd>"}`; current Codex
+/// configs use arrays of matcher groups with nested command handlers.
 fn removeSimpleHooks(aa: std.mem.Allocator, root: *std.json.ObjectMap, binary: []const u8) std.mem.Allocator.Error!bool {
     var changed = false;
     const hooks_val = root.get("hooks") orelse return false;
     if (hooks_val != .object) return false;
 
-    var to_remove: [16][]const u8 = undefined;
-    var n_to_remove: usize = 0;
+    var new_hooks = std.json.ObjectMap.empty;
     var it = hooks_val.object.iterator();
     while (it.next()) |entry| {
         const v = entry.value_ptr.*;
-        if (v != .object) continue;
-        const cmd = v.object.get("command") orelse continue;
-        if (cmd != .string) continue;
-        const is_agit_cmd = std.mem.eql(u8, cmd.string, binary) or
-            (std.mem.startsWith(u8, cmd.string, binary) and
-                cmd.string.len > binary.len and cmd.string[binary.len] == ' ');
-        if (is_agit_cmd and n_to_remove < to_remove.len) {
-            to_remove[n_to_remove] = entry.key_ptr.*;
-            n_to_remove += 1;
-            changed = true;
+        switch (v) {
+            .object => {
+                if (isSimpleAgitCommand(v, binary)) {
+                    changed = true;
+                    continue;
+                }
+                try new_hooks.put(aa, entry.key_ptr.*, v);
+            },
+            .array => {
+                var event_changed = false;
+                const filtered = try filterSimpleMatcherGroups(aa, v.array, binary, &event_changed);
+                if (event_changed) {
+                    changed = true;
+                    if (filtered.items.len > 0) {
+                        try new_hooks.put(aa, entry.key_ptr.*, std.json.Value{ .array = filtered });
+                    }
+                } else {
+                    try new_hooks.put(aa, entry.key_ptr.*, v);
+                }
+            },
+            else => try new_hooks.put(aa, entry.key_ptr.*, v),
         }
     }
-
-    var hooks_obj = hooks_val.object;
-    for (to_remove[0..n_to_remove]) |key| {
-        _ = hooks_obj.swapRemove(key);
-    }
     if (changed) {
-        try root.put(aa, "hooks", std.json.Value{ .object = hooks_obj });
+        try root.put(aa, "hooks", std.json.Value{ .object = new_hooks });
     }
     return changed;
+}
+
+fn filterSimpleMatcherGroups(
+    aa: std.mem.Allocator,
+    groups: std.json.Array,
+    binary: []const u8,
+    changed: *bool,
+) std.mem.Allocator.Error!std.json.Array {
+    var filtered_groups = std.json.Array.init(aa);
+    for (groups.items) |group| {
+        if (group != .object) {
+            try filtered_groups.append(group);
+            continue;
+        }
+        const handlers = group.object.get("hooks") orelse {
+            try filtered_groups.append(group);
+            continue;
+        };
+        if (handlers != .array) {
+            try filtered_groups.append(group);
+            continue;
+        }
+
+        var filtered_handlers = std.json.Array.init(aa);
+        var removed_handler = false;
+        for (handlers.array.items) |handler| {
+            if (isSimpleAgitCommand(handler, binary)) {
+                removed_handler = true;
+                continue;
+            }
+            try filtered_handlers.append(handler);
+        }
+
+        if (!removed_handler) {
+            try filtered_groups.append(group);
+            continue;
+        }
+        changed.* = true;
+        if (filtered_handlers.items.len == 0) continue;
+
+        var filtered_group = std.json.ObjectMap.empty;
+        var group_it = group.object.iterator();
+        while (group_it.next()) |entry| {
+            if (std.mem.eql(u8, entry.key_ptr.*, "hooks")) {
+                try filtered_group.put(aa, entry.key_ptr.*, std.json.Value{ .array = filtered_handlers });
+            } else {
+                try filtered_group.put(aa, entry.key_ptr.*, entry.value_ptr.*);
+            }
+        }
+        try filtered_groups.append(std.json.Value{ .object = filtered_group });
+    }
+    return filtered_groups;
+}
+
+fn isSimpleAgitCommand(v: std.json.Value, binary: []const u8) bool {
+    if (v != .object) return false;
+    const cmd = v.object.get("command") orelse return false;
+    if (cmd != .string) return false;
+    return commandMatchesBinary(cmd.string, binary);
+}
+
+fn commandMatchesBinary(cmd: []const u8, binary: []const u8) bool {
+    return std.mem.eql(u8, cmd, binary) or
+        (std.mem.startsWith(u8, cmd, binary) and
+            cmd.len > binary.len and cmd[binary.len] == ' ');
 }
 
 test "removeClaude removes agit-managed hooks and returns changed" {
@@ -312,6 +382,36 @@ test "removeSimpleHooks removes agit-managed Codex/Gemini hooks" {
     try stop_obj.put(aa, "command", std.json.Value{ .string = "/bin/agit codex-hook" });
     var hooks_obj = std.json.ObjectMap.empty;
     try hooks_obj.put(aa, "Stop", std.json.Value{ .object = stop_obj });
+    var root = std.json.ObjectMap.empty;
+    try root.put(aa, "hooks", std.json.Value{ .object = hooks_obj });
+
+    const changed = try removeSimpleHooks(aa, &root, "/bin/agit");
+    try std.testing.expect(changed);
+    const remaining = root.get("hooks").?.object;
+    try std.testing.expect(remaining.get("Stop") == null);
+}
+
+test "removeSimpleHooks removes agit-managed Codex matcher group hooks" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const aa = arena.allocator();
+
+    var handler_obj = std.json.ObjectMap.empty;
+    try handler_obj.put(aa, "type", std.json.Value{ .string = "command" });
+    try handler_obj.put(aa, "command", std.json.Value{ .string = "/bin/agit codex-hook" });
+
+    var handlers = std.json.Array.init(aa);
+    try handlers.append(std.json.Value{ .object = handler_obj });
+
+    var group_obj = std.json.ObjectMap.empty;
+    try group_obj.put(aa, "hooks", std.json.Value{ .array = handlers });
+
+    var groups = std.json.Array.init(aa);
+    try groups.append(std.json.Value{ .object = group_obj });
+
+    var hooks_obj = std.json.ObjectMap.empty;
+    try hooks_obj.put(aa, "Stop", std.json.Value{ .array = groups });
     var root = std.json.ObjectMap.empty;
     try root.put(aa, "hooks", std.json.Value{ .object = hooks_obj });
 

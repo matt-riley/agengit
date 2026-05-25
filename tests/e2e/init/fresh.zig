@@ -29,6 +29,9 @@ test "init/fresh" {
     try expectContains(claude, "\"Stop\"");
     try expectContains(codex, "\"PostToolUse\"");
     try expectContains(codex, "\"Stop\"");
+    try expectCodexEventShape(codex, "UserPromptSubmit");
+    try expectCodexEventShape(codex, "PostToolUse");
+    try expectCodexEventShape(codex, "Stop");
     try expectContains(gemini, "\"AfterTool\"");
     try expectContains(gemini, "\"AfterAgent\"");
 }
@@ -41,4 +44,27 @@ fn readHomeConfig(sandbox: *harness.Sandbox, rel_path: []const u8) ![]u8 {
 
 fn expectContains(haystack: []const u8, needle: []const u8) !void {
     try std.testing.expect(std.mem.indexOf(u8, haystack, needle) != null);
+}
+
+fn expectCodexEventShape(config: []const u8, event_name: []const u8) !void {
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, config, .{
+        .allocate = .alloc_always,
+    });
+    defer parsed.deinit();
+
+    const hooks = parsed.value.object.get("hooks") orelse return error.MissingHooks;
+    const event = hooks.object.get(event_name) orelse return error.MissingCodexEvent;
+    try std.testing.expect(event == .array);
+    try std.testing.expectEqual(@as(usize, 1), event.array.items.len);
+
+    const group = event.array.items[0];
+    try std.testing.expect(group == .object);
+    const handlers = group.object.get("hooks") orelse return error.MissingCodexHandlers;
+    try std.testing.expect(handlers == .array);
+    try std.testing.expectEqual(@as(usize, 1), handlers.array.items.len);
+
+    const handler = handlers.array.items[0];
+    try std.testing.expect(handler == .object);
+    try std.testing.expectEqualStrings("command", handler.object.get("type").?.string);
+    try std.testing.expect(std.mem.indexOf(u8, handler.object.get("command").?.string, " codex-hook") != null);
 }
