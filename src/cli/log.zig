@@ -21,10 +21,7 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
     var stdout_buf: [8192]u8 = undefined;
     var stdout = std.Io.File.stdout().writer(io, &stdout_buf);
 
-    var store = (try status.openStoreOrDie(io, gpa, &stdout)) orelse return;
-    defer store.deinit(io);
-
-    // Parse --help and target session ID
+    // Parse --help and target session ID first (before opening store)
     var help_requested = false;
     var session_arg: ?[:0]const u8 = null;
     while (iter.next()) |arg| {
@@ -41,6 +38,9 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
         try stdout.flush();
         return;
     }
+
+    var store = (try status.openStoreOrDie(io, gpa, &stdout)) orelse return;
+    defer store.deinit(io);
 
     const resolved = try resolveSessionArg(io, gpa, &store, session_arg, &stdout) orelse return;
     defer {
