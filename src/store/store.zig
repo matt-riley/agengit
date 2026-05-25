@@ -417,9 +417,12 @@ pub const Store = struct {
             const sep = std.mem.indexOfScalar(u8, entry.path, '/') orelse continue;
             const origin_hex = entry.path[0..sep];
             const session_hex = entry.path[sep + 1 ..];
-            const origin = try decodeHexAlloc(gpa, origin_hex);
+            const origin = decodeHexAlloc(gpa, origin_hex) catch continue;
             errdefer gpa.free(origin);
-            const sess_id = try decodeHexAlloc(gpa, session_hex);
+            const sess_id = decodeHexAlloc(gpa, session_hex) catch {
+                gpa.free(origin);
+                continue;
+            };
             errdefer gpa.free(sess_id);
             try appendUniqueSessionOwned(gpa, &list, &seen, origin, sess_id);
         }
