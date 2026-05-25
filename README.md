@@ -152,8 +152,15 @@ cat .agit/log/hook-error.log
 
 ```sh
 zig build test
+zig build test-e2e
 zig build check-fmt
 zig build -Dtarget=x86_64-linux-musl -Doptimize=ReleaseSafe
+```
+
+E2E golden files live under `tests/golden/`. Regenerate them intentionally with:
+
+```sh
+AGIT_UPDATE_GOLDEN=1 zig build test-e2e
 ```
 
 The repository also has GitHub Actions for Linux/macOS tests, release archive builds, checksums, Release Please, and an optional Homebrew tap update.

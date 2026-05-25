@@ -1,0 +1,6 @@
+  ✓ .agit/ store: ok
+  - .agitignore: not present (using default snapshot skips)
+  ✓ .agit/tmp staging: ok
+  - claude: not installed
+  - codex: not installed
+  - gemini: not installed
