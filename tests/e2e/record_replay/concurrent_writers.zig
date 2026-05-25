@@ -69,6 +69,8 @@ test "record_replay/concurrent_writers" {
     if (err_log) |buf| {
         try std.testing.expect(std.mem.indexOf(u8, buf, "corrupt_staging") == null);
         try std.testing.expect(std.mem.indexOf(u8, buf, "CorruptRef") == null);
+        try std.testing.expect(std.mem.indexOf(u8, buf, "lock_timeout") == null);
+        try std.testing.expect(std.mem.indexOf(u8, buf, "LockTimeout") == null);
     }
 }
 

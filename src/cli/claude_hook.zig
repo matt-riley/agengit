@@ -26,6 +26,7 @@ fn runInner(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator
     defer gpa.free(data);
 
     processPayload(io, gpa, subcommand, data, &diagnostic) catch |err| {
+        if (err == error.LockTimeout) diagnostic = hook.Diagnostic.lockTimeout();
         hook.reportFailure(io, gpa, "claude-hook", err, diagnostic, data);
         return err;
     };

@@ -74,6 +74,9 @@ If none of those agents are installed, `agit init` politely shrugs and does noth
 # Check that the store and agent hook config look healthy.
 agit doctor
 
+# Include currently held lock files.
+agit doctor --locks
+
 # See how many sessions and steps have been recorded.
 agit status
 
@@ -161,6 +164,9 @@ zig build -Dtarget=x86_64-linux-musl -Doptimize=ReleaseSafe
 Durability fsync is enabled by default for atomic store/config writes. Set
 `AGIT_FSYNC=0` only for tests or microbenchmarks when you intentionally want to
 skip directory fsync.
+
+Hook lock acquisition waits up to 10 seconds by default. Override with
+`AGIT_LOCK_TIMEOUT_MS=<milliseconds>` when diagnosing high-contention runs.
 
 E2E golden files live under `tests/golden/`. Regenerate them intentionally with:
 
