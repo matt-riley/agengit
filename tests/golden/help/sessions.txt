@@ -1,0 +1,14 @@
+USAGE:
+    agit sessions [OPTIONS]
+
+DESCRIPTION:
+    List recorded agent sessions from the index.
+
+OPTIONS:
+    -h, --help
+        Display this help and exit.
+
+EXAMPLES:
+    # list all sessions
+    agit sessions
+

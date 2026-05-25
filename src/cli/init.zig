@@ -2,6 +2,21 @@ const std = @import("std");
 const exe_path_mod = @import("../util/exe_path.zig");
 const home_mod = @import("../util/home.zig");
 const atomic_json_mod = @import("../util/atomic_json.zig");
+const help_mod = @import("help.zig");
+
+pub const usage = help_mod.UsageSpec{
+    .name = "init",
+    .synopsis = "[OPTIONS]",
+    .description = "Set up agit hooks for installed agent CLIs.",
+    .options = &.{
+        .{ .flag = "--force", .description = "Back up and replace malformed/non-object existing JSON config." },
+        .{ .flag = "-h, --help", .description = "Display this help and exit." },
+    },
+    .examples = &.{
+        .{ .description = "install hooks for available agents", .command = "" },
+        .{ .description = "reinstall even if config exists", .command = "--force" },
+    },
+};
 
 pub fn run(
     io: std.Io,
@@ -59,29 +74,16 @@ fn parseOptions(iter: *std.process.Args.Iterator, stdout: *std.Io.File.Writer) !
         if (std.mem.eql(u8, arg, "--force")) {
             options.force = true;
         } else if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
-            try printUsage(stdout);
+            try help_mod.renderUsage(stdout, usage);
             return error.HelpShown;
         } else {
-            try stdout.interface.print("agit init: unknown option '{s}'\n\n", .{arg});
-            try printUsage(stdout);
+            try stdout.interface.print("error: unknown option '{s}'\n\n", .{arg});
+            try help_mod.renderUsage(stdout, usage);
             try stdout.flush();
             return error.InvalidArgument;
         }
     }
     return options;
-}
-
-fn printUsage(stdout: *std.Io.File.Writer) !void {
-    try stdout.interface.writeAll(
-        \\Usage: agit init [--force]
-        \\
-        \\Set up agit hooks for installed agent CLIs.
-        \\
-        \\Options:
-        \\  --force      Back up and replace malformed/non-object existing JSON config.
-        \\  -h, --help   Display this help and exit.
-        \\
-    );
 }
 
 fn detectBinary(io: std.Io, gpa: std.mem.Allocator, name: []const u8) bool {

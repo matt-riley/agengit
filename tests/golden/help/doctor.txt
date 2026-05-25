@@ -1,0 +1,24 @@
+USAGE:
+    agit doctor [OPTIONS]
+
+DESCRIPTION:
+    Check store health and agent hook configuration.
+
+OPTIONS:
+    --locks
+        List currently held lock files with age and executable path.
+    --stats
+        Print finalize retry/object-write counters.
+    --last-hook-error
+        Pretty-print the newest hook-error log entry.
+    -h, --help
+        Display this help and exit.
+
+EXAMPLES:
+    # check store and agent health
+    agit doctor
+    # show lock files in use
+    agit doctor --locks
+    # show finalize statistics
+    agit doctor --stats
+

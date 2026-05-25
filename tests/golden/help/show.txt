@@ -1,0 +1,14 @@
+USAGE:
+    agit show [OPTIONS] <HASH>
+
+DESCRIPTION:
+    Show details of a recorded step object by its BLAKE3 hash.
+
+OPTIONS:
+    -h, --help
+        Display this help and exit.
+
+EXAMPLES:
+    # show details of a step
+    agit show abc123def
+

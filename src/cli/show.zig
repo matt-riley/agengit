@@ -1,14 +1,45 @@
 const std = @import("std");
 const store_mod = @import("../store/store.zig");
 const status = @import("status.zig");
+const help_mod = @import("help.zig");
+
+pub const usage = help_mod.UsageSpec{
+    .name = "show",
+    .synopsis = "[OPTIONS] <HASH>",
+    .description = "Show details of a recorded step object by its BLAKE3 hash.",
+    .options = &.{
+        .{ .flag = "-h, --help", .description = "Display this help and exit." },
+    },
+    .examples = &.{
+        .{ .description = "show details of a step", .command = "abc123def" },
+    },
+};
 
 // Phase 6 implementation: show details of a named step object.
 pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator) !void {
     var stdout_buf: [16384]u8 = undefined;
     var stdout = std.Io.File.stdout().writer(io, &stdout_buf);
 
-    const prefix = iter.next() orelse {
-        try stdout.interface.writeAll("usage: agit show <hash>\n");
+    // Parse --help and hash prefix
+    var help_requested = false;
+    var hash_prefix: ?[:0]const u8 = null;
+    while (iter.next()) |arg| {
+        if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
+            help_requested = true;
+            break;
+        } else if (hash_prefix == null) {
+            hash_prefix = arg;
+        }
+    }
+
+    if (help_requested) {
+        try help_mod.renderUsage(&stdout, usage);
+        try stdout.flush();
+        return;
+    }
+
+    const prefix = hash_prefix orelse {
+        try help_mod.renderUsage(&stdout, usage);
         try stdout.flush();
         return;
     };

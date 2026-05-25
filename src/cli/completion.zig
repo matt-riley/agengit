@@ -1,4 +1,18 @@
 const std = @import("std");
+const help_mod = @import("help.zig");
+
+pub const usage = help_mod.UsageSpec{
+    .name = "completion",
+    .synopsis = "[OPTIONS] <SHELL>",
+    .description = "Generate shell completion scripts for bash, zsh, fish, or nushell.",
+    .options = &.{
+        .{ .flag = "-h, --help", .description = "Display this help and exit." },
+    },
+    .examples = &.{
+        .{ .description = "bash completion script", .command = "bash" },
+        .{ .description = "zsh completion script", .command = "zsh" },
+    },
+};
 
 const bash_completion =
     \\# agit bash completion
@@ -72,8 +86,26 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
     var stdout_buf: [8192]u8 = undefined;
     var stdout = std.Io.File.stdout().writer(io, &stdout_buf);
 
-    const shell = iter.next() orelse {
-        try stdout.interface.writeAll("usage: agit completion <shell>\nshells: bash zsh fish nushell\n");
+    // Parse --help and shell name
+    var help_requested = false;
+    var shell_name: ?[:0]const u8 = null;
+    while (iter.next()) |arg| {
+        if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
+            help_requested = true;
+            break;
+        } else if (shell_name == null) {
+            shell_name = arg;
+        }
+    }
+
+    if (help_requested) {
+        try help_mod.renderUsage(&stdout, usage);
+        try stdout.flush();
+        return;
+    }
+
+    const shell = shell_name orelse {
+        try help_mod.renderUsage(&stdout, usage);
         try stdout.flush();
         return;
     };

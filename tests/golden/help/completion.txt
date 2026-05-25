@@ -1,0 +1,16 @@
+USAGE:
+    agit completion [OPTIONS] <SHELL>
+
+DESCRIPTION:
+    Generate shell completion scripts for bash, zsh, fish, or nushell.
+
+OPTIONS:
+    -h, --help
+        Display this help and exit.
+
+EXAMPLES:
+    # bash completion script
+    agit completion bash
+    # zsh completion script
+    agit completion zsh
+

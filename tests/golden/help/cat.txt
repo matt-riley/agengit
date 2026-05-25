@@ -1,0 +1,14 @@
+USAGE:
+    agit cat [OPTIONS] <HASH>
+
+DESCRIPTION:
+    Print a raw object by its BLAKE3 hash.
+
+OPTIONS:
+    -h, --help
+        Display this help and exit.
+
+EXAMPLES:
+    # print object content
+    agit cat abc123def
+
