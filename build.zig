@@ -3,7 +3,7 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-    const sanitize_c = b.option(std.zig.SanitizeC, "sanitize-c", "Enable C-family undefined behavior sanitizers") orelse .off;
+    const sanitize_c = b.option(std.zig.SanitizeC, "sanitize-c", "Enable C-family undefined behavior sanitizers") orelse .full;
 
     const clap_dep = b.dependency("clap", .{ .target = target, .optimize = optimize });
     const zqlite_dep = b.dependency("zqlite", .{ .target = target, .optimize = optimize });
