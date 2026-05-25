@@ -2,6 +2,11 @@ const std = @import("std");
 const store_mod = @import("../store/store.zig");
 const exe_path_mod = @import("../util/exe_path.zig");
 const home_mod = @import("../util/home.zig");
+const file_lock_mod = @import("../util/file_lock.zig");
+
+const DoctorOptions = struct {
+    locks: bool = false,
+};
 
 pub fn run(
     io: std.Io,
@@ -9,10 +14,16 @@ pub fn run(
     environ: std.process.Environ,
     iter: *std.process.Args.Iterator,
 ) !void {
-    _ = iter;
-
     var stdout_buf: [4096]u8 = undefined;
     var stdout = std.Io.File.stdout().writer(io, &stdout_buf);
+
+    const options = parseOptions(iter, &stdout) catch |err| switch (err) {
+        error.HelpShown => {
+            try stdout.flush();
+            return;
+        },
+        else => return err,
+    };
 
     const home = try home_mod.getAlloc(gpa, environ);
     defer gpa.free(home);
@@ -30,6 +41,7 @@ pub fn run(
 
     try checkAgitIgnore(io, std.Io.Dir.cwd(), gpa, &stdout);
     try checkStaging(io, gpa, store.root, &stdout);
+    if (options.locks) try checkLocks(io, gpa, store.root, &stdout);
 
     // --- Agent checks ---
     try checkAgent(io, gpa, home, exe, "claude", ".claude/settings.json", &stdout);
@@ -37,6 +49,37 @@ pub fn run(
     try checkAgent(io, gpa, home, exe, "gemini", ".gemini/settings.json", &stdout);
 
     try stdout.flush();
+}
+
+fn parseOptions(iter: *std.process.Args.Iterator, stdout: *std.Io.File.Writer) !DoctorOptions {
+    var options: DoctorOptions = .{};
+    while (iter.next()) |arg| {
+        if (std.mem.eql(u8, arg, "--locks")) {
+            options.locks = true;
+        } else if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
+            try printUsage(stdout);
+            return error.HelpShown;
+        } else {
+            try stdout.interface.print("agit doctor: unknown option '{s}'\n\n", .{arg});
+            try printUsage(stdout);
+            try stdout.flush();
+            return error.InvalidArgument;
+        }
+    }
+    return options;
+}
+
+fn printUsage(stdout: *std.Io.File.Writer) !void {
+    try stdout.interface.writeAll(
+        \\Usage: agit doctor [--locks]
+        \\
+        \\Check store health and agent hook configuration.
+        \\
+        \\Options:
+        \\  --locks      List currently held lock files with age and executable path.
+        \\  -h, --help   Display this help and exit.
+        \\
+    );
 }
 
 fn detectBinary(io: std.Io, gpa: std.mem.Allocator, name: []const u8) bool {
@@ -124,6 +167,54 @@ fn checkStaging(
         );
     } else {
         try stdout.interface.writeAll("  ✓ .agit/tmp staging: ok\n");
+    }
+}
+
+fn checkLocks(
+    io: std.Io,
+    gpa: std.mem.Allocator,
+    store_root: std.Io.Dir,
+    stdout: *std.Io.File.Writer,
+) !void {
+    var root_iter_dir = try store_root.openDir(io, ".", .{ .iterate = true });
+    defer root_iter_dir.close(io);
+
+    var walker = try root_iter_dir.walk(gpa);
+    defer walker.deinit();
+
+    var lock_count: usize = 0;
+    const now_ms = std.Io.Timestamp.now(io, .real).toMilliseconds();
+
+    while (try walker.next(io)) |entry| {
+        if (entry.kind != .file) continue;
+        if (!std.mem.endsWith(u8, entry.path, ".lock")) continue;
+        lock_count += 1;
+
+        const data = store_root.readFileAlloc(io, entry.path, gpa, .unlimited) catch {
+            try stdout.interface.print("  - lock {s}: unreadable\n", .{entry.path});
+            continue;
+        };
+        defer gpa.free(data);
+        const text = std.mem.trim(u8, data, "\n\r ");
+
+        var parsed = std.json.parseFromSlice(file_lock_mod.LockRecord, gpa, text, .{
+            .allocate = .alloc_always,
+            .ignore_unknown_fields = true,
+        }) catch {
+            try stdout.interface.print("  - lock {s}: malformed\n", .{entry.path});
+            continue;
+        };
+        defer parsed.deinit();
+
+        const age_ms: i64 = @max(0, now_ms - parsed.value.started_at);
+        try stdout.interface.print(
+            "  - lock {s}: age_ms={d} pid={d} exe={s}\n",
+            .{ entry.path, age_ms, parsed.value.pid, parsed.value.exe_path },
+        );
+    }
+
+    if (lock_count == 0) {
+        try stdout.interface.writeAll("  ✓ .agit locks: none held\n");
     }
 }
 

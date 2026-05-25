@@ -1,6 +1,6 @@
 # ADR 009: Robust file locking for concurrent hook writers
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-05-25
 
 ## Context
@@ -92,3 +92,16 @@ Concrete failure modes:
 - The system behaves correctly under concurrent multi-agent recording,
   which is the whole point of supporting Claude + Codex + Gemini
   simultaneously.
+
+## Implementation notes
+
+- `src/util/file_lock.zig` now writes a single-line JSON `LockRecord`
+  (`pid`, `started_at`, `exe_path`, `hostname`) and fsyncs the lock file
+  on acquire.
+- Lock acquire is bounded by a default 10s timeout and honors
+  `AGIT_LOCK_TIMEOUT_MS`.
+- Stale lock takeover now checks PID liveness and validates executable path
+  ownership on Linux/macOS (PID-only fallback on other platforms), with an
+  age-based stale window.
+- `agit doctor --locks` lists active lock files with PID, age, and executable
+  path.

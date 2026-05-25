@@ -19,4 +19,5 @@ test {
 
     _ = @import("doctor/healthy_store.zig");
     _ = @import("doctor/drifted_store.zig");
+    _ = @import("doctor/locks.zig");
 }

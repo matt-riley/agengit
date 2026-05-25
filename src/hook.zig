@@ -53,6 +53,13 @@ pub const Diagnostic = struct {
             .message = "hook payload exceeds the maximum accepted size",
         };
     }
+
+    pub fn lockTimeout() Diagnostic {
+        return .{
+            .code = "lock_timeout",
+            .message = "timed out waiting for a lock; set AGIT_LOCK_TIMEOUT_MS to a higher value if needed",
+        };
+    }
 };
 
 /// Read all bytes from a hook payload reader into a heap-allocated buffer.
