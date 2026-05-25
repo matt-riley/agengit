@@ -85,7 +85,7 @@ jobs:
           version: 0.16.0
 
       - name: Run unit and e2e tests with UBSan
-        run: zig build test test-e2e -Doptimize=Debug -fsanitize-c
+        run: zig build test test-e2e -Doptimize=Debug -Dsanitize-c=full
 
   fuzz:
     name: Fuzz hook payloads

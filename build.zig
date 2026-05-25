@@ -3,6 +3,7 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    const sanitize_c = b.option(std.zig.SanitizeC, "sanitize-c", "Enable C-family undefined behavior sanitizers") orelse .off;
 
     const clap_dep = b.dependency("clap", .{ .target = target, .optimize = optimize });
     const zqlite_dep = b.dependency("zqlite", .{ .target = target, .optimize = optimize });
@@ -10,11 +11,13 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/hook.zig"),
         .target = target,
         .optimize = optimize,
+        .sanitize_c = sanitize_c,
     });
     const test_support_module = b.createModule(.{
         .root_source_file = b.path("src/test_support.zig"),
         .target = target,
         .optimize = optimize,
+        .sanitize_c = sanitize_c,
         .imports = &.{
             .{ .name = "zqlite", .module = zqlite_dep.module("zqlite") },
         },
@@ -24,6 +27,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
+        .sanitize_c = sanitize_c,
         .imports = &.{
             .{ .name = "clap", .module = clap_dep.module("clap") },
             .{ .name = "zqlite", .module = zqlite_dep.module("zqlite") },
@@ -51,6 +55,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/main.zig"),
             .target = target,
             .optimize = optimize,
+            .sanitize_c = sanitize_c,
             .imports = &.{
                 .{ .name = "clap", .module = clap_dep.module("clap") },
                 .{ .name = "zqlite", .module = zqlite_dep.module("zqlite") },
@@ -68,6 +73,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("tests/e2e/all.zig"),
             .target = target,
             .optimize = optimize,
+            .sanitize_c = sanitize_c,
         }),
     });
 
@@ -82,6 +88,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("tests/property/all.zig"),
             .target = target,
             .optimize = optimize,
+            .sanitize_c = sanitize_c,
             .imports = &.{
                 .{ .name = "test_support", .module = test_support_module },
             },
@@ -96,6 +103,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("bench/durable.zig"),
             .target = target,
             .optimize = optimize,
+            .sanitize_c = sanitize_c,
             .imports = &.{
                 .{
                     .name = "fs_util",
@@ -103,6 +111,7 @@ pub fn build(b: *std.Build) void {
                         .root_source_file = b.path("src/util/fs.zig"),
                         .target = target,
                         .optimize = optimize,
+                        .sanitize_c = sanitize_c,
                     }),
                 },
             },
@@ -118,6 +127,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("tests/fuzz/hooks.zig"),
             .target = target,
             .optimize = optimize,
+            .sanitize_c = sanitize_c,
             .imports = &.{
                 .{ .name = "hook", .module = hook_module },
             },
