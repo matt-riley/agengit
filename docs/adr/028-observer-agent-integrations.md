@@ -1,0 +1,76 @@
+# ADR 028: Observer-based integrations for agents without lifecycle hooks
+
+**Status:** Proposed
+**Date:** 2026-05-25
+
+## Context
+
+Current capture support is hook-driven:
+
+- Claude Code hooks,
+- Codex CLI hooks,
+- Gemini CLI hooks.
+
+The roadmap names Pi and GitHub Copilot CLI as future targets, but those agents
+do not currently have the same public lifecycle-hook shape. Copying the hook
+adapter model into those integrations would either be impossible or would depend
+on unstable private behavior.
+
+The code already benefits from a shared recorder pipeline. The missing decision
+is how non-hook sources feed that pipeline without making `agit init` install
+hidden background processes.
+
+## Decision
+
+Introduce an opt-in observer framework for agents that expose session state
+through files, logs, local IPC, or future MCP-style callouts rather than hooks.
+
+1. **Observer sources:** add `src/observer/` with source adapters that poll or
+   watch an agent-specific state location and emit the same `NormalizedEvent`
+   contract defined in ADR 024.
+2. **Explicit command:** observers run only through explicit commands such as
+   `agit observe <agent>` or a documented service wrapper. `agit init` may
+   write config hints, but it must not start hidden long-running processes.
+3. **Checkpoint state:** each observer stores watermarks under
+   `.agit/observers/<agent>.json` so restarts resume without duplicating events.
+4. **Backpressure and rate limits:** observers batch events, cap file reads, and
+   hand off to the recorder with the same lock and durability rules as hooks.
+5. **Privacy policy:** observers obey the `.agit/config.json` capture policy
+   from ADR 026 before writing prompts, tool arguments, results, or snapshots.
+6. **Adapter maturity:** each observer starts behind an experimental marker
+   until its source format is documented and covered by fixtures.
+
+## Plan
+
+1. Define `ObserverSource` and `ObserverCheckpoint` types.
+2. Implement a fake file-backed observer in tests before adding a real agent.
+3. Add `agit observe --once <source-fixture>` for deterministic e2e validation.
+4. Research Pi session-state files and Copilot CLI state separately, then add
+   one thin adapter at a time.
+5. Document each observer's stability, permissions, and failure modes before it
+   is listed as supported in the README.
+
+## Testing
+
+- Unit tests for checkpoint load/save, duplicate suppression, and event ordering.
+- E2E test: run `agit observe --once` over a fixture directory and assert it
+  records the expected session steps.
+- Resume test: run observer once, append new fixture events, run again, and
+  assert only new events are recorded.
+- Privacy test: observer output obeys metadata-only and redacted capture modes.
+
+## Risks and tradeoffs
+
+- Polling files is less precise than first-party lifecycle hooks. The observer
+  model must tolerate missing intermediate state and mark low-confidence events.
+- Agent internals may change without notice. Experimental adapters should fail
+  closed and report clear diagnostics.
+- Long-running observers create operational questions around startup, logs, and
+  resource use. Keeping them explicit avoids surprising users.
+
+## Consequences
+
+- Pi and Copilot-style integrations get a deliberate architecture rather than
+  hook-shaped workarounds.
+- The recorder remains the single persistence path for all capture sources.
+- Users retain local control over when background observation is active.
