@@ -1,0 +1,85 @@
+# agit nushell completion
+def "nu-complete agit command" [] {
+    [
+        { value: 'init', description: 'Set up agit in the current repository' }
+        { value: 'uninstall', description: 'Remove agit hooks from agent configurations' }
+        { value: 'doctor', description: 'Check agent hook configurations and store health' }
+        { value: 'status', description: 'Show current repository state' }
+        { value: 'sessions', description: 'List recorded agent sessions' }
+        { value: 'log', description: 'Show step history for a session' }
+        { value: 'show', description: 'Show details of a step' }
+        { value: 'blame', description: 'Show per-line step attribution for a file' }
+        { value: 'cat', description: 'Print a raw object by hash' }
+        { value: 'reindex', description: 'Rebuild the index from the object store' }
+        { value: 'version', description: 'Print version information' }
+        { value: 'completion', description: 'Generate shell completion scripts' }
+    ]
+}
+def "nu-complete agit init-agent" [] {
+    ['claude', 'codex', 'gemini']
+}
+
+extern "agit" [
+    command?: string@"nu-complete agit command"
+    ...args: string
+]
+extern "agit init" [
+    --agent: string@"nu-complete agit init-agent"
+    --dry-run
+    --force
+    --help(-h)
+]
+
+extern "agit uninstall" [
+    --help(-h)
+]
+
+extern "agit doctor" [
+    --json
+    --locks
+    --stats
+    --last-hook-error
+    --help(-h)
+]
+
+extern "agit status" [
+    --json
+    --help(-h)
+]
+
+extern "agit sessions" [
+    --json
+    --help(-h)
+]
+
+extern "agit log" [
+    --json
+    --help(-h)
+]
+
+extern "agit show" [
+    --json
+    --help(-h)
+]
+
+extern "agit blame" [
+    --help(-h)
+]
+
+extern "agit cat" [
+    --help(-h)
+]
+
+extern "agit reindex" [
+    --from: string
+    --help(-h)
+]
+
+extern "agit version" [
+    --help(-h)
+]
+
+extern "agit completion" [
+    --help(-h)
+]
+

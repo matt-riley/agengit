@@ -8,7 +8,7 @@ pub const usage = help_mod.UsageSpec{
     .synopsis = "[OPTIONS] <HASH>",
     .description = "Print a raw object by its BLAKE3 hash.",
     .options = &.{
-        .{ .flag = "-h, --help", .description = "Display this help and exit." },
+        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
     },
     .examples = &.{
         .{ .description = "print object content", .command = "abc123def" },
@@ -44,7 +44,7 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
         return;
     };
 
-    var store = (try status.openStoreOrDie(io, gpa, &stdout)) orelse return;
+    var store = try status.openStoreOrExit(io, gpa, &stdout, .human, usage.name);
     defer store.deinit(io);
 
     const h = store.resolvePrefix(io, gpa, prefix) catch |err| {

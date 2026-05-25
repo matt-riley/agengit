@@ -5,6 +5,8 @@ DESCRIPTION:
     Check store health and agent hook configuration.
 
 OPTIONS:
+    --json
+        Render doctor checks as structured JSON.
     --locks
         List currently held lock files with age and executable path.
     --stats

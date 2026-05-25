@@ -9,8 +9,8 @@ pub const usage = help_mod.UsageSpec{
     .synopsis = "[OPTIONS]",
     .description = "Rebuild the SQLite index from object/ref truth.",
     .options = &.{
-        .{ .flag = "--from <HASH>", .description = "Incrementally replay steps newer than <HASH> that are reachable from session refs." },
-        .{ .flag = "-h, --help", .description = "Display this help and exit." },
+        .{ .long = "from", .value_name = "HASH", .description = "Incrementally replay steps newer than <HASH> that are reachable from session refs." },
+        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
     },
     .examples = &.{
         .{ .description = "rebuild entire index", .command = "" },

@@ -13,4 +13,8 @@ EXAMPLES:
     agit completion bash
     # zsh completion script
     agit completion zsh
+    # fish completion script
+    agit completion fish
+    # nushell completion script
+    agit completion nushell
 

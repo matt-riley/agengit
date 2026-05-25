@@ -5,6 +5,8 @@ DESCRIPTION:
     List recorded agent sessions from the index.
 
 OPTIONS:
+    --json
+        Render the session list as structured JSON.
     -h, --help
         Display this help and exit.
 

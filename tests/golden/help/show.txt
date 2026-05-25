@@ -5,6 +5,8 @@ DESCRIPTION:
     Show details of a recorded step object by its BLAKE3 hash.
 
 OPTIONS:
+    --json
+        Render the step details as structured JSON.
     -h, --help
         Display this help and exit.
 
