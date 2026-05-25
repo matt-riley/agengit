@@ -54,8 +54,13 @@ EOF
 export HOME="${HOME_DIR}"
 export PATH="${BIN_DIR}:${ORIG_PATH}"
 
+# Keep smoke builds isolated from any pre-restored CI cache state.
+export ZIG_GLOBAL_CACHE_DIR="${TMP_DIR}/zig-global-cache"
+export ZIG_LOCAL_CACHE_DIR="${TMP_DIR}/zig-local-cache"
+mkdir -p "${ZIG_GLOBAL_CACHE_DIR}" "${ZIG_LOCAL_CACHE_DIR}"
+
 cd "${ROOT_DIR}"
-zig build >/dev/null
+zig build -Dsanitize-c=full >/dev/null
 
 cd "${REPO_DIR}"
 "${AGIT_BIN}" init >/dev/null
