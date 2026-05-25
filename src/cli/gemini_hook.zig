@@ -79,3 +79,29 @@ fn runInner(io: std.Io, gpa: std.mem.Allocator) !void {
     }
     // Unknown events are silently ignored.
 }
+
+test "parse gemini after tool fixture" {
+    const gpa = std.testing.allocator;
+    const data = @embedFile("../fixtures/hooks/gemini_after_tool.json");
+    const parsed = try std.json.parseFromSlice(std.json.Value, gpa, data, .{
+        .allocate = .alloc_always,
+    });
+    defer parsed.deinit();
+    const root = parsed.value.object;
+    try std.testing.expectEqualStrings("gemini-sess-001", root.get("session_id").?.string);
+    try std.testing.expectEqualStrings("AfterTool", root.get("hook_event_name").?.string);
+    try std.testing.expectEqualStrings("read_file", root.get("tool_name").?.string);
+}
+
+test "parse gemini after agent fixture" {
+    const gpa = std.testing.allocator;
+    const data = @embedFile("../fixtures/hooks/gemini_after_agent.json");
+    const parsed = try std.json.parseFromSlice(std.json.Value, gpa, data, .{
+        .allocate = .alloc_always,
+    });
+    defer parsed.deinit();
+    const root = parsed.value.object;
+    try std.testing.expectEqualStrings("gemini-sess-001", root.get("session_id").?.string);
+    try std.testing.expectEqualStrings("AfterAgent", root.get("hook_event_name").?.string);
+    try std.testing.expect(root.get("response").?.string.len > 0);
+}

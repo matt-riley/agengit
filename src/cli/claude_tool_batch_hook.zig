@@ -43,6 +43,7 @@ fn runInner(io: std.Io, gpa: std.mem.Allocator) !void {
     try rec.upsertSession(meta);
 
     for (tool_calls.items) |tc| {
+
         const tc_obj = switch (tc) {
             .object => |o| o,
             else => continue,
@@ -75,4 +76,23 @@ fn runInner(io: std.Io, gpa: std.mem.Allocator) !void {
             .result = tool_response_str,
         });
     }
+}
+
+test "parse claude post tool batch fixture" {
+    const gpa = std.testing.allocator;
+    const data = @embedFile("../fixtures/hooks/claude_post_tool_batch.json");
+    const parsed = try std.json.parseFromSlice(std.json.Value, gpa, data, .{
+        .allocate = .alloc_always,
+    });
+    defer parsed.deinit();
+
+    const root = parsed.value.object;
+    const session_id = root.get("session_id").?.string;
+    try std.testing.expectEqualStrings("abc123def456", session_id);
+    try std.testing.expectEqualStrings("PostToolBatch", root.get("hook_event_name").?.string);
+
+    const tool_calls = root.get("tool_calls").?.array;
+    try std.testing.expectEqual(@as(usize, 2), tool_calls.items.len);
+    try std.testing.expectEqualStrings("Read", tool_calls.items[0].object.get("tool_name").?.string);
+    try std.testing.expectEqualStrings("Bash", tool_calls.items[1].object.get("tool_name").?.string);
 }

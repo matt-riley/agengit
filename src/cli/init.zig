@@ -302,3 +302,95 @@ fn writeFileAtomic(io: std.Io, path: []const u8, content: []const u8) !void {
     try af.file.writeStreamingAll(io, content);
     try af.replace(io);
 }
+
+test "setClaudeHooks installs all managed events on empty root" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const aa = arena.allocator();
+
+    var root = std.json.ObjectMap.empty;
+    try setClaudeHooks(aa, &root, "/bin/agit");
+
+    const hooks = root.get("hooks") orelse return error.MissingHooks;
+    try std.testing.expect(hooks == .object);
+    try std.testing.expect(hooks.object.get("UserPromptSubmit") != null);
+    try std.testing.expect(hooks.object.get("PostToolBatch") != null);
+    try std.testing.expect(hooks.object.get("Stop") != null);
+
+    const meta = root.get("_agit") orelse return error.MissingMeta;
+    try std.testing.expectEqualStrings("/bin/agit", meta.object.get("binary").?.string);
+}
+
+test "setClaudeHooks is idempotent" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const aa = arena.allocator();
+
+    var root = std.json.ObjectMap.empty;
+    try setClaudeHooks(aa, &root, "/bin/agit");
+    try setClaudeHooks(aa, &root, "/bin/agit");
+
+    const hooks = root.get("hooks").?.object;
+    try std.testing.expect(hooks.get("UserPromptSubmit") != null);
+    try std.testing.expect(hooks.get("PostToolBatch") != null);
+    try std.testing.expect(hooks.get("Stop") != null);
+    // No duplicate event keys — object map dedups by key.
+    try std.testing.expectEqual(@as(usize, 3), hooks.count());
+}
+
+test "setClaudeHooks preserves user hooks on other event names" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const aa = arena.allocator();
+
+    // Pre-populate hooks with a user-owned PreTool entry.
+    var user_arr = std.json.Array.init(aa);
+    try user_arr.append(std.json.Value{ .string = "user-entry" });
+    var existing_hooks = std.json.ObjectMap.empty;
+    try existing_hooks.put(aa, "PreTool", std.json.Value{ .array = user_arr });
+
+    var root = std.json.ObjectMap.empty;
+    try root.put(aa, "hooks", std.json.Value{ .object = existing_hooks });
+
+    try setClaudeHooks(aa, &root, "/bin/agit");
+
+    const hooks = root.get("hooks").?.object;
+    // Managed events installed.
+    try std.testing.expect(hooks.get("UserPromptSubmit") != null);
+    // User's PreTool entry preserved.
+    try std.testing.expect(hooks.get("PreTool") != null);
+}
+
+test "setCodexHooks installs all managed events on empty root" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const aa = arena.allocator();
+
+    var root = std.json.ObjectMap.empty;
+    try setCodexHooks(aa, &root, "/bin/agit");
+
+    const hooks = root.get("hooks").?.object;
+    try std.testing.expect(hooks.get("UserPromptSubmit") != null);
+    try std.testing.expect(hooks.get("PostToolUse") != null);
+    try std.testing.expect(hooks.get("Stop") != null);
+    try std.testing.expectEqualStrings("/bin/agit", root.get("_agit").?.object.get("binary").?.string);
+}
+
+test "setGeminiHooks installs all managed events on empty root" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const aa = arena.allocator();
+
+    var root = std.json.ObjectMap.empty;
+    try setGeminiHooks(aa, &root, "/bin/agit");
+
+    const hooks = root.get("hooks").?.object;
+    try std.testing.expect(hooks.get("AfterTool") != null);
+    try std.testing.expect(hooks.get("AfterAgent") != null);
+    try std.testing.expectEqualStrings("/bin/agit", root.get("_agit").?.object.get("binary").?.string);
+}

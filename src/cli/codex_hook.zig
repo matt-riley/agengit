@@ -93,3 +93,48 @@ fn runInner(io: std.Io, gpa: std.mem.Allocator) !void {
     }
     // Unknown events are silently ignored (forward-compatible).
 }
+
+test "parse codex user prompt fixture" {
+    const gpa = std.testing.allocator;
+    const data = @embedFile("../fixtures/hooks/codex_user_prompt.json");
+    const common = try std.json.parseFromSlice(hook.CommonPayload, gpa, data, .{
+        .allocate = .alloc_always,
+        .ignore_unknown_fields = true,
+    });
+    defer common.deinit();
+    try std.testing.expectEqualStrings("codex-sess-001", common.value.session_id);
+    try std.testing.expectEqualStrings("UserPromptSubmit", common.value.hook_event_name);
+
+    const parsed = try std.json.parseFromSlice(hook.ClaudeUserPayload, gpa, data, .{
+        .allocate = .alloc_always,
+        .ignore_unknown_fields = true,
+    });
+    defer parsed.deinit();
+    try std.testing.expect(parsed.value.prompt.len > 0);
+}
+
+test "parse codex post tool use fixture" {
+    const gpa = std.testing.allocator;
+    const data = @embedFile("../fixtures/hooks/codex_post_tool_use.json");
+    const parsed = try std.json.parseFromSlice(std.json.Value, gpa, data, .{
+        .allocate = .alloc_always,
+    });
+    defer parsed.deinit();
+    const root = parsed.value.object;
+    try std.testing.expectEqualStrings("codex-sess-001", root.get("session_id").?.string);
+    try std.testing.expectEqualStrings("PostToolUse", root.get("hook_event_name").?.string);
+    try std.testing.expectEqualStrings("bash", root.get("tool_name").?.string);
+}
+
+test "parse codex stop fixture" {
+    const gpa = std.testing.allocator;
+    const data = @embedFile("../fixtures/hooks/codex_stop.json");
+    const parsed = try std.json.parseFromSlice(hook.ClaudeStopPayload, gpa, data, .{
+        .allocate = .alloc_always,
+        .ignore_unknown_fields = true,
+    });
+    defer parsed.deinit();
+    try std.testing.expectEqualStrings("codex-sess-001", parsed.value.session_id);
+    try std.testing.expectEqualStrings("Stop", parsed.value.hook_event_name);
+    try std.testing.expect(parsed.value.last_assistant_message.len > 0);
+}

@@ -20,11 +20,30 @@ Inspired by [`regent-vcs/re_gent`](https://github.com/regent-vcs/re_gent). Writt
 
 ## Install
 
-> Binary releases not yet available. Build from source.
+### Binary (recommended)
+
+Download the latest release from the [releases page](https://github.com/matt-riley/agengit/releases):
+
+| Platform | Archive |
+|---|---|
+| Linux x86_64 | `agit-x86_64-linux.tar.gz` |
+| Linux aarch64 | `agit-aarch64-linux.tar.gz` |
+| macOS arm64 | `agit-aarch64-macos.tar.gz` |
+| macOS x86_64 | `agit-x86_64-macos.tar.gz` |
+| Windows x86_64 | `agit-x86_64-windows.zip` |
 
 ```sh
-git clone https://github.com/matt-riley/agit
-cd agit
+# Linux / macOS example
+tar -xzf agit-x86_64-linux.tar.gz
+sudo mv agit /usr/local/bin/
+agit version
+```
+
+### Build from source
+
+```sh
+git clone https://github.com/matt-riley/agengit
+cd agengit
 zig build -Doptimize=ReleaseSafe
 # binary is at ./zig-out/bin/agit
 ```

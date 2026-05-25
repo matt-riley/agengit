@@ -1,0 +1,87 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-linux-musl
+            archive: agit-x86_64-linux.tar.gz
+            binary: agit
+          - target: aarch64-linux-musl
+            archive: agit-aarch64-linux.tar.gz
+            binary: agit
+          - target: aarch64-macos
+            archive: agit-aarch64-macos.tar.gz
+            binary: agit
+          - target: x86_64-macos
+            archive: agit-x86_64-macos.tar.gz
+            binary: agit
+          - target: x86_64-windows
+            archive: agit-x86_64-windows.zip
+            binary: agit.exe
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Build release binary
+        run: zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSafe
+
+      - name: Create archive (Unix)
+        if: ${{ !contains(matrix.target, 'windows') }}
+        run: |
+          mkdir -p dist
+          tar -czf dist/${{ matrix.archive }} -C zig-out/bin ${{ matrix.binary }}
+
+      - name: Create archive (Windows)
+        if: contains(matrix.target, 'windows')
+        run: |
+          mkdir -p dist
+          zip -j dist/${{ matrix.archive }} zig-out/bin/${{ matrix.binary }}
+
+      - name: Upload archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.archive }}
+          path: dist/${{ matrix.archive }}
+
+  release:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum * > checksums.txt
+          cat checksums.txt
+
+      - name: Create GitHub Release
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --title "agit ${{ github.ref_name }}" \
+            --generate-notes \
+            dist/*
+        env:
+          GH_TOKEN: ${{ github.token }}
