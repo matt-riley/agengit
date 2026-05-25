@@ -1,6 +1,6 @@
 # ADR 029: Guided setup and hook-install preview
 
-**Status:** Proposed
+**Status:** Implemented
 **Date:** 2026-05-25
 
 ## Context
