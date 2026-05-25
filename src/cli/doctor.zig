@@ -4,16 +4,18 @@ const exe_path_mod = @import("../util/exe_path.zig");
 const home_mod = @import("../util/home.zig");
 const file_lock_mod = @import("../util/file_lock.zig");
 const help_mod = @import("help.zig");
+const output_mod = @import("output.zig");
 
 pub const usage = help_mod.UsageSpec{
     .name = "doctor",
     .synopsis = "[OPTIONS]",
     .description = "Check store health and agent hook configuration.",
     .options = &.{
-        .{ .flag = "--locks", .description = "List currently held lock files with age and executable path." },
-        .{ .flag = "--stats", .description = "Print finalize retry/object-write counters." },
-        .{ .flag = "--last-hook-error", .description = "Pretty-print the newest hook-error log entry." },
-        .{ .flag = "-h, --help", .description = "Display this help and exit." },
+        .{ .long = "json", .description = "Render doctor checks as structured JSON." },
+        .{ .long = "locks", .description = "List currently held lock files with age and executable path." },
+        .{ .long = "stats", .description = "Print finalize retry/object-write counters." },
+        .{ .long = "last-hook-error", .description = "Pretty-print the newest hook-error log entry." },
+        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
     },
     .examples = &.{
         .{ .description = "check store and agent health", .command = "" },
@@ -23,6 +25,7 @@ pub const usage = help_mod.UsageSpec{
 };
 
 const DoctorOptions = struct {
+    json: bool = false,
     locks: bool = false,
     stats: bool = false,
     last_hook_error: bool = false,
@@ -36,7 +39,6 @@ pub fn run(
 ) !void {
     var stdout_buf: [4096]u8 = undefined;
     var stdout = std.Io.File.stdout().writer(io, &stdout_buf);
-    var has_failures = false;
 
     const options = parseOptions(iter, &stdout) catch |err| switch (err) {
         error.HelpShown => {
@@ -50,6 +52,13 @@ pub fn run(
     defer gpa.free(home);
     const exe = try exe_path_mod.getAlloc(io, gpa);
     defer gpa.free(exe);
+
+    if (options.json) {
+        try runJson(io, gpa, home, exe, options, &stdout);
+        return;
+    }
+
+    var has_failures = false;
 
     // --- Store check ---
     var store = store_mod.Store.open(io, std.Io.Dir.cwd(), gpa) catch |err| {
@@ -96,7 +105,9 @@ pub fn run(
 fn parseOptions(iter: *std.process.Args.Iterator, stdout: *std.Io.File.Writer) !DoctorOptions {
     var options: DoctorOptions = .{};
     while (iter.next()) |arg| {
-        if (std.mem.eql(u8, arg, "--locks")) {
+        if (std.mem.eql(u8, arg, "--json")) {
+            options.json = true;
+        } else if (std.mem.eql(u8, arg, "--locks")) {
             options.locks = true;
         } else if (std.mem.eql(u8, arg, "--stats")) {
             options.stats = true;
@@ -106,13 +117,207 @@ fn parseOptions(iter: *std.process.Args.Iterator, stdout: *std.Io.File.Writer) !
             try help_mod.renderUsage(stdout, usage);
             return error.HelpShown;
         } else {
-            try stdout.interface.print("error: unknown option '{s}'\n\n", .{arg});
-            try help_mod.renderUsage(stdout, usage);
+            if (options.json) {
+                try output_mod.writeDiagnosticEnvelope(stdout, usage.name, .{
+                    .code = "invalid_argument",
+                    .message = "Unknown option.",
+                    .hint = arg,
+                });
+            } else {
+                try stdout.interface.print("error: unknown option '{s}'\n\n", .{arg});
+                try help_mod.renderUsage(stdout, usage);
+            }
             try stdout.flush();
-            return error.InvalidArgument;
+            std.process.exit(1);
         }
     }
     return options;
+}
+
+const DoctorStats = struct {
+    retries_total: i64,
+    objects_written_total: i64,
+};
+
+const LockInfo = struct {
+    path: []const u8,
+    status: output_mod.CheckStatus,
+    message: []const u8,
+    age_ms: ?i64 = null,
+    pid: ?i32 = null,
+    exe_path: ?[]const u8 = null,
+};
+
+fn runJson(
+    io: std.Io,
+    gpa: std.mem.Allocator,
+    home: []const u8,
+    exe: []const u8,
+    options: DoctorOptions,
+    stdout: *std.Io.File.Writer,
+) !void {
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const aa = arena.allocator();
+
+    var checks: std.ArrayList(output_mod.Check) = .empty;
+    defer checks.deinit(gpa);
+
+    var lock_infos: std.ArrayList(LockInfo) = .empty;
+    defer lock_infos.deinit(gpa);
+
+    var store = store_mod.Store.open(io, std.Io.Dir.cwd(), gpa) catch |err| {
+        const diagnostic: output_mod.Diagnostic = .{
+            .code = "store_open_failed",
+            .message = "Failed to open agit store.",
+            .hint = @errorName(err),
+            .path = ".",
+        };
+        try output_mod.writeDiagnosticEnvelope(stdout, usage.name, diagnostic);
+        try stdout.flush();
+        std.process.exit(1);
+    };
+    defer store.deinit(io);
+
+    try checks.append(gpa, .{
+        .code = "store_ok",
+        .status = .ok,
+        .message = ".agit/ store is readable.",
+    });
+
+    const reconcile = try store.reconcile(io, gpa, .dry_run);
+    if (reconcile.drifted > 0 or reconcile.index_ahead > 0) {
+        try checks.append(gpa, .{
+            .code = "ref_index_drift",
+            .status = .@"error",
+            .message = try std.fmt.allocPrint(aa, "{d} repairable drifted session(s), {d} index-ahead session(s).", .{
+                reconcile.drifted,
+                reconcile.index_ahead,
+            }),
+            .hint = "Run `agit reindex` to rebuild the query index.",
+        });
+    } else {
+        try checks.append(gpa, .{
+            .code = "ref_index_drift",
+            .status = .ok,
+            .message = "No ref/index drift detected.",
+        });
+    }
+
+    const agit_ignore = try collectAgitIgnoreDiagnostics(io, std.Io.Dir.cwd(), gpa);
+    switch (agit_ignore) {
+        .missing => try checks.append(gpa, .{
+            .code = "agitignore_missing",
+            .status = .info,
+            .message = ".agitignore not present; using default snapshot skips.",
+        }),
+        .readable => |rule_count| try checks.append(gpa, .{
+            .code = "agitignore_readable",
+            .status = .ok,
+            .message = try std.fmt.allocPrint(aa, ".agitignore readable with {d} custom rule(s).", .{rule_count}),
+        }),
+        .unreadable => |err| try checks.append(gpa, .{
+            .code = "agitignore_unreadable",
+            .status = .@"error",
+            .message = ".agitignore is unreadable.",
+            .hint = @errorName(err),
+            .path = ".agitignore",
+        }),
+    }
+
+    const staging = try collectStagingDiagnostics(io, gpa, store.root);
+    if (staging.corrupt_json > 0 or staging.unreadable > 0) {
+        try checks.append(gpa, .{
+            .code = "staging_corrupt",
+            .status = .@"error",
+            .message = try std.fmt.allocPrint(aa, ".agit/tmp contains {d} corrupt JSON file(s) and {d} unreadable file(s).", .{
+                staging.corrupt_json,
+                staging.unreadable,
+            }),
+            .hint = "Inspect .agit/tmp and .agit/log/hook-error.log.",
+            .path = ".agit/tmp",
+        });
+    } else if (staging.quarantined > 0) {
+        try checks.append(gpa, .{
+            .code = "staging_quarantined",
+            .status = .@"error",
+            .message = try std.fmt.allocPrint(aa, ".agit/tmp contains {d} quarantined corrupt file(s).", .{staging.quarantined}),
+            .hint = "Inspect .agit/tmp for recovery details.",
+            .path = ".agit/tmp",
+        });
+    } else if (staging.pending_json > 0) {
+        try checks.append(gpa, .{
+            .code = "staging_pending",
+            .status = .info,
+            .message = try std.fmt.allocPrint(aa, ".agit/tmp contains {d} pending capture file(s).", .{staging.pending_json}),
+            .path = ".agit/tmp",
+        });
+    } else {
+        try checks.append(gpa, .{
+            .code = "staging_ok",
+            .status = .ok,
+            .message = ".agit/tmp staging is clean.",
+            .path = ".agit/tmp",
+        });
+    }
+
+    if (options.locks) {
+        try collectLockInfos(io, gpa, aa, store.root, &lock_infos);
+        if (lock_infos.items.len == 0) {
+            try checks.append(gpa, .{
+                .code = "locks_clear",
+                .status = .ok,
+                .message = "No lock files are currently held.",
+            });
+        } else {
+            try checks.append(gpa, .{
+                .code = "locks_present",
+                .status = .info,
+                .message = try std.fmt.allocPrint(aa, "{d} lock file(s) are currently present.", .{lock_infos.items.len}),
+            });
+        }
+    }
+
+    const stats = if (options.stats) DoctorStats{
+        .retries_total = try store.index.readMetaCounter(store_mod.finalize_retries_metric_key),
+        .objects_written_total = try store.index.readMetaCounter(store_mod.finalize_objects_metric_key),
+    } else null;
+
+    const last_hook_error = if (options.last_hook_error) try readLastHookErrorRaw(io, aa, store.root, &checks, gpa) else null;
+
+    try appendConfigTmpCheck(io, gpa, aa, home, "claude", ".claude/settings.json", &checks);
+    try appendConfigTmpCheck(io, gpa, aa, home, "codex", ".codex/hooks.json", &checks);
+    try appendConfigTmpCheck(io, gpa, aa, home, "gemini", ".gemini/settings.json", &checks);
+    try checks.append(gpa, try collectAgentCheck(io, gpa, aa, home, exe, "claude", ".claude/settings.json"));
+    try checks.append(gpa, try collectAgentCheck(io, gpa, aa, home, exe, "codex", ".codex/hooks.json"));
+    try checks.append(gpa, try collectAgentCheck(io, gpa, aa, home, exe, "gemini", ".gemini/settings.json"));
+
+    const check_slice = try checks.toOwnedSlice(gpa);
+    defer gpa.free(check_slice);
+
+    const lock_slice: ?[]const LockInfo = if (options.locks)
+        try lock_infos.toOwnedSlice(gpa)
+    else
+        null;
+    defer if (lock_slice) |slice| gpa.free(slice);
+
+    const healthy = !hasErrorChecks(check_slice);
+    try output_mod.writeEnvelope(stdout, usage.name, .{
+        .healthy = healthy,
+        .checks = check_slice,
+        .locks = lock_slice,
+        .stats = stats,
+        .last_hook_error = last_hook_error,
+    });
+    try stdout.flush();
+    if (!healthy) std.process.exit(1);
+}
+
+fn hasErrorChecks(checks: []const output_mod.Check) bool {
+    for (checks) |check| {
+        if (check.status == .@"error") return true;
+    }
+    return false;
 }
 
 fn printFinalizeStats(store: *const store_mod.Store, stdout: *std.Io.File.Writer) !void {
@@ -298,6 +503,60 @@ fn checkLocks(
     }
 }
 
+fn collectLockInfos(
+    io: std.Io,
+    gpa: std.mem.Allocator,
+    aa: std.mem.Allocator,
+    store_root: std.Io.Dir,
+    lock_infos: *std.ArrayList(LockInfo),
+) !void {
+    var root_iter_dir = try store_root.openDir(io, ".", .{ .iterate = true });
+    defer root_iter_dir.close(io);
+
+    var walker = try root_iter_dir.walk(gpa);
+    defer walker.deinit();
+
+    const now_ms = std.Io.Timestamp.now(io, .real).toMilliseconds();
+    while (try walker.next(io)) |entry| {
+        if (entry.kind != .file) continue;
+        if (!std.mem.endsWith(u8, entry.path, ".lock")) continue;
+
+        const path = try aa.dupe(u8, entry.path);
+        const data = store_root.readFileAlloc(io, entry.path, gpa, .unlimited) catch {
+            try lock_infos.append(gpa, .{
+                .path = path,
+                .status = .warn,
+                .message = "Lock file is unreadable.",
+            });
+            continue;
+        };
+        defer gpa.free(data);
+
+        const text = std.mem.trim(u8, data, "\n\r ");
+        var parsed = std.json.parseFromSlice(file_lock_mod.LockRecord, gpa, text, .{
+            .allocate = .alloc_always,
+            .ignore_unknown_fields = true,
+        }) catch {
+            try lock_infos.append(gpa, .{
+                .path = path,
+                .status = .warn,
+                .message = "Lock file is malformed.",
+            });
+            continue;
+        };
+        defer parsed.deinit();
+
+        try lock_infos.append(gpa, .{
+            .path = path,
+            .status = .info,
+            .message = "Lock file present.",
+            .age_ms = @max(0, now_ms - parsed.value.started_at),
+            .pid = parsed.value.pid,
+            .exe_path = try aa.dupe(u8, parsed.value.exe_path),
+        });
+    }
+}
+
 fn collectStagingDiagnostics(
     io: std.Io,
     gpa: std.mem.Allocator,
@@ -340,6 +599,191 @@ fn collectStagingDiagnostics(
         diag.pending_json += 1;
     }
     return diag;
+}
+
+fn appendConfigTmpCheck(
+    io: std.Io,
+    gpa: std.mem.Allocator,
+    aa: std.mem.Allocator,
+    home: []const u8,
+    agent_name: []const u8,
+    rel_config: []const u8,
+    checks: *std.ArrayList(output_mod.Check),
+) !void {
+    const rel_dir = std.fs.path.dirname(rel_config) orelse return;
+    const file_base = std.fs.path.basename(rel_config);
+    const prefix = try std.fmt.allocPrint(gpa, "{s}.agit-tmp-", .{file_base});
+    defer gpa.free(prefix);
+
+    const dir_path = try std.mem.concat(gpa, u8, &.{ home, "/", rel_dir });
+    defer gpa.free(dir_path);
+
+    var config_dir = std.Io.Dir.cwd().openDir(io, dir_path, .{ .iterate = true }) catch |err| switch (err) {
+        error.FileNotFound, error.NotDir => return,
+        else => {
+            try checks.append(gpa, .{
+                .code = "agent_config_temp_scan_failed",
+                .status = .warn,
+                .message = try std.fmt.allocPrint(aa, "{s} config temp files could not be scanned.", .{agent_name}),
+                .hint = @errorName(err),
+                .path = try aa.dupe(u8, dir_path),
+            });
+            return;
+        },
+    };
+    defer config_dir.close(io);
+
+    var walker = try config_dir.walk(gpa);
+    defer walker.deinit();
+
+    var leftover_count: usize = 0;
+    while (try walker.next(io)) |entry| {
+        if (entry.kind != .file) continue;
+        const name = std.fs.path.basename(entry.path);
+        if (std.mem.startsWith(u8, name, prefix)) leftover_count += 1;
+    }
+
+    if (leftover_count > 0) {
+        try checks.append(gpa, .{
+            .code = "agent_config_temp_files",
+            .status = .@"error",
+            .message = try std.fmt.allocPrint(aa, "{s} has {d} leftover crash-temp config file(s).", .{
+                agent_name,
+                leftover_count,
+            }),
+            .hint = try aa.dupe(u8, prefix),
+            .path = try aa.dupe(u8, dir_path),
+        });
+    }
+}
+
+fn collectAgentCheck(
+    io: std.Io,
+    gpa: std.mem.Allocator,
+    aa: std.mem.Allocator,
+    home: []const u8,
+    exe: []const u8,
+    agent_name: []const u8,
+    rel_config: []const u8,
+) !output_mod.Check {
+    if (!detectBinary(io, gpa, agent_name)) {
+        return .{
+            .code = "agent_not_installed",
+            .status = .info,
+            .message = try std.fmt.allocPrint(aa, "{s} binary not found on PATH.", .{agent_name}),
+        };
+    }
+
+    const config_path = try std.mem.concat(gpa, u8, &.{ home, "/", rel_config });
+    defer gpa.free(config_path);
+
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const scratch = arena.allocator();
+
+    const text = (readFileAllocOrNull(io, scratch, config_path) catch |err| {
+        return .{
+            .code = "agent_config_unreadable",
+            .status = .@"error",
+            .message = try std.fmt.allocPrint(aa, "{s} config is unreadable.", .{agent_name}),
+            .hint = @errorName(err),
+            .path = try aa.dupe(u8, config_path),
+        };
+    }) orelse {
+        return .{
+            .code = "agent_config_missing",
+            .status = .@"error",
+            .message = try std.fmt.allocPrint(aa, "{s} config file not found.", .{agent_name}),
+            .path = try aa.dupe(u8, config_path),
+        };
+    };
+
+    const root_val = std.json.parseFromSliceLeaky(std.json.Value, scratch, text, .{
+        .allocate = .alloc_always,
+    }) catch {
+        return .{
+            .code = "agent_config_malformed",
+            .status = .@"error",
+            .message = try std.fmt.allocPrint(aa, "{s} config is not valid JSON.", .{agent_name}),
+            .path = try aa.dupe(u8, config_path),
+        };
+    };
+
+    if (root_val != .object) {
+        return .{
+            .code = "agent_config_not_object",
+            .status = .@"error",
+            .message = try std.fmt.allocPrint(aa, "{s} config root is not an object.", .{agent_name}),
+            .path = try aa.dupe(u8, config_path),
+        };
+    }
+
+    const agit = root_val.object.get("_agit");
+    if (agit == null or agit.? != .object) {
+        return .{
+            .code = "agent_not_initialized",
+            .status = .@"error",
+            .message = try std.fmt.allocPrint(aa, "{s} config does not contain agit metadata.", .{agent_name}),
+            .path = try aa.dupe(u8, config_path),
+        };
+    }
+
+    const bin_val = agit.?.object.get("binary");
+    if (bin_val == null or bin_val.? != .string) {
+        return .{
+            .code = "agent_binary_missing",
+            .status = .@"error",
+            .message = try std.fmt.allocPrint(aa, "{s} config is missing _agit.binary.", .{agent_name}),
+            .path = try aa.dupe(u8, config_path),
+        };
+    }
+
+    const stored = bin_val.?.string;
+    if (std.mem.eql(u8, stored, exe)) {
+        return .{
+            .code = "agent_hooks_configured",
+            .status = .ok,
+            .message = try std.fmt.allocPrint(aa, "{s} hooks configured for the current agit binary.", .{agent_name}),
+            .path = try aa.dupe(u8, config_path),
+        };
+    }
+
+    return .{
+        .code = "agent_binary_mismatch",
+        .status = .@"error",
+        .message = try std.fmt.allocPrint(aa, "{s} config points at a different agit binary.", .{agent_name}),
+        .hint = try std.fmt.allocPrint(aa, "config={s} current={s}", .{ stored, exe }),
+        .path = try aa.dupe(u8, config_path),
+    };
+}
+
+fn readLastHookErrorRaw(
+    io: std.Io,
+    aa: std.mem.Allocator,
+    store_root: std.Io.Dir,
+    checks: *std.ArrayList(output_mod.Check),
+    gpa: std.mem.Allocator,
+) !?[]const u8 {
+    const content = store_root.readFileAlloc(io, "log/hook-error.log", gpa, .unlimited) catch |err| switch (err) {
+        error.FileNotFound => return null,
+        else => return err,
+    };
+    defer gpa.free(content);
+
+    const line = lastNonEmptyLine(content) orelse return null;
+    var parsed = std.json.parseFromSlice(std.json.Value, gpa, line, .{
+        .allocate = .alloc_always,
+    }) catch {
+        try checks.append(gpa, .{
+            .code = "last_hook_error_unreadable",
+            .status = .warn,
+            .message = "Latest hook error entry is not valid JSON.",
+            .path = ".agit/log/hook-error.log",
+        });
+        return try aa.dupe(u8, line);
+    };
+    defer parsed.deinit();
+    return try aa.dupe(u8, line);
 }
 
 fn checkAgent(

@@ -9,7 +9,7 @@ pub const usage = help_mod.UsageSpec{
     .synopsis = "[OPTIONS]",
     .description = "Remove agit hooks from agent configurations.",
     .options = &.{
-        .{ .flag = "-h, --help", .description = "Display this help and exit." },
+        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
     },
     .examples = &.{
         .{ .description = "remove all hooks", .command = "" },

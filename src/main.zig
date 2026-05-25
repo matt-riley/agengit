@@ -3,6 +3,8 @@ const clap = @import("clap");
 const fs_mod = @import("util/fs.zig");
 const file_lock_mod = @import("util/file_lock.zig");
 const hook_mod = @import("hook.zig");
+const registry = @import("cli/registry.zig");
+const version_mod = @import("version.zig");
 
 const cli = struct {
     const help = @import("cli/help.zig");
@@ -17,13 +19,14 @@ const cli = struct {
     const cat = @import("cli/cat.zig");
     const completion = @import("cli/completion.zig");
     const reindex = @import("cli/reindex.zig");
+    const version = @import("cli/version.zig");
     const claude_hook = @import("cli/claude_hook.zig");
     const claude_tool_batch_hook = @import("cli/claude_tool_batch_hook.zig");
     const codex_hook = @import("cli/codex_hook.zig");
     const gemini_hook = @import("cli/gemini_hook.zig");
 };
 
-pub const version = "1.12.0"; // x-release-please-version
+pub const version = version_mod.value;
 
 const SubCommand = enum {
     init,
@@ -102,8 +105,7 @@ pub fn main(init: std.process.Init) !void {
 
     switch (cmd) {
         .version => {
-            try stdout.interface.print("agit {s}\n", .{version});
-            try stdout.flush();
+            try cli.version.run(init.io, &iter);
         },
         .help => {
             try printUsage(&stdout);
@@ -130,32 +132,7 @@ pub fn main(init: std.process.Init) !void {
 }
 
 fn printUsage(w: *std.Io.File.Writer) !void {
-    try w.interface.writeAll(
-        \\agit - AI agent version control
-        \\
-        \\Usage: agit [options] <command> [command-options]
-        \\
-        \\Options:
-        \\  -h, --help     Display this help and exit.
-        \\  -V, --version  Print version and exit.
-        \\
-        \\Commands:
-        \\  init          Set up agit in the current repository
-        \\  uninstall     Remove agit hooks from agent configurations
-        \\  doctor        Check agent hook configurations and store health
-        \\  status        Show current repository state
-        \\  sessions      List recorded agent sessions
-        \\  log           Show step history for a session
-        \\  show          Show details of a step
-        \\  blame         Show per-line step attribution for a file
-        \\  cat           Print a raw object by hash
-        \\  reindex       Rebuild the index from the object store
-        \\  version       Print version information
-        \\  completion    Generate shell completion scripts
-        \\
-        \\Run 'agit <command> --help' for command-specific help.
-        \\
-    );
+    try cli.help.renderTopLevelUsage(w, &registry.public_commands);
 }
 
 test "version is non-empty" {
@@ -180,6 +157,8 @@ test {
     _ = @import("recorder.zig");
     _ = @import("hook.zig");
     _ = @import("cli/help.zig");
+    _ = @import("cli/output.zig");
+    _ = @import("cli/registry.zig");
     _ = @import("cli/claude_hook.zig");
     _ = @import("cli/claude_tool_batch_hook.zig");
     _ = @import("cli/codex_hook.zig");
@@ -188,4 +167,5 @@ test {
     _ = @import("cli/init.zig");
     _ = @import("cli/uninstall.zig");
     _ = @import("cli/doctor.zig");
+    _ = @import("cli/version.zig");
 }

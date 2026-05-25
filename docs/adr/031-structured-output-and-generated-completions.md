@@ -1,6 +1,6 @@
 # ADR 031: Structured output and generated completions
 
-**Status:** Proposed
+**Status:** Implemented
 **Date:** 2026-05-25
 
 ## Context

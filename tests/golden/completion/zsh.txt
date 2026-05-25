@@ -1,0 +1,95 @@
+#compdef agit
+_agit() {
+    local context state line
+    local -a commands
+    commands=(
+        'init:Set up agit in the current repository'
+        'uninstall:Remove agit hooks from agent configurations'
+        'doctor:Check agent hook configurations and store health'
+        'status:Show current repository state'
+        'sessions:List recorded agent sessions'
+        'log:Show step history for a session'
+        'show:Show details of a step'
+        'blame:Show per-line step attribution for a file'
+        'cat:Print a raw object by hash'
+        'reindex:Rebuild the index from the object store'
+        'version:Print version information'
+        'completion:Generate shell completion scripts'
+    )
+    _arguments -C \
+        '-h[Display this help and exit.]' \
+        '-V[Print version and exit.]' \
+        '1:command:->command' \
+        '*::arg:->args'
+
+    case $state in
+        command)
+            _describe 'agit command' commands
+            ;;
+        args)
+            case $words[2] in
+                init)
+                    _arguments \
+                        '--agent[Install only the specified agent (claude, codex, gemini). Can be repeated.]:name:(claude codex gemini)' \
+                        '--dry-run[Show what would be installed without making changes.]' \
+                        '--force[Back up and replace malformed/non-object existing JSON config.]' \
+                        '--help[Display this help and exit.]'
+                    ;;
+                uninstall)
+                    _arguments \
+                        '--help[Display this help and exit.]'
+                    ;;
+                doctor)
+                    _arguments \
+                        '--json[Render doctor checks as structured JSON.]' \
+                        '--locks[List currently held lock files with age and executable path.]' \
+                        '--stats[Print finalize retry/object-write counters.]' \
+                        '--last-hook-error[Pretty-print the newest hook-error log entry.]' \
+                        '--help[Display this help and exit.]'
+                    ;;
+                status)
+                    _arguments \
+                        '--json[Render the status as structured JSON.]' \
+                        '--help[Display this help and exit.]'
+                    ;;
+                sessions)
+                    _arguments \
+                        '--json[Render the session list as structured JSON.]' \
+                        '--help[Display this help and exit.]'
+                    ;;
+                log)
+                    _arguments \
+                        '--json[Render the session log as structured JSON.]' \
+                        '--help[Display this help and exit.]'
+                    ;;
+                show)
+                    _arguments \
+                        '--json[Render the step details as structured JSON.]' \
+                        '--help[Display this help and exit.]'
+                    ;;
+                blame)
+                    _arguments \
+                        '--help[Display this help and exit.]'
+                    ;;
+                cat)
+                    _arguments \
+                        '--help[Display this help and exit.]'
+                    ;;
+                reindex)
+                    _arguments \
+                        '--from[Incrementally replay steps newer than <HASH> that are reachable from session refs.]:HASH' \
+                        '--help[Display this help and exit.]'
+                    ;;
+                version)
+                    _arguments \
+                        '--help[Display this help and exit.]'
+                    ;;
+                completion)
+                    _arguments \
+                        '--help[Display this help and exit.]'
+                    ;;
+            esac
+            ;;
+    esac
+}
+_agit "$@"

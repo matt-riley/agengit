@@ -2,52 +2,52 @@ const std = @import("std");
 const store_mod = @import("../store/store.zig");
 const status = @import("status.zig");
 const help_mod = @import("help.zig");
+const output_mod = @import("output.zig");
 
 pub const usage = help_mod.UsageSpec{
     .name = "sessions",
     .synopsis = "[OPTIONS]",
     .description = "List recorded agent sessions from the index.",
     .options = &.{
-        .{ .flag = "-h, --help", .description = "Display this help and exit." },
+        .{ .long = "json", .description = "Render the session list as structured JSON." },
+        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
     },
     .examples = &.{
         .{ .description = "list all sessions", .command = "" },
     },
 };
 
-// Phase 6 implementation: list recorded agent sessions from the index.
+const SessionsOptions = struct {
+    format: output_mod.Format = .human,
+};
+
 pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator) !void {
     var stdout_buf: [8192]u8 = undefined;
     var stdout = std.Io.File.stdout().writer(io, &stdout_buf);
+    const options = parseOptions(iter, &stdout) catch |err| switch (err) {
+        error.HelpShown => return,
+        else => return err,
+    };
 
-    // Parse --help / -h
-    var help_requested = false;
-    while (iter.next()) |arg| {
-        if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
-            help_requested = true;
-            break;
-        }
-    }
-
-    if (help_requested) {
-        try help_mod.renderUsage(&stdout, usage);
-        try stdout.flush();
-        return;
-    }
-
-    var store = (try status.openStoreOrDie(io, gpa, &stdout)) orelse return;
+    var store = try status.openStoreOrExit(io, gpa, &stdout, options.format, usage.name);
     defer store.deinit(io);
 
     const sessions = try store.index.listSessions(gpa);
     defer store_mod.freeSessionRows(gpa, sessions);
 
+    switch (options.format) {
+        .human => try writeHuman(&stdout, sessions),
+        .json => try writeJson(&stdout, sessions),
+    }
+    try stdout.flush();
+}
+
+fn writeHuman(stdout: *std.Io.File.Writer, sessions: []const store_mod.SessionRow) !void {
     if (sessions.len == 0) {
         try stdout.interface.writeAll("No sessions recorded yet. Run `agit init` and record some activity.\n");
-        try stdout.flush();
         return;
     }
 
-    // Column widths: origin 30, session_id 24, head 8, updated 19
     try stdout.interface.writeAll("ORIGIN                         SESSION                  HEAD      UPDATED\n");
     try stdout.interface.writeAll("────────────────────────────── ──────────────────────── ──────── ───────────────────\n");
 
@@ -62,5 +62,36 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
             updated,
         });
     }
-    try stdout.flush();
+}
+
+fn writeJson(stdout: *std.Io.File.Writer, sessions: []const store_mod.SessionRow) !void {
+    try output_mod.writeEnvelope(stdout, usage.name, .{
+        .sessions = sessions,
+    });
+}
+
+fn parseOptions(iter: *std.process.Args.Iterator, stdout: *std.Io.File.Writer) !SessionsOptions {
+    var options: SessionsOptions = .{};
+    while (iter.next()) |arg| {
+        if (std.mem.eql(u8, arg, "--json")) {
+            options.format = .json;
+        } else if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
+            try help_mod.renderUsage(stdout, usage);
+            try stdout.flush();
+            return error.HelpShown;
+        } else {
+            try status.writeDiagnostic(stdout, options.format, usage.name, .{
+                .code = "invalid_argument",
+                .message = "Unknown option.",
+                .hint = arg,
+            });
+            if (options.format == .human) {
+                try stdout.interface.writeAll("\n");
+                try help_mod.renderUsage(stdout, usage);
+            }
+            try stdout.flush();
+            std.process.exit(1);
+        }
+    }
+    return options;
 }

@@ -1,0 +1,56 @@
+# agit bash completion
+_agit_complete() {
+    local cur prev cmd
+    cur="${COMP_WORDS[COMP_CWORD]}"
+    prev="${COMP_WORDS[COMP_CWORD-1]}"
+    cmd="${COMP_WORDS[1]}"
+
+    if [[ $COMP_CWORD -eq 1 ]]; then
+        COMPREPLY=($(compgen -W "-h --help -V --version init uninstall doctor status sessions log show blame cat reindex version completion" -- "$cur"))
+        return 0
+    fi
+
+    case "$cmd" in
+    init)
+        if [[ "$prev" == "--agent" ]]; then
+            COMPREPLY=($(compgen -W "claude codex gemini" -- "$cur"))
+            return 0
+        fi
+        COMPREPLY=($(compgen -W "--agent --dry-run --force -h --help " -- "$cur"))
+        ;;
+    uninstall)
+        COMPREPLY=($(compgen -W "-h --help " -- "$cur"))
+        ;;
+    doctor)
+        COMPREPLY=($(compgen -W "--json --locks --stats --last-hook-error -h --help " -- "$cur"))
+        ;;
+    status)
+        COMPREPLY=($(compgen -W "--json -h --help " -- "$cur"))
+        ;;
+    sessions)
+        COMPREPLY=($(compgen -W "--json -h --help " -- "$cur"))
+        ;;
+    log)
+        COMPREPLY=($(compgen -W "--json -h --help " -- "$cur"))
+        ;;
+    show)
+        COMPREPLY=($(compgen -W "--json -h --help " -- "$cur"))
+        ;;
+    blame)
+        COMPREPLY=($(compgen -W "-h --help " -- "$cur"))
+        ;;
+    cat)
+        COMPREPLY=($(compgen -W "-h --help " -- "$cur"))
+        ;;
+    reindex)
+        COMPREPLY=($(compgen -W "--from -h --help " -- "$cur"))
+        ;;
+    version)
+        COMPREPLY=($(compgen -W "-h --help " -- "$cur"))
+        ;;
+    completion)
+        COMPREPLY=($(compgen -W "-h --help " -- "$cur"))
+        ;;
+    esac
+}
+complete -F _agit_complete agit

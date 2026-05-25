@@ -5,6 +5,8 @@ DESCRIPTION:
     Show step history for a session.
 
 OPTIONS:
+    --json
+        Render the session log as structured JSON.
     -h, --help
         Display this help and exit.
 

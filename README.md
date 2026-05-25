@@ -74,24 +74,32 @@ overwrite it unless you run `agit init --force`.
 
 ```sh
 agit doctor                 # store + hook health checks
+agit doctor --json          # machine-readable health checks
 agit doctor --locks         # include lock-file details
 agit doctor --stats         # print finalize/object-write counters
 agit doctor --last-hook-error  # pretty-print latest hook failure entry
 agit status                 # summarize captured state
+agit status --json          # structured repository summary
 agit sessions               # list sessions
+agit sessions --json        # structured session list
 agit log                    # latest session timeline
+agit log --json             # structured latest session timeline
 agit log <session-id>       # specific session timeline
 agit log claude/<session-id>
 agit show <step-hash>       # detailed step view
+agit show --json <step-hash>  # structured step view
 agit cat <hash>             # raw object payload
 agit reindex                # rebuild index from object store
 agit reindex --from <hash>  # incremental replay
-agit completion zsh         # shell completions (bash/zsh/fish/nushell)
+agit completion zsh         # generated shell completions (bash/zsh/fish/nushell)
 agit uninstall              # remove agit-managed hooks
 ```
 
 `agit blame` is present but currently reports that blame recording is not yet
 available.
+
+Structured CLI output uses the `cli-json-v1` envelope documented in
+[`docs/format/cli-json-v1.md`](docs/format/cli-json-v1.md).
 
 ## Store layout
 

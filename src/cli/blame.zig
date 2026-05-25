@@ -8,7 +8,7 @@ pub const usage = help_mod.UsageSpec{
     .synopsis = "[OPTIONS] <FILE>",
     .description = "Show per-line step attribution for a file path.",
     .options = &.{
-        .{ .flag = "-h, --help", .description = "Display this help and exit." },
+        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
     },
     .examples = &.{
         .{ .description = "show blame for a file", .command = "src/main.zig" },

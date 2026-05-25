@@ -5,6 +5,8 @@ DESCRIPTION:
     Show current repository state and agit store statistics.
 
 OPTIONS:
+    --json
+        Render the status as structured JSON.
     -h, --help
         Display this help and exit.
 
