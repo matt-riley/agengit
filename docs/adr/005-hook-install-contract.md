@@ -24,13 +24,17 @@ Those files may already contain carefully arranged user settings. A recorder tha
 - write the absolute path to the current `agit` binary;
 - add `_agit` metadata so `doctor` and `uninstall` can recognize managed config;
 - preserve unrelated user-owned config keys;
-- be safe to run more than once.
+- be safe to run more than once;
+- emit each agent's native hook schema. In particular, Codex `hooks.json`
+  events are arrays of matcher groups, each with a nested `hooks` handler array.
 
 `agit uninstall` must:
 
 - remove only hooks that match the recorded `agit` binary metadata;
 - remove `_agit` metadata when managed hooks are gone;
 - preserve user-owned settings and hooks;
+- understand both the current Codex matcher-group shape and the older
+  object-valued Codex/Gemini command shape;
 - leave `.agit/` data in place.
 
 ## Consequences

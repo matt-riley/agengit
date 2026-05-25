@@ -424,9 +424,9 @@ fn makeClaudeList(aa: std.mem.Allocator, exe: []const u8, args: []const []const 
 /// Merge agit-managed entries into Codex hooks.json.
 fn setCodexHooks(aa: std.mem.Allocator, root: *std.json.ObjectMap, exe: []const u8) !void {
     var hooks_obj = std.json.ObjectMap.empty;
-    try hooks_obj.put(aa, "UserPromptSubmit", try makeCodexHook(aa, exe, "codex-hook"));
-    try hooks_obj.put(aa, "PostToolUse", try makeCodexHook(aa, exe, "codex-hook"));
-    try hooks_obj.put(aa, "Stop", try makeCodexHook(aa, exe, "codex-hook"));
+    try hooks_obj.put(aa, "UserPromptSubmit", try makeCodexList(aa, exe, "codex-hook"));
+    try hooks_obj.put(aa, "PostToolUse", try makeCodexList(aa, exe, "codex-hook"));
+    try hooks_obj.put(aa, "Stop", try makeCodexList(aa, exe, "codex-hook"));
 
     if (root.get("hooks")) |existing| {
         if (existing == .object) {
@@ -445,11 +445,22 @@ fn setCodexHooks(aa: std.mem.Allocator, root: *std.json.ObjectMap, exe: []const 
     try root.put(aa, "_agit", std.json.Value{ .object = agit_meta });
 }
 
-fn makeCodexHook(aa: std.mem.Allocator, exe: []const u8, subcmd: []const u8) !std.json.Value {
+fn makeCodexList(aa: std.mem.Allocator, exe: []const u8, subcmd: []const u8) !std.json.Value {
     const cmd = try std.mem.concat(aa, u8, &.{ exe, " ", subcmd });
-    var obj = std.json.ObjectMap.empty;
-    try obj.put(aa, "command", std.json.Value{ .string = cmd });
-    return std.json.Value{ .object = obj };
+    var handler_obj = std.json.ObjectMap.empty;
+    try handler_obj.put(aa, "type", std.json.Value{ .string = "command" });
+    try handler_obj.put(aa, "command", std.json.Value{ .string = cmd });
+
+    var handlers = std.json.Array.init(aa);
+    try handlers.append(std.json.Value{ .object = handler_obj });
+
+    var group_obj = std.json.ObjectMap.empty;
+    try group_obj.put(aa, "hooks", std.json.Value{ .array = handlers });
+
+    var groups = std.json.Array.init(aa);
+    try groups.append(std.json.Value{ .object = group_obj });
+
+    return std.json.Value{ .array = groups };
 }
 
 /// Merge agit-managed entries into Gemini settings.json.
@@ -556,6 +567,18 @@ test "setCodexHooks installs all managed events on empty root" {
     try std.testing.expect(hooks.get("UserPromptSubmit") != null);
     try std.testing.expect(hooks.get("PostToolUse") != null);
     try std.testing.expect(hooks.get("Stop") != null);
+    const user_prompt = hooks.get("UserPromptSubmit").?;
+    try std.testing.expect(user_prompt == .array);
+    try std.testing.expectEqual(@as(usize, 1), user_prompt.array.items.len);
+    const group = user_prompt.array.items[0];
+    try std.testing.expect(group == .object);
+    const handlers = group.object.get("hooks") orelse return error.MissingCodexHandlers;
+    try std.testing.expect(handlers == .array);
+    try std.testing.expectEqual(@as(usize, 1), handlers.array.items.len);
+    const handler = handlers.array.items[0];
+    try std.testing.expect(handler == .object);
+    try std.testing.expectEqualStrings("command", handler.object.get("type").?.string);
+    try std.testing.expectEqualStrings("/bin/agit codex-hook", handler.object.get("command").?.string);
     try std.testing.expectEqualStrings("/bin/agit", root.get("_agit").?.object.get("binary").?.string);
 }
 
