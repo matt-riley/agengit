@@ -19,6 +19,8 @@ Those files may already contain carefully arranged user settings. A recorder tha
 
 - detect supported agent binaries on `PATH`;
 - create a backup before changing an existing config file;
+- fail loudly if that backup or the final config write fails;
+- refuse malformed or non-object existing JSON unless the user explicitly chooses the repair path;
 - write the absolute path to the current `agit` binary;
 - add `_agit` metadata so `doctor` and `uninstall` can recognize managed config;
 - preserve unrelated user-owned config keys;
@@ -34,6 +36,7 @@ Those files may already contain carefully arranged user settings. A recorder tha
 ## Consequences
 
 - Users can try `agit` without handing it the keys to every config cupboard.
+- A malformed config now blocks installation by default; `agit init --force` is the explicit "back up and replace it" path.
 - Binary moves can make hook paths stale; `agit doctor` should report that mismatch.
 - Backups may remain after uninstall, which is preferable to losing user config.
 - Hook config formats should stay as close as possible to each agent's native shape.

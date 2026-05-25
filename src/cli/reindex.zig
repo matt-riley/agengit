@@ -35,7 +35,7 @@ const ReindexStats = struct {
     steps: usize,
 };
 
-fn reindex(io: std.Io, gpa: std.mem.Allocator, store: *store_mod.Store) !ReindexStats {
+pub fn reindex(io: std.Io, gpa: std.mem.Allocator, store: *store_mod.Store) !ReindexStats {
     var stats = ReindexStats{ .sessions = 0, .steps = 0 };
 
     // Walk every object in the store and parse those with type=="step".
@@ -83,7 +83,7 @@ fn reindex(io: std.Io, gpa: std.mem.Allocator, store: *store_mod.Store) !Reindex
         defer parsed.deinit();
 
         const step = parsed.value;
-        if (!std.mem.eql(u8, step.@"type", "step")) continue;
+        if (!std.mem.eql(u8, step.type, "step")) continue;
 
         // Ensure the session row exists with a null HEAD for now;
         // we will fix up the real HEAD after the full walk.
@@ -132,4 +132,53 @@ fn reindex(io: std.Io, gpa: std.mem.Allocator, store: *store_mod.Store) !Reindex
     }
 
     return stats;
+}
+
+test "reindex repairs missing rows from objects and refs" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+
+    var store = try store_mod.Store.open(io, tmp.dir, gpa);
+    defer store.deinit(io);
+
+    const step = object.Step{
+        .parent = null,
+        .tree = "a" ** 64,
+        .session_id = "sess-1",
+        .origin = "github.com/u/r",
+        .turn_id = "t1",
+        .causes = &.{},
+        .timestamp = 1000,
+        .messages = &.{.{ .role = "assistant", .content = "ok" }},
+        .tool_calls = &.{},
+    };
+
+    const h = try store.writeStep(io, gpa, step);
+    const ok = try store.casRef(io, gpa, step.origin, step.session_id, null, h, &step);
+    try std.testing.expect(ok);
+
+    try store.index.truncate();
+
+    const stats = try reindex(io, gpa, &store);
+    try std.testing.expectEqual(@as(usize, 1), stats.sessions);
+    try std.testing.expectEqual(@as(usize, 1), stats.steps);
+
+    const h_hex = h.toHex();
+    const row = try store.index.db.row(
+        "select head_hash from sessions where origin=? and session_id=?",
+        .{ step.origin, step.session_id },
+    );
+    try std.testing.expect(row != null);
+    defer row.?.deinit();
+    try std.testing.expectEqualStrings(&h_hex, row.?.get([]const u8, 0));
+
+    const msg_row = try store.index.db.row(
+        "select content from messages where step_hash=? and seq=0",
+        .{&h_hex},
+    );
+    try std.testing.expect(msg_row != null);
+    defer msg_row.?.deinit();
+    try std.testing.expectEqualStrings("ok", msg_row.?.get([]const u8, 0));
 }

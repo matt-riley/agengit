@@ -13,7 +13,7 @@ pub const TreeEntry = struct {
 
 /// A directory snapshot: an ordered list of file entries.
 pub const Tree = struct {
-    @"type": []const u8 = "tree",
+    type: []const u8 = "tree",
     entries: []const TreeEntry,
 };
 
@@ -41,7 +41,7 @@ pub const StepToolCall = struct {
 /// `messages` and `tool_calls` default to empty so that step objects written
 /// before these fields were added can be parsed without error.
 pub const Step = struct {
-    @"type": []const u8 = "step",
+    type: []const u8 = "step",
     parent: ?[]const u8, // 64-char hex or null
     tree: []const u8, // 64-char hex
     session_id: []const u8,

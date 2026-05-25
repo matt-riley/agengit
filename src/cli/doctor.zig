@@ -28,6 +28,9 @@ pub fn run(
     defer store.deinit(io);
     try stdout.interface.writeAll("  ✓ .agit/ store: ok\n");
 
+    try checkAgitIgnore(io, std.Io.Dir.cwd(), gpa, &stdout);
+    try checkStaging(io, gpa, store.root, &stdout);
+
     // --- Agent checks ---
     try checkAgent(io, gpa, home, exe, "claude", ".claude/settings.json", &stdout);
     try checkAgent(io, gpa, home, exe, "codex", ".codex/hooks.json", &stdout);
@@ -41,6 +44,131 @@ fn detectBinary(io: std.Io, gpa: std.mem.Allocator, name: []const u8) bool {
     defer gpa.free(result.stdout);
     defer gpa.free(result.stderr);
     return result.term == .exited and result.term.exited == 0;
+}
+
+const AgitIgnoreDiagnostics = union(enum) {
+    missing,
+    readable: usize,
+    unreadable: anyerror,
+};
+
+const StagingDiagnostics = struct {
+    pending_json: usize = 0,
+    corrupt_json: usize = 0,
+    quarantined: usize = 0,
+    unreadable: usize = 0,
+};
+
+fn checkAgitIgnore(
+    io: std.Io,
+    repo_dir: std.Io.Dir,
+    gpa: std.mem.Allocator,
+    stdout: *std.Io.File.Writer,
+) !void {
+    const diag = try collectAgitIgnoreDiagnostics(io, repo_dir, gpa);
+    switch (diag) {
+        .missing => try stdout.interface.writeAll("  - .agitignore: not present (using default snapshot skips)\n"),
+        .readable => |rule_count| try stdout.interface.print(
+            "  ✓ .agitignore: readable ({d} custom rule{s})\n",
+            .{ rule_count, if (rule_count == 1) "" else "s" },
+        ),
+        .unreadable => |err| try stdout.interface.print(
+            "  ✗ .agitignore: unreadable ({s}); snapshots fall back to default skips\n",
+            .{@errorName(err)},
+        ),
+    }
+}
+
+fn collectAgitIgnoreDiagnostics(
+    io: std.Io,
+    repo_dir: std.Io.Dir,
+    gpa: std.mem.Allocator,
+) !AgitIgnoreDiagnostics {
+    const data = repo_dir.readFileAlloc(io, ".agitignore", gpa, .unlimited) catch |err| switch (err) {
+        error.FileNotFound => return .missing,
+        else => return .{ .unreadable = err },
+    };
+    defer gpa.free(data);
+
+    var rule_count: usize = 0;
+    var it = std.mem.splitScalar(u8, data, '\n');
+    while (it.next()) |raw| {
+        const trimmed = std.mem.trimEnd(u8, std.mem.trim(u8, raw, " \r\t"), "/");
+        if (trimmed.len == 0 or trimmed[0] == '#') continue;
+        rule_count += 1;
+    }
+    return .{ .readable = rule_count };
+}
+
+fn checkStaging(
+    io: std.Io,
+    gpa: std.mem.Allocator,
+    store_root: std.Io.Dir,
+    stdout: *std.Io.File.Writer,
+) !void {
+    const diag = try collectStagingDiagnostics(io, gpa, store_root);
+    if (diag.corrupt_json > 0 or diag.unreadable > 0) {
+        try stdout.interface.print(
+            "  ✗ .agit/tmp staging: {d} corrupt, {d} unreadable file{s}; inspect .agit/tmp and .agit/log/hook-error.log\n",
+            .{ diag.corrupt_json, diag.unreadable, if (diag.corrupt_json + diag.unreadable == 1) "" else "s" },
+        );
+    } else if (diag.quarantined > 0) {
+        try stdout.interface.print(
+            "  ✗ .agit/tmp staging: {d} quarantined corrupt file{s}; inspect .agit/tmp\n",
+            .{ diag.quarantined, if (diag.quarantined == 1) "" else "s" },
+        );
+    } else if (diag.pending_json > 0) {
+        try stdout.interface.print(
+            "  - .agit/tmp staging: {d} pending capture file{s}\n",
+            .{ diag.pending_json, if (diag.pending_json == 1) "" else "s" },
+        );
+    } else {
+        try stdout.interface.writeAll("  ✓ .agit/tmp staging: ok\n");
+    }
+}
+
+fn collectStagingDiagnostics(
+    io: std.Io,
+    gpa: std.mem.Allocator,
+    store_root: std.Io.Dir,
+) !StagingDiagnostics {
+    var tmp_dir = store_root.openDir(io, "tmp", .{ .iterate = true }) catch |err| switch (err) {
+        error.FileNotFound, error.NotDir => return .{},
+        else => return err,
+    };
+    defer tmp_dir.close(io);
+
+    var walker = try tmp_dir.walk(gpa);
+    defer walker.deinit();
+
+    var diag: StagingDiagnostics = .{};
+    while (try walker.next(io)) |entry| {
+        if (entry.kind != .file) continue;
+        if (std.mem.endsWith(u8, entry.path, ".json.lock")) continue;
+        if (std.mem.endsWith(u8, entry.path, ".json.corrupt") or
+            std.mem.endsWith(u8, entry.path, ".corrupt"))
+        {
+            diag.quarantined += 1;
+            continue;
+        }
+        if (!std.mem.endsWith(u8, entry.path, ".json")) continue;
+
+        const data = tmp_dir.readFileAlloc(io, entry.path, gpa, .unlimited) catch {
+            diag.unreadable += 1;
+            continue;
+        };
+        defer gpa.free(data);
+
+        var parsed = std.json.parseFromSlice(std.json.Value, gpa, data, .{
+            .allocate = .alloc_always,
+        }) catch {
+            diag.corrupt_json += 1;
+            continue;
+        };
+        defer parsed.deinit();
+        diag.pending_json += 1;
+    }
+    return diag;
 }
 
 fn checkAgent(
@@ -66,7 +194,10 @@ fn checkAgent(
     defer arena.deinit();
     const aa = arena.allocator();
 
-    const text = (readFileAllocOrNull(io, aa, config_path) catch null) orelse {
+    const text = (readFileAllocOrNull(io, aa, config_path) catch |err| {
+        try stdout.interface.print("  ✗ {s}: config unreadable ({s}): {s}\n", .{ agent_name, config_path, @errorName(err) });
+        return;
+    }) orelse {
         try stdout.interface.print("  ✗ {s}: config not found ({s})\n", .{ agent_name, config_path });
         return;
     };
@@ -114,10 +245,52 @@ fn readFileAllocOrNull(io: std.Io, allocator: std.mem.Allocator, path: []const u
     defer file.close(io);
 
     const stat = try file.stat(io);
-    if (stat.size == 0) return null;
-
     const buf = try allocator.alloc(u8, @intCast(stat.size));
     errdefer allocator.free(buf);
-    _ = try file.readPositionalAll(io, buf, 0);
+    if (buf.len > 0) {
+        _ = try file.readPositionalAll(io, buf, 0);
+    }
     return buf;
+}
+
+fn writeTestFile(io: std.Io, dir: std.Io.Dir, rel_path: []const u8, content: []const u8) !void {
+    if (std.mem.lastIndexOfScalar(u8, rel_path, '/')) |sep| {
+        try dir.createDirPath(io, rel_path[0..sep]);
+    }
+    var file = try dir.createFile(io, rel_path, .{});
+    defer file.close(io);
+    try file.writeStreamingAll(io, content);
+}
+
+test "collectAgitIgnoreDiagnostics reports missing and readable files" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+
+    const missing = try collectAgitIgnoreDiagnostics(io, tmp.dir, gpa);
+    try std.testing.expect(missing == .missing);
+
+    try writeTestFile(io, tmp.dir, ".agitignore", "# comment\n\n*.log\nbuild_*/\n");
+    const diag = try collectAgitIgnoreDiagnostics(io, tmp.dir, gpa);
+    try std.testing.expect(diag == .readable);
+    try std.testing.expectEqual(@as(usize, 2), diag.readable);
+}
+
+test "collectStagingDiagnostics counts pending corrupt and quarantined files" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+
+    try writeTestFile(io, tmp.dir, "tmp/good.json", "{}");
+    try writeTestFile(io, tmp.dir, "tmp/bad.json", "{not-json");
+    try writeTestFile(io, tmp.dir, "tmp/old.json.corrupt", "{not-json");
+    try writeTestFile(io, tmp.dir, "tmp/good.json.lock", "");
+
+    const diag = try collectStagingDiagnostics(io, gpa, tmp.dir);
+    try std.testing.expectEqual(@as(usize, 1), diag.pending_json);
+    try std.testing.expectEqual(@as(usize, 1), diag.corrupt_json);
+    try std.testing.expectEqual(@as(usize, 1), diag.quarantined);
+    try std.testing.expectEqual(@as(usize, 0), diag.unreadable);
 }

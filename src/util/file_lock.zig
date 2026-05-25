@@ -26,7 +26,7 @@ pub const LockFile = struct {
         LockTimeout,
         SubPathTooLong,
         Canceled,
-    } || std.Io.File.OpenError || std.Io.Dir.DeleteFileError;
+    } || std.Io.File.OpenError || std.Io.File.ReadPositionalError || std.Io.File.Writer.Error || std.Io.Dir.DeleteFileError;
 
     /// Acquire the lock at dir/sub_path, blocking up to opts.timeout_ms milliseconds.
     pub fn acquire(io: std.Io, dir: std.Io.Dir, sub_path: []const u8, opts: Options) AcquireError!LockFile {
@@ -43,13 +43,16 @@ pub const LockFile = struct {
         var delay_ms = opts.initial_delay_ms;
 
         while (true) {
-            switch (tryAcquireOnce(io, dir, sub_path)) {
+            switch (try tryAcquireOnce(io, dir, sub_path)) {
                 .acquired => return self,
                 .contended => |maybe_pid| {
                     if (maybe_pid) |pid| {
                         if (!isProcessAlive(pid)) {
-                            dir.deleteFile(io, sub_path) catch {};
-                            switch (tryAcquireOnce(io, dir, sub_path)) {
+                            dir.deleteFile(io, sub_path) catch |err| switch (err) {
+                                error.FileNotFound => {},
+                                else => return err,
+                            };
+                            switch (try tryAcquireOnce(io, dir, sub_path)) {
                                 .acquired => return self,
                                 .contended => {},
                             }
@@ -81,26 +84,29 @@ const TryResult = union(enum) {
 
 const OsPid = if (builtin.os.tag == .windows) u32 else std.posix.pid_t;
 
-fn tryAcquireOnce(io: std.Io, dir: std.Io.Dir, sub_path: []const u8) TryResult {
+fn tryAcquireOnce(io: std.Io, dir: std.Io.Dir, sub_path: []const u8) LockFile.AcquireError!TryResult {
     const file = dir.createFile(io, sub_path, .{ .exclusive = true }) catch |err| switch (err) {
-        error.PathAlreadyExists => return .{ .contended = readLockPid(io, dir, sub_path) },
-        else => return .{ .contended = null },
+        error.PathAlreadyExists => return .{ .contended = try readLockPid(io, dir, sub_path) },
+        else => return err,
     };
     defer file.close(io);
 
     const pid = currentPid();
     var pid_buf: [32]u8 = undefined;
-    const pid_str = std.fmt.bufPrint(&pid_buf, "{d}\n", .{pid}) catch return .{ .contended = null };
-    file.writeStreamingAll(io, pid_str) catch {};
+    const pid_str = std.fmt.bufPrint(&pid_buf, "{d}\n", .{pid}) catch unreachable;
+    try file.writeStreamingAll(io, pid_str);
 
     return .acquired;
 }
 
-fn readLockPid(io: std.Io, dir: std.Io.Dir, sub_path: []const u8) ?OsPid {
+fn readLockPid(io: std.Io, dir: std.Io.Dir, sub_path: []const u8) LockFile.AcquireError!?OsPid {
     var content_buf: [32]u8 = undefined;
-    const file = dir.openFile(io, sub_path, .{}) catch return null;
+    const file = dir.openFile(io, sub_path, .{}) catch |err| switch (err) {
+        error.FileNotFound => return null,
+        else => return err,
+    };
     defer file.close(io);
-    const n = file.readPositionalAll(io, &content_buf, 0) catch return null;
+    const n = try file.readPositionalAll(io, &content_buf, 0);
     const text = std.mem.trim(u8, content_buf[0..n], "\n\r ");
     return std.fmt.parseInt(OsPid, text, 10) catch null;
 }
@@ -163,4 +169,13 @@ test "stale lock is reclaimed" {
 
     var lock = try LockFile.acquire(io, tmp.dir, "stale.lock", .{ .timeout_ms = 1_000 });
     lock.release(io);
+}
+
+test "non-contention acquire errors propagate" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = std.testing.io;
+
+    const result = LockFile.acquire(io, tmp.dir, "missing-parent/test.lock", .{ .timeout_ms = 1_000 });
+    try std.testing.expectError(error.FileNotFound, result);
 }

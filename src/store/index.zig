@@ -49,6 +49,9 @@ pub const Index = struct {
         if (current_version < 2) {
             try self.applyMigration2();
         }
+        if (current_version < 3) {
+            try self.applyMigration3();
+        }
     }
 
     fn applyMigration1(self: Index) !void {
@@ -128,6 +131,25 @@ pub const Index = struct {
         try self.db.exec(
             "insert into schema_migrations (version) values (?)",
             .{@as(i64, 2)},
+        );
+
+        try self.db.commit();
+    }
+
+    fn applyMigration3(self: Index) !void {
+        try self.db.transaction();
+        errdefer self.db.rollback();
+
+        try self.db.execNoArgs(
+            "create index if not exists sessions_updated_at_desc on sessions(updated_at desc)",
+        );
+        try self.db.execNoArgs(
+            "create index if not exists steps_session_timestamp on steps(session_origin, session_id, timestamp)",
+        );
+
+        try self.db.exec(
+            "insert into schema_migrations (version) values (?)",
+            .{@as(i64, 3)},
         );
 
         try self.db.commit();
@@ -385,6 +407,35 @@ test "index open and migrate" {
     try idx.migrate();
 }
 
+test "index migrate creates query-path indexes" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = std.testing.io;
+
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const n = try tmp.dir.realPath(io, &path_buf);
+    var db_path_buf: [std.fs.max_path_bytes + 12]u8 = undefined;
+    const db_path = try std.fmt.bufPrintZ(&db_path_buf, "{s}/index.db", .{path_buf[0..n]});
+
+    const idx = try Index.open(db_path);
+    defer idx.close();
+    try idx.migrate();
+
+    const session_idx = try idx.db.row(
+        "select 1 from sqlite_master where type='index' and name='sessions_updated_at_desc'",
+        .{},
+    );
+    try std.testing.expect(session_idx != null);
+    defer session_idx.?.deinit();
+
+    const step_idx = try idx.db.row(
+        "select 1 from sqlite_master where type='index' and name='steps_session_timestamp'",
+        .{},
+    );
+    try std.testing.expect(step_idx != null);
+    defer step_idx.?.deinit();
+}
+
 test "index upsertSession and insertStep" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -409,6 +460,41 @@ test "index upsertSession and insertStep" {
     try std.testing.expect(row != null);
     defer row.?.deinit();
     try std.testing.expectEqualStrings("c" ** 64, row.?.get([]const u8, 0));
+}
+
+test "insertStep is idempotent for duplicate turn ids" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = std.testing.io;
+
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const n = try tmp.dir.realPath(io, &path_buf);
+    var db_path_buf: [std.fs.max_path_bytes + 12]u8 = undefined;
+    const db_path = try std.fmt.bufPrintZ(&db_path_buf, "{s}/index.db", .{path_buf[0..n]});
+
+    const idx = try Index.open(db_path);
+    defer idx.close();
+    try idx.migrate();
+
+    try idx.upsertSession("origin", "s1", null);
+    try idx.insertStep("a" ** 64, "origin", "s1", "t1", null, "b" ** 64, 1000);
+    try idx.insertStep("c" ** 64, "origin", "s1", "t1", "a" ** 64, "d" ** 64, 1001);
+
+    const count_row = try idx.db.row(
+        "select count(*) from steps where session_origin=? and session_id=? and turn_id=?",
+        .{ "origin", "s1", "t1" },
+    );
+    try std.testing.expect(count_row != null);
+    defer count_row.?.deinit();
+    try std.testing.expectEqual(@as(i64, 1), count_row.?.get(i64, 0));
+
+    const hash_row = try idx.db.row(
+        "select hash from steps where session_origin=? and session_id=? and turn_id=?",
+        .{ "origin", "s1", "t1" },
+    );
+    try std.testing.expect(hash_row != null);
+    defer hash_row.?.deinit();
+    try std.testing.expectEqualStrings("a" ** 64, hash_row.?.get([]const u8, 0));
 }
 
 test "index truncate" {

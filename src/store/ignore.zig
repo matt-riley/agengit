@@ -2,16 +2,20 @@ const std = @import("std");
 
 /// Default directory names that are always excluded from snapshots.
 const default_ignore_dirs = [_][]const u8{
-    ".git",    ".agit",       "node_modules", "target",     ".venv",
-    "dist",    "build",       ".cache",        "vendor",     "__pycache__",
+    ".git",      ".agit",      "node_modules", "target", ".venv",
+    "dist",      "build",      ".cache",       "vendor", "__pycache__",
     "zig-cache", ".zig-cache", "zig-out",
 };
 
 /// Default filenames that are always excluded (secrets / credentials).
 const default_ignore_exact = [_][]const u8{
     ".env",
-    "id_rsa",  "id_ecdsa",    "id_ed25519",
-    "id_dsa",  "id_ecdsa_sk", "id_ed25519_sk",
+    "id_rsa",
+    "id_ecdsa",
+    "id_ed25519",
+    "id_dsa",
+    "id_ecdsa_sk",
+    "id_ed25519_sk",
 };
 
 /// Default filename suffixes that are always excluded.
