@@ -52,6 +52,9 @@ pub const Index = struct {
         if (current_version < 3) {
             try self.applyMigration3();
         }
+        if (current_version < 4) {
+            try self.applyMigration4();
+        }
     }
 
     fn applyMigration1(self: Index) !void {
@@ -155,6 +158,26 @@ pub const Index = struct {
         try self.db.commit();
     }
 
+    fn applyMigration4(self: Index) !void {
+        try self.db.transaction();
+        errdefer self.db.rollback();
+
+        try self.db.execNoArgs(
+            \\create table if not exists meta (
+            \\  key   text primary key,
+            \\  value text not null
+            \\)
+        );
+
+        try self.db.exec(
+            "insert into schema_migrations (version) values (?)",
+            .{@as(i64, 4)},
+        );
+
+        try self.db.execNoArgs("pragma user_version = 4");
+        try self.db.commit();
+    }
+
     /// Insert or update a session's HEAD pointer.
     pub fn upsertSession(
         self: Index,
@@ -226,6 +249,50 @@ pub const Index = struct {
         try self.db.exec(
             "insert or ignore into tool_calls (step_hash, seq, tool_name, args, result) values (?, ?, ?, ?, ?)",
             .{ step_hash, seq, tool_name, args, result },
+        );
+    }
+
+    pub fn hasStep(self: Index, hash: []const u8) !bool {
+        const row = try self.db.row(
+            "select 1 from steps where hash=? limit 1",
+            .{hash},
+        );
+        if (row) |r| {
+            defer r.deinit();
+            return true;
+        }
+        return false;
+    }
+
+    pub fn countSessionSteps(self: Index, origin: []const u8, session_id: []const u8) !i64 {
+        const row = try self.db.row(
+            "select count(*) from steps where session_origin=? and session_id=?",
+            .{ origin, session_id },
+        ) orelse return 0;
+        defer row.deinit();
+        return row.get(i64, 0);
+    }
+
+    pub fn metaSet(self: Index, key: []const u8, value: []const u8) !void {
+        try self.db.exec(
+            \\insert into meta (key, value) values (?, ?)
+            \\on conflict(key) do update set value=excluded.value
+        , .{ key, value });
+    }
+
+    pub fn metaGet(self: Index, gpa: std.mem.Allocator, key: []const u8) !?[]const u8 {
+        const row = try self.db.row(
+            "select value from meta where key=?",
+            .{key},
+        ) orelse return null;
+        defer row.deinit();
+        return try gpa.dupe(u8, row.get([]const u8, 0));
+    }
+
+    pub fn metaDelete(self: Index, key: []const u8) !void {
+        try self.db.exec(
+            "delete from meta where key=?",
+            .{key},
         );
     }
 
@@ -434,6 +501,18 @@ test "index migrate creates query-path indexes" {
     );
     try std.testing.expect(step_idx != null);
     defer step_idx.?.deinit();
+
+    const meta_tbl = try idx.db.row(
+        "select 1 from sqlite_master where type='table' and name='meta'",
+        .{},
+    );
+    try std.testing.expect(meta_tbl != null);
+    defer meta_tbl.?.deinit();
+
+    const user_ver = try idx.db.row("pragma user_version", .{});
+    try std.testing.expect(user_ver != null);
+    defer user_ver.?.deinit();
+    try std.testing.expectEqual(@as(i64, 4), user_ver.?.get(i64, 0));
 }
 
 test "index upsertSession and insertStep" {
@@ -518,4 +597,32 @@ test "index truncate" {
     const row = try idx.db.row("select count(*) from steps", .{});
     defer row.?.deinit();
     try std.testing.expectEqual(@as(i64, 0), row.?.get(i64, 0));
+}
+
+test "index meta round trip" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const n = try tmp.dir.realPath(io, &path_buf);
+    var db_path_buf: [std.fs.max_path_bytes + 12]u8 = undefined;
+    const db_path = try std.fmt.bufPrintZ(&db_path_buf, "{s}/index.db", .{path_buf[0..n]});
+
+    const idx = try Index.open(db_path);
+    defer idx.close();
+    try idx.migrate();
+
+    try idx.metaSet("k", "v1");
+    try idx.metaSet("k", "v2");
+
+    const value = try idx.metaGet(gpa, "k");
+    try std.testing.expect(value != null);
+    defer gpa.free(value.?);
+    try std.testing.expectEqualStrings("v2", value.?);
+
+    try idx.metaDelete("k");
+    const missing = try idx.metaGet(gpa, "k");
+    try std.testing.expect(missing == null);
 }

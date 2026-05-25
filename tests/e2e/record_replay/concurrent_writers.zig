@@ -13,6 +13,7 @@ test "record_replay/concurrent_writers" {
     defer gpa.free(home_env);
     const path_env = try std.fmt.allocPrint(gpa, "PATH={s}:/usr/bin:/bin", .{sandbox.bin});
     defer gpa.free(path_env);
+    const lock_timeout_env = "AGIT_LOCK_TIMEOUT_MS=60000";
 
     var children: [8]std.process.Child = undefined;
     var payloads: [8][]u8 = undefined;
@@ -23,7 +24,7 @@ test "record_replay/concurrent_writers" {
             \\{{"session_id":"gemini-sess-{d}","cwd":"{s}","hook_event_name":"AfterAgent","response":"ok"}}
         , .{ i, sandbox.cwd });
         children[i] = try std.process.spawn(io, .{
-            .argv = &.{ "/usr/bin/env", home_env, path_env, sandbox.agit_bin, "gemini-hook" },
+            .argv = &.{ "/usr/bin/env", home_env, path_env, lock_timeout_env, sandbox.agit_bin, "gemini-hook" },
             .cwd = .{ .path = sandbox.cwd },
             .stdin = .pipe,
             .stdout = .pipe,
