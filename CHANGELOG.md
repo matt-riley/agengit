@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.1](https://github.com/matt-riley/agengit/compare/v1.11.0...v1.11.1) (2026-05-25)
+
+
+### Bug Fixes
+
+* **gemini:** update hooks to use array format in settings.json ([eb8738b](https://github.com/matt-riley/agengit/commit/eb8738bb0ca6f120c8890464a92762b99edaeced))
+
 ## [1.11.0](https://github.com/matt-riley/agengit/compare/v1.10.0...v1.11.0) (2026-05-25)
 
 
