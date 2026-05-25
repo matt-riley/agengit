@@ -15,6 +15,12 @@ pub const TreeEntry = object.TreeEntry;
 pub const Step = object.Step;
 pub const Cause = object.Cause;
 pub const Index = index_mod.Index;
+pub const SessionRow = index_mod.SessionRow;
+pub const StepRow = index_mod.StepRow;
+pub const freeSessionRows = index_mod.freeSessionRows;
+pub const freeStepRows = index_mod.freeStepRows;
+pub const freeSessionRow = index_mod.freeSessionRow;
+pub const freeStepRow = index_mod.freeStepRow;
 pub const Ignorer = ignore_mod.Ignorer;
 pub const SnapshotConfig = snapshot_mod.SnapshotConfig;
 pub const BlameMap = blame_mod.BlameMap;
@@ -61,6 +67,58 @@ pub const Store = struct {
         self.index.close();
         self.root.close(io);
         self.* = undefined;
+    }
+
+    /// Walk up from `start_dir` looking for a `.agit/` directory.
+    /// Returns `error.StoreNotFound` if none is found, otherwise opens the store.
+    /// Does NOT create `.agit/` or any subdirectories.
+    pub fn findAndOpen(io: std.Io, start_dir: std.Io.Dir, gpa: std.mem.Allocator) !Store {
+        var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+        var parent_buf: [std.fs.max_path_bytes]u8 = undefined;
+
+        var current = try start_dir.openDir(io, ".", .{});
+        while (true) {
+            const has_agit = blk: {
+                var d = current.openDir(io, ".agit", .{}) catch |err| switch (err) {
+                    error.FileNotFound, error.NotDir => break :blk false,
+                    else => |e| {
+                        current.close(io);
+                        return e;
+                    },
+                };
+                d.close(io);
+                break :blk true;
+            };
+            if (has_agit) {
+                defer current.close(io);
+                return Store.open(io, current, gpa);
+            }
+
+            const parent = current.openDir(io, "..", .{}) catch |e| {
+                current.close(io);
+                return e;
+            };
+
+            const n1 = current.realPath(io, &path_buf) catch |e| {
+                current.close(io);
+                parent.close(io);
+                return e;
+            };
+            const n2 = parent.realPath(io, &parent_buf) catch |e| {
+                current.close(io);
+                parent.close(io);
+                return e;
+            };
+
+            if (std.mem.eql(u8, path_buf[0..n1], parent_buf[0..n2])) {
+                current.close(io);
+                parent.close(io);
+                return error.StoreNotFound;
+            }
+
+            current.close(io);
+            current = parent;
+        }
     }
 
     // ── Object writes ────────────────────────────────────────────────────────

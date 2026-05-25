@@ -225,7 +225,147 @@ pub const Index = struct {
         @memcpy(&buf, hash_str);
         return buf;
     }
+
+    /// Count the number of sessions in the index.
+    pub fn countSessions(self: Index) !i64 {
+        const row = try self.db.row("select count(*) from sessions", .{}) orelse return 0;
+        defer row.deinit();
+        return row.get(i64, 0);
+    }
+
+    /// Count the total number of steps in the index.
+    pub fn countSteps(self: Index) !i64 {
+        const row = try self.db.row("select count(*) from steps", .{}) orelse return 0;
+        defer row.deinit();
+        return row.get(i64, 0);
+    }
+
+    /// List all sessions ordered by most recently updated first.
+    /// Caller must call `freeSessionRows(gpa, result)` when done.
+    pub fn listSessions(self: Index, gpa: std.mem.Allocator) ![]const SessionRow {
+        var list: std.ArrayList(SessionRow) = .empty;
+        errdefer {
+            for (list.items) |r| freeSessionRow(gpa, r);
+            list.deinit(gpa);
+        }
+        var rs = try self.db.rows(
+            "select origin, session_id, head_hash, updated_at from sessions order by updated_at desc",
+            .{},
+        );
+        defer rs.deinit();
+        while (rs.next()) |row| {
+            try list.append(gpa, SessionRow{
+                .origin = try gpa.dupe(u8, row.get([]const u8, 0)),
+                .session_id = try gpa.dupe(u8, row.get([]const u8, 1)),
+                .head_hash = if (row.get(?[]const u8, 2)) |h| try gpa.dupe(u8, h) else null,
+                .updated_at = row.get(i64, 3),
+            });
+        }
+        if (rs.err) |err| return err;
+        return list.toOwnedSlice(gpa);
+    }
+
+    /// List all steps for a session ordered by timestamp ascending.
+    /// Caller must call `freeStepRows(gpa, result)` when done.
+    pub fn listSteps(
+        self: Index,
+        gpa: std.mem.Allocator,
+        origin: []const u8,
+        session_id: []const u8,
+    ) ![]const StepRow {
+        var list: std.ArrayList(StepRow) = .empty;
+        errdefer {
+            for (list.items) |r| freeStepRow(gpa, r);
+            list.deinit(gpa);
+        }
+        var rs = try self.db.rows(
+            \\select hash, turn_id, parent_hash, tree_hash, timestamp
+            \\from steps where session_origin=? and session_id=?
+            \\order by timestamp asc
+        , .{ origin, session_id });
+        defer rs.deinit();
+        while (rs.next()) |row| {
+            try list.append(gpa, StepRow{
+                .hash = try gpa.dupe(u8, row.get([]const u8, 0)),
+                .turn_id = try gpa.dupe(u8, row.get([]const u8, 1)),
+                .parent_hash = if (row.get(?[]const u8, 2)) |p| try gpa.dupe(u8, p) else null,
+                .tree_hash = try gpa.dupe(u8, row.get([]const u8, 3)),
+                .timestamp = row.get(i64, 4),
+            });
+        }
+        if (rs.err) |err| return err;
+        return list.toOwnedSlice(gpa);
+    }
+
+    /// Return the most recent session that has a committed HEAD ref, or null.
+    /// Caller must call `freeSessionRow(gpa, result)` when done.
+    pub fn mostRecentSession(self: Index, gpa: std.mem.Allocator) !?SessionRow {
+        const row = try self.db.row(
+            \\select origin, session_id, head_hash, updated_at from sessions
+            \\where head_hash is not null
+            \\order by updated_at desc limit 1
+        , .{}) orelse return null;
+        defer row.deinit();
+        return SessionRow{
+            .origin = try gpa.dupe(u8, row.get([]const u8, 0)),
+            .session_id = try gpa.dupe(u8, row.get([]const u8, 1)),
+            .head_hash = if (row.get(?[]const u8, 2)) |h| try gpa.dupe(u8, h) else null,
+            .updated_at = row.get(i64, 3),
+        };
+    }
+
+    /// Find a step by hash prefix. Returns null if not found; error if ambiguous.
+    pub fn findStepByPrefix(self: Index, gpa: std.mem.Allocator, prefix: []const u8) !?[]const u8 {
+        const pattern = try std.fmt.allocPrint(gpa, "{s}%", .{prefix});
+        defer gpa.free(pattern);
+        const row = try self.db.row(
+            "select hash from steps where hash like ?",
+            .{pattern},
+        ) orelse return null;
+        defer row.deinit();
+        return try gpa.dupe(u8, row.get([]const u8, 0));
+    }
 };
+
+/// A session row returned by index queries.
+pub const SessionRow = struct {
+    origin: []const u8,
+    session_id: []const u8,
+    head_hash: ?[]const u8,
+    updated_at: i64,
+};
+
+/// A step row returned by index queries.
+pub const StepRow = struct {
+    hash: []const u8,
+    turn_id: []const u8,
+    parent_hash: ?[]const u8,
+    tree_hash: []const u8,
+    timestamp: i64,
+};
+
+pub fn freeSessionRow(gpa: std.mem.Allocator, r: SessionRow) void {
+    gpa.free(r.origin);
+    gpa.free(r.session_id);
+    if (r.head_hash) |h| gpa.free(h);
+}
+
+pub fn freeStepRow(gpa: std.mem.Allocator, r: StepRow) void {
+    gpa.free(r.hash);
+    gpa.free(r.turn_id);
+    if (r.parent_hash) |p| gpa.free(p);
+    gpa.free(r.tree_hash);
+}
+
+pub fn freeSessionRows(gpa: std.mem.Allocator, rows: []const SessionRow) void {
+    for (rows) |r| freeSessionRow(gpa, r);
+    gpa.free(rows);
+}
+
+pub fn freeStepRows(gpa: std.mem.Allocator, rows: []const StepRow) void {
+    for (rows) |r| freeStepRow(gpa, r);
+    gpa.free(rows);
+}
 
 test "index open and migrate" {
     var tmp = std.testing.tmpDir(.{});
