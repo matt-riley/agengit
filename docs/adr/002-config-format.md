@@ -1,27 +1,28 @@
-# ADR 002: Configuration Format — JSON
+# ADR 002: Use JSON for configuration and objects
 
 **Status:** Accepted
+**Editorial note:** Reworded on 2026-05-25 for clarity; the decision is unchanged.
 
 ## Context
 
-`agit` needs a machine-readable config file at `.agit/config.json`. Candidates were TOML and JSON.
+`agit` needs machine-readable data for local config, hook payloads, and inspectable object serialization.
 
-- TOML is the upstream `re_gent` choice. However, Zig 0.16's standard library has no TOML parser. Adding a TOML dep just for config introduces build complexity.
-- JSON is natively handled by `std.json` in Zig 0.16 with no additional dependencies.
-- JSON also matches the config ecosystems of Claude Code (`.claude/settings.json`), Google Gemini CLI, and Pi.
+TOML was considered because `re_gent` uses it. JSON was chosen because Zig 0.16 includes `std.json`, and the agents `agit` integrates with already live in JSON-heavy ecosystems.
 
 ## Decision
 
-Use JSON for all `agit` configuration files:
+Use JSON for `agit`-owned structured data:
 
-- `.agit/config.json` — store-level config (schema version, ignore overrides, log level)
-- Hook payloads are always JSON (agent-mandated)
-- Internal object serialization (trees, steps) uses JSON for inspectability
+- `.agit/config.json` if store-level config is needed;
+- agent hook payload parsing;
+- tree and step object serialization;
+- hook metadata such as the installed `agit` binary path.
 
-The config schema is versioned via a top-level `"schema_version"` field.
+Version JSON schemas with an explicit schema/version field where the file format needs migrations.
 
 ## Consequences
 
-- No third-party TOML dependency needed for config.
-- Config files are human-readable and easy to emit from any language.
-- `re_gent` TOML configs are not directly importable; a conversion tool may be needed for migration.
+- No TOML parser dependency is required.
+- Stored objects remain easy to inspect with ordinary tools.
+- `re_gent` TOML config is not directly importable.
+- Compatibility tooling, if added later, must convert between formats deliberately.

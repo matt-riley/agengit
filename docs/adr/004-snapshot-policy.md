@@ -1,16 +1,19 @@
-# ADR 004: Workspace Snapshot Policy
+# ADR 004: Snapshot conservatively
 
 **Status:** Accepted
+**Editorial note:** Reworded on 2026-05-25 for clarity; the decision is unchanged.
 
 ## Context
 
-At each agent turn `agit` captures a snapshot of the project workspace to record what changed. Snapshots must be fast, safe (no secrets), and predictable in size.
+`agit` snapshots the workspace so each agent step can point at the files it affected. Snapshots must be useful, quick enough for hook workflows, and careful around secrets and large files.
+
+Perfect safety is not possible from filenames alone, but sensible defaults keep the treasure chest from filling with obvious dragons.
 
 ## Decision
 
-### Default ignored paths (always skipped, not configurable away)
+Skip these paths by default:
 
-```
+```text
 .git/
 .agit/
 node_modules/
@@ -23,9 +26,9 @@ __pycache__/
 *.pyc
 ```
 
-### Default secret-file ignores (skipped unless explicitly included in `.agitignore`)
+Skip common secret-looking files by default:
 
-```
+```text
 .env
 .env.*
 .envrc
@@ -40,23 +43,17 @@ id_ecdsa
 *.asc
 ```
 
-### Hard limits
+Apply these hard limits:
 
-- Maximum file size per snapshot entry: **10 MB**. Files exceeding this are recorded as `{truncated: true, size: N}` metadata entries, not raw blobs.
-- Binary files (detected by null-byte scan of first 8 KB): recorded as metadata only, no content blob stored.
+- files larger than 10 MiB are skipped;
+- binary files, detected by a null byte in the initial scan window, are skipped;
+- symlinks are skipped.
 
-### Incremental strategy (v1)
-
-v1 uses **full snapshots** augmented with mtime/size cache metadata. The cache is stored alongside each `Tree` object and enables fast skipping of unchanged files in subsequent snapshots without requiring a file watcher.
-
-Proper incremental snapshots using inotify/kqueue/FSEvents are deferred to a future phase. Zig 0.16 has no cross-platform file-watcher in the standard library.
-
-### User override
-
-`.agitignore` at the repository root uses `.gitignore`-compatible glob syntax to add project-specific ignores.
+Allow repository-specific ignore rules in `.agitignore`.
 
 ## Consequences
 
-- No secrets or large binary files are ever stored in `.agit/objects/` by default.
-- Snapshot latency is bounded by the per-file cap and default ignores for typical projects.
-- Users must explicitly opt in to snapshot secret files via `.agitignore` negation patterns — `agit init` warns about this.
+- Snapshots are bounded and avoid common generated directories.
+- Secret filtering is best-effort and must not be described as a complete guarantee.
+- Users should treat `.agit/` as private local history unless they have reviewed it.
+- Future richer ignore behavior should preserve the safe defaults unless users explicitly opt in.

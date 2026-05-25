@@ -1,28 +1,34 @@
-# agit
+# AgenGit
 
-AI agent version control — captures your AI coding-agent sessions (prompts, tool calls, responses, workspace snapshots, and per-line blame) in a content-addressed, queryable object store.
+`agit` is a little black box for AI coding sessions.
 
-Inspired by [`regent-vcs/re_gent`](https://github.com/regent-vcs/re_gent). Written in [Zig](https://ziglang.org/) 0.16.
+It watches supported coding agents, records the prompts/tools/responses that shaped a workspace, and tucks everything into a local `.agit/` store so you can ask, "What happened here?" without rummaging through terminal scrollback like a raccoon in a filing cabinet.
 
 ## Status
 
-⚠️ **Work in progress.** This project is in early implementation. No stable API yet.
+`agit` is early, sharp-edged, and useful-in-progress. The CLI is currently `0.1.0`, and both the command output and on-disk format may change before a stable release.
 
-## Supported agents (planned v1)
+Today it focuses on local capture for:
 
-| Agent | Integration |
+| Agent | What `agit` installs today |
 |---|---|
-| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | Hook commands (`agit claude-hook`) |
-| [OpenAI Codex CLI](https://github.com/openai/codex) | Hook commands (`agit codex-hook`) |
-| [Google Gemini CLI](https://github.com/google-gemini/gemini-cli) | Hook commands (`agit gemini-hook`) |
-| [Pi](https://pi.dev) | Filesystem observer (`agit pi-watch`) |
-| [GitHub Copilot CLI](https://docs.github.com/en/copilot/using-github-copilot/using-github-copilot-in-the-command-line) | Filesystem observer (`agit copilot-watch`) |
+| Claude Code | `UserPromptSubmit`, `PostToolBatch`, and `Stop` hooks in `~/.claude/settings.json` |
+| OpenAI Codex CLI | `UserPromptSubmit`, `PostToolUse`, and `Stop` hooks in `~/.codex/hooks.json` |
+| Google Gemini CLI | `AfterTool` and `AfterAgent` hooks in `~/.gemini/settings.json` |
+
+Pi (the `pi.dev` coding agent) and GitHub Copilot CLI support are roadmap items, not current user-facing commands.
+
+## What it records
+
+When an installed hook fires, `agit` records a session step containing the agent origin, session id, turn id, messages, tool calls, a workspace snapshot, and a content-addressed object hash.
+
+The short version: git remembers what humans commit; `agit` remembers what the agent did between commits.
 
 ## Install
 
-### Binary (recommended)
+### From a release archive
 
-Download the latest release from the [releases page](https://github.com/matt-riley/agengit/releases):
+Download a release from <https://github.com/matt-riley/agengit/releases>, then unpack the archive for your platform:
 
 | Platform | Archive |
 |---|---|
@@ -33,7 +39,6 @@ Download the latest release from the [releases page](https://github.com/matt-ril
 | Windows x86_64 | `agit-x86_64-windows.zip` |
 
 ```sh
-# Linux / macOS example
 tar -xzf agit-x86_64-linux.tar.gz
 sudo mv agit /usr/local/bin/
 agit version
@@ -41,59 +46,125 @@ agit version
 
 ### Build from source
 
+You need Zig `0.16.0`.
+
 ```sh
 git clone https://github.com/matt-riley/agengit
 cd agengit
 zig build -Doptimize=ReleaseSafe
-# binary is at ./zig-out/bin/agit
+./zig-out/bin/agit version
 ```
 
-## Usage
+## First run
+
+From the repository you want to observe:
 
 ```sh
-# Set up agit in the current repository and configure all detected agents
 agit init
+```
 
-# Check your configuration and store health
+`agit init` looks for `claude`, `codex`, and `gemini` on your `PATH`. For each one it finds, it writes hook configuration into that agent's user config and saves a `*.agit.bak` backup first.
+
+If none of those agents are installed, `agit init` politely shrugs and does nothing.
+
+## Everyday commands
+
+```sh
+# Check that the store and agent hook config look healthy.
 agit doctor
 
-# List all recorded sessions
+# See how many sessions and steps have been recorded.
+agit status
+
+# List captured agent sessions.
 agit sessions
 
-# Show the step history of a session
-agit log <session-id>
+# Show the step history for the most recent session.
+agit log
 
-# Show details of a specific step
+# Or show a specific session by id, or by origin/session-id.
+agit log <session-id>
+agit log claude/<session-id>
+
+# Inspect one recorded step.
 agit show <step-hash>
 
-# Show per-line blame for a file
-agit blame src/main.zig
-
-# Print a raw object
+# Print a raw object from the local object store.
 agit cat <hash>
 
-# Remove agit hooks from all agent configs (preserves user content)
+# Rebuild the SQLite index from objects if it gets out of step.
+agit reindex
+
+# Generate shell completions.
+agit completion bash
+agit completion zsh
+agit completion fish
+agit completion nushell
+
+# Remove agit-managed hooks while keeping the recorded store.
 agit uninstall
 ```
 
+`agit blame` exists in the command list, but line-level blame recording is not available yet. Consider it a signpost with a tiny hard hat.
+
 ## Store layout
 
-agit stores everything in `.agit/` inside your repository root:
+`agit` stores data in `.agit/` at the root of the repository being observed:
 
-```
+```text
 .agit/
-├── config.json          # Repository configuration
-├── objects/             # Content-addressed blobs, trees, steps, blame maps
-├── refs/
-│   └── sessions/        # Per-session DAG ref pointers
-├── blame/               # Per-file line attribution
-├── index.db             # SQLite query index
-└── log/
-    └── hook-error.log   # Hook error log (never crashes the agent)
+|-- objects/          # BLAKE3-addressed blobs, trees, and steps
+|-- refs/
+|   `-- sessions/     # Mutable pointers to each session's latest step
+|-- log/
+|   `-- hook-error.log
+|-- tmp/              # Hook staging files and temporary writes
+`-- index.db          # Rebuildable SQLite query index
 ```
 
-The store format is **not byte-compatible** with `re_gent` in v1. API/behavior compatibility is the goal; byte compatibility will be addressed in a future migration plan.
+Do not commit `.agit/`. It is local session history, not source code.
+
+The canonical data lives in the object store; `index.db` is a query helper that can be rebuilt with `agit reindex`.
+
+## Snapshot safety
+
+Snapshots are intentionally conservative. By default `agit` skips `.git/`, `.agit/`, common dependency/build/cache directories, common secret-looking files, symlinks, binary files, and files larger than 10 MiB.
+
+You can add project-specific ignore rules in `.agitignore` at the repository root. The matcher is intentionally simple today: exact paths, trailing-slash directory prefixes, and single-`*` glob patterns.
+
+Secret filtering is a safety net, not a force field. Keep `.agit/` private unless you have reviewed what it contains.
+
+## How hooks behave
+
+Hook commands are designed to stay out of the agent's way. If capture fails, the hook logs an error and exits successfully so Claude, Codex, or Gemini can keep working.
+
+That means missed captures should be debugged with:
+
+```sh
+agit doctor
+cat .agit/log/hook-error.log
+```
+
+## Development
+
+```sh
+zig build test
+zig build check-fmt
+zig build -Dtarget=x86_64-linux-musl -Doptimize=ReleaseSafe
+```
+
+The repository also has GitHub Actions for Linux/macOS/Windows tests, release archive builds, checksums, Release Please, and an optional Homebrew tap update.
+
+## Design notes
+
+The short version lives here; the "why did we choose that?" trail lives in the ADRs:
+
+- [ADR 001: Store directory](docs/adr/001-store-directory.md)
+- [ADR 002: JSON configuration](docs/adr/002-config-format.md)
+- [ADR 003: Hook process model](docs/adr/003-hook-process-model.md)
+- [ADR 004: Snapshot policy](docs/adr/004-snapshot-policy.md)
+- [ADR 005: Hook installation contract](docs/adr/005-hook-install-contract.md)
 
 ## License
 
-GNU General Public License v3.0 — see [LICENSE](./LICENSE).
+GNU General Public License v3.0. See [LICENSE](./LICENSE).

@@ -1,42 +1,38 @@
-# ADR 003: Hook Process Model
+# ADR 003: Keep hook commands short-lived and agent-safe
 
 **Status:** Accepted
+**Editorial note:** Reworded on 2026-05-25 for clarity; the decision is unchanged.
 
 ## Context
 
-Agent hooks (Claude Code, Codex CLI, Gemini CLI) invoke external commands synchronously before/after each agent action. If a hook command is slow, crashes, or exits non-zero, it can degrade or block the agent process.
+Claude Code, Codex CLI, and Gemini CLI can call external hook commands during an agent session. Those hooks are the doorway into `agit`, but they run in the agent's path. If a hook hangs, crashes, or exits non-zero, the user's agent workflow can suffer.
+
+The recorder should be useful, not a gremlin sitting on the brakes.
 
 ## Decision
 
-### Per-invocation process model
+Each hook event starts a fresh `agit` process:
 
-Each hook event spawns a fresh `agit <hook-subcommand>` process. There is no long-lived hook daemon in v1.
+- `agit claude-hook user`
+- `agit claude-tool-batch-hook`
+- `agit claude-hook assistant`
+- `agit codex-hook`
+- `agit gemini-hook`
 
-### Non-negotiable exit invariant
+Hook commands must catch errors, report them through the hook logging path, and return successfully to the agent.
 
-Hook commands **always exit 0**. Every error path logs a structured JSON entry to `.agit/log/hook-error.log` and exits 0. The agent process must never be blocked or terminated by a hook failure.
+When a hook finalizes a step, writes should follow this order:
 
-### Lock ordering (to prevent deadlocks)
-
-When a hook command finalizes a step:
-
-1. Write immutable objects (blobs, trees, steps) — no lock needed; object writes are idempotent by content hash.
-2. Open SQLite transaction in WAL mode with `busy_timeout = 5000ms`.
-3. Acquire ref lock (`O_CREAT|O_EXCL` on `.agit/refs/sessions/<id>.lock`) — only for the CAS compare-and-swap.
-4. Update the ref file.
-5. Commit the SQLite transaction.
+1. Write immutable objects.
+2. Update the SQLite index inside a transaction.
+3. Acquire the session-ref lock for the shortest possible compare-and-swap window.
+4. Update the ref.
+5. Commit index work.
 6. Release the ref lock.
-
-### Latency contract
-
-Hook commands must be fast enough not to degrade agent UX. Latency is tracked in integration tests. Heavy work (e.g., full workspace snapshots in very large repos) is subject to the snapshot policy size/ignore caps.
-
-### Concurrency
-
-Multiple hooks for the same session can be invoked concurrently (e.g., parallel tool calls). WAL mode and `busy_timeout` handle SQLite concurrency. The ref lock ensures only one process swaps the session ref at a time.
 
 ## Consequences
 
-- Per-process model is simpler to implement and test than a daemon; revisit if latency becomes a concern.
-- The exit-0 invariant protects agent processes from `agit` bugs during development.
-- Lock ordering and WAL mode must be implemented before any concurrent use (Phase 2).
+- Hooks stay simple and testable.
+- A broken capture should not break the user's agent session.
+- `.agit/log/hook-error.log` is the first place to check when capture looks quiet.
+- A future daemon can be considered only if process startup or snapshot latency becomes a real user problem.
