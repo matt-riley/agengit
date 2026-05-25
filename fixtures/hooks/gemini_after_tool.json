@@ -1,0 +1,8 @@
+{
+  "session_id": "gemini-sess-001",
+  "cwd": "/home/user/myproject",
+  "hook_event_name": "AfterTool",
+  "tool_name": "read_file",
+  "tool_input": { "path": "src/main.go" },
+  "tool_response": "package main\n\nimport \"fmt\"\n\nfunc main() {\n\tfmt.Println(\"Hello, World!\")\n}\n"
+}

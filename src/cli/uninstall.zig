@@ -1,9 +1,177 @@
 const std = @import("std");
+const exe_path_mod = @import("../util/exe_path.zig");
 
-// Phase 5 implementation: remove sentinel-managed hook blocks, preserve user content.
-pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator) !void {
-    _ = io;
-    _ = gpa;
+pub fn run(
+    io: std.Io,
+    gpa: std.mem.Allocator,
+    environ: std.process.Environ,
+    iter: *std.process.Args.Iterator,
+) !void {
     _ = iter;
-    @panic("not yet implemented");
+
+    var stdout_buf: [4096]u8 = undefined;
+    var stdout = std.Io.File.stdout().writer(io, &stdout_buf);
+
+    const home = environ.getPosix("HOME") orelse return error.MissingHOME;
+    const exe = try exe_path_mod.getAlloc(io, gpa);
+    defer gpa.free(exe);
+
+    try uninstallAgent(io, gpa, home, exe, ".claude/settings.json", &stdout, removeClaude);
+    try uninstallAgent(io, gpa, home, exe, ".codex/hooks.json", &stdout, removeSimpleHooks);
+    try uninstallAgent(io, gpa, home, exe, ".gemini/settings.json", &stdout, removeSimpleHooks);
+
+    try stdout.flush();
+}
+
+const RemoveFn = *const fn (aa: std.mem.Allocator, root: *std.json.ObjectMap, binary: []const u8) std.mem.Allocator.Error!bool;
+
+fn uninstallAgent(
+    io: std.Io,
+    gpa: std.mem.Allocator,
+    home: []const u8,
+    exe: []const u8,
+    rel_config: []const u8,
+    stdout: *std.Io.File.Writer,
+    removeFn: RemoveFn,
+) !void {
+    const config_path = try std.mem.concat(gpa, u8, &.{ home, "/", rel_config });
+    defer gpa.free(config_path);
+
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const aa = arena.allocator();
+
+    const text = (readFileAllocOrNull(io, aa, config_path) catch return) orelse return;
+    const root_val = std.json.parseFromSliceLeaky(std.json.Value, aa, text, .{
+        .allocate = .alloc_always,
+    }) catch return;
+    if (root_val != .object) return;
+
+    var root = root_val.object;
+
+    // Identify the stored binary that was installed.
+    const stored_binary: []const u8 = blk: {
+        const agit = root.get("_agit") orelse return; // not agit-managed
+        if (agit != .object) return;
+        const bin = agit.object.get("binary") orelse return;
+        if (bin != .string) return;
+        break :blk bin.string;
+    };
+    _ = exe; // use stored binary for matching; exe may differ if binary moved
+
+    const changed = try removeFn(aa, &root, stored_binary);
+    _ = root.swapRemove("_agit");
+
+    if (!changed) {
+        try stdout.interface.print("agit uninstall: no agit hooks found in {s}\n", .{config_path});
+        return;
+    }
+
+    const json_str = try std.json.Stringify.valueAlloc(aa, std.json.Value{ .object = root }, .{ .whitespace = .indent_2 });
+    try writeFileAtomic(io, config_path, json_str);
+    try stdout.interface.print("agit uninstall: removed agit hooks from {s}\n", .{config_path});
+}
+
+/// Remove Claude-format hook entries: each event value is an array of
+/// `{hooks: [{type, command, args}]}` groups; remove groups where
+/// `hooks[0].command == binary`.
+fn removeClaude(aa: std.mem.Allocator, root: *std.json.ObjectMap, binary: []const u8) std.mem.Allocator.Error!bool {
+    var changed = false;
+    const hooks_val = root.get("hooks") orelse return false;
+    if (hooks_val != .object) return false;
+
+    var new_hooks = std.json.ObjectMap.empty;
+    var ev_it = hooks_val.object.iterator();
+    while (ev_it.next()) |ev_entry| {
+        const event_val = ev_entry.value_ptr.*;
+        if (event_val != .array) {
+            try new_hooks.put(aa, ev_entry.key_ptr.*, event_val);
+            continue;
+        }
+        var filtered = std.json.Array.init(aa);
+        for (event_val.array.items) |group| {
+            if (isClaudeAgitGroup(group, binary)) {
+                changed = true;
+                continue;
+            }
+            try filtered.append(group);
+        }
+        if (filtered.items.len > 0) {
+            try new_hooks.put(aa, ev_entry.key_ptr.*, std.json.Value{ .array = filtered });
+        } else {
+            changed = true; // event key removed
+        }
+    }
+
+    if (changed) {
+        try root.put(aa, "hooks", std.json.Value{ .object = new_hooks });
+    }
+    return changed;
+}
+
+fn isClaudeAgitGroup(group: std.json.Value, binary: []const u8) bool {
+    if (group != .object) return false;
+    const inner = group.object.get("hooks") orelse return false;
+    if (inner != .array or inner.array.items.len == 0) return false;
+    const first = inner.array.items[0];
+    if (first != .object) return false;
+    const cmd = first.object.get("command") orelse return false;
+    if (cmd != .string) return false;
+    return std.mem.eql(u8, cmd.string, binary);
+}
+
+/// Remove Codex/Gemini-format hook entries: each event value is an object
+/// `{command: "<binary> <subcmd>"}`.  Remove event keys where command
+/// starts with `binary + " "`.
+fn removeSimpleHooks(aa: std.mem.Allocator, root: *std.json.ObjectMap, binary: []const u8) std.mem.Allocator.Error!bool {
+    var changed = false;
+    const hooks_val = root.get("hooks") orelse return false;
+    if (hooks_val != .object) return false;
+
+    var to_remove: [16][]const u8 = undefined;
+    var n_to_remove: usize = 0;
+    var it = hooks_val.object.iterator();
+    while (it.next()) |entry| {
+        const v = entry.value_ptr.*;
+        if (v != .object) continue;
+        const cmd = v.object.get("command") orelse continue;
+        if (cmd != .string) continue;
+        if (std.mem.startsWith(u8, cmd.string, binary) and n_to_remove < to_remove.len) {
+            to_remove[n_to_remove] = entry.key_ptr.*;
+            n_to_remove += 1;
+            changed = true;
+        }
+    }
+
+    var hooks_obj = hooks_val.object;
+    for (to_remove[0..n_to_remove]) |key| {
+        _ = hooks_obj.swapRemove(key);
+    }
+    if (changed) {
+        try root.put(aa, "hooks", std.json.Value{ .object = hooks_obj });
+    }
+    return changed;
+}
+
+fn readFileAllocOrNull(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !?[]u8 {
+    const file = std.Io.Dir.cwd().openFile(io, path, .{}) catch |err| switch (err) {
+        error.FileNotFound => return null,
+        else => return err,
+    };
+    defer file.close(io);
+
+    const stat = try file.stat(io);
+    if (stat.size == 0) return null;
+
+    const buf = try allocator.alloc(u8, @intCast(stat.size));
+    errdefer allocator.free(buf);
+    _ = try file.readPositionalAll(io, buf, 0);
+    return buf;
+}
+
+fn writeFileAtomic(io: std.Io, path: []const u8, content: []const u8) !void {
+    var af = try std.Io.Dir.cwd().createFileAtomic(io, path, .{ .replace = true, .make_path = false });
+    defer af.deinit(io);
+    try af.file.writeStreamingAll(io, content);
+    try af.replace(io);
 }
