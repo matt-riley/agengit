@@ -21,7 +21,7 @@ const cli = struct {
     const gemini_hook = @import("cli/gemini_hook.zig");
 };
 
-pub const version = "1.8.0"; // x-release-please-version
+pub const version = "1.9.0"; // x-release-please-version
 
 const SubCommand = enum {
     init,
