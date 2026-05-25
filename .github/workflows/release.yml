@@ -2,37 +2,35 @@ name: Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [main]
 
 permissions:
   contents: write
+  issues: write
+  pull-requests: write
 
 jobs:
+  release-please:
+    uses: matt-riley/matt-riley-ci/.github/workflows/release-please.yml@main
+
   build:
     name: Build (${{ matrix.target }})
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - target: x86_64-linux-musl
-            archive: agit-x86_64-linux.tar.gz
-            binary: agit
-          - target: aarch64-linux-musl
-            archive: agit-aarch64-linux.tar.gz
-            binary: agit
-          - target: aarch64-macos
-            archive: agit-aarch64-macos.tar.gz
-            binary: agit
-          - target: x86_64-macos
-            archive: agit-x86_64-macos.tar.gz
-            binary: agit
-          - target: x86_64-windows
-            archive: agit-x86_64-windows.zip
-            binary: agit.exe
+          - { target: x86_64-linux-musl,  archive: agit-x86_64-linux.tar.gz,   binary: agit }
+          - { target: aarch64-linux-musl, archive: agit-aarch64-linux.tar.gz,  binary: agit }
+          - { target: aarch64-macos,      archive: agit-aarch64-macos.tar.gz,  binary: agit }
+          - { target: x86_64-macos,       archive: agit-x86_64-macos.tar.gz,   binary: agit }
+          - { target: x86_64-windows,     archive: agit-x86_64-windows.zip,    binary: agit.exe }
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
 
       - uses: mlugg/setup-zig@v2
         with:
@@ -53,35 +51,118 @@ jobs:
           mkdir -p dist
           zip -j dist/${{ matrix.archive }} zig-out/bin/${{ matrix.binary }}
 
-      - name: Upload archive
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.archive }}
-          path: dist/${{ matrix.archive }}
+      - name: Upload to release
+        run: gh release upload "${{ needs.release-please.outputs.tag_name }}" dist/${{ matrix.archive }} --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
 
-  release:
-    name: Publish release
-    needs: build
+  checksums:
+    name: Generate checksums
+    needs: [release-please, build]
+    if: needs.release-please.outputs.release_created == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/download-artifact@v4
-        with:
-          path: dist
-          merge-multiple: true
-
-      - name: Generate checksums
+      - name: Download archives and generate checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          gh release download "${{ needs.release-please.outputs.tag_name }}" \
+            --repo "${{ github.repository }}" \
+            --pattern "agit-*.tar.gz" \
+            --pattern "agit-*.zip" \
+            --dir dist
           cd dist
           sha256sum * > checksums.txt
           cat checksums.txt
+          gh release upload "${{ needs.release-please.outputs.tag_name }}" checksums.txt \
+            --repo "${{ github.repository }}" --clobber
 
-      - name: Create GitHub Release
+  publish:
+    name: Publish release
+    needs: [release-please, checksums]
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mark release as published
         run: |
-          gh release create "${{ github.ref_name }}" \
-            --title "agit ${{ github.ref_name }}" \
-            --generate-notes \
-            dist/*
+          gh release edit "${{ needs.release-please.outputs.tag_name }}" --draft=false \
+            --repo "${{ github.repository }}"
         env:
           GH_TOKEN: ${{ github.token }}
+
+  homebrew:
+    name: Update homebrew tap
+    needs: [release-please, publish]
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate and push formula
+        env:
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+          TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
+          GH_TOKEN: ${{ secrets.TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TAP_TOKEN:-}" ]; then
+            echo "::warning::TAP_TOKEN secret not set — homebrew tap not updated. Add a PAT with contents:write to matt-riley/homebrew-tools as TAP_TOKEN in this repo."
+            exit 0
+          fi
+          VERSION="${TAG#v}"
+          mkdir -p /tmp/agit-dist
+          for ARCH_OS in x86_64-macos aarch64-macos x86_64-linux aarch64-linux; do
+            gh release download "$TAG" --repo "matt-riley/agengit" \
+              --pattern "agit-${ARCH_OS}.tar.gz" --dir /tmp/agit-dist
+          done
+          SHA_X86_MACOS=$(sha256sum /tmp/agit-dist/agit-x86_64-macos.tar.gz  | awk '{print $1}')
+          SHA_ARM_MACOS=$(sha256sum /tmp/agit-dist/agit-aarch64-macos.tar.gz | awk '{print $1}')
+          SHA_X86_LINUX=$(sha256sum /tmp/agit-dist/agit-x86_64-linux.tar.gz  | awk '{print $1}')
+          SHA_ARM_LINUX=$(sha256sum /tmp/agit-dist/agit-aarch64-linux.tar.gz | awk '{print $1}')
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/matt-riley/homebrew-tools.git" \
+            /tmp/homebrew-tools
+          cat > /tmp/homebrew-tools/Formula/agit.rb << FORMULA
+          # typed: false
+          # frozen_string_literal: true
+
+          # Managed by CI — do not edit manually.
+          class Agit < Formula
+            desc "AI-agent version control"
+            homepage "https://github.com/matt-riley/agengit"
+            version "${VERSION}"
+            license "GPL-3.0-only"
+
+            on_macos do
+              if Hardware::CPU.arm?
+                url "https://github.com/matt-riley/agengit/releases/download/${TAG}/agit-aarch64-macos.tar.gz"
+                sha256 "${SHA_ARM_MACOS}"
+              else
+                url "https://github.com/matt-riley/agengit/releases/download/${TAG}/agit-x86_64-macos.tar.gz"
+                sha256 "${SHA_X86_MACOS}"
+              end
+            end
+
+            on_linux do
+              if Hardware::CPU.arm? && Hardware::CPU.is_64_bit?
+                url "https://github.com/matt-riley/agengit/releases/download/${TAG}/agit-aarch64-linux.tar.gz"
+                sha256 "${SHA_ARM_LINUX}"
+              else
+                url "https://github.com/matt-riley/agengit/releases/download/${TAG}/agit-x86_64-linux.tar.gz"
+                sha256 "${SHA_X86_LINUX}"
+              end
+            end
+
+            def install
+              bin.install "agit"
+            end
+
+            test do
+              system bin/"agit", "version"
+            end
+          end
+          FORMULA
+          cd /tmp/homebrew-tools
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/agit.rb
+          git diff --staged --quiet || git commit -m "chore: update agit to ${VERSION}"
+          git push
+
