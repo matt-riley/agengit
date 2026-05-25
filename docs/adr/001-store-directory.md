@@ -1,27 +1,33 @@
-# ADR 001: Store Directory — `.agit/`
+# ADR 001: Use `.agit/` as the store directory
 
 **Status:** Accepted
+**Editorial note:** Reworded on 2026-05-25 for clarity; the decision is unchanged.
 
 ## Context
 
-`agit` needs a well-known directory to store its content-addressed objects, refs, SQLite index, config, and logs. The upstream project `regent-vcs/re_gent` uses `.regent/`. A compatible path would allow cross-tool workflows but could silently mix data between implementations before compatibility is proven.
+`agit` needs one predictable place to keep its local session history: objects, refs, the SQLite index, hook logs, and temporary hook staging files.
+
+The reference project, `re_gent`, uses `.regent/`. Reusing that path too early would look convenient, but it could also mix two tools' data before byte-level compatibility exists. That is the sort of shortcut that starts as "probably fine" and ends as a tiny haunted basement.
 
 ## Decision
 
-Use `.agit/` as the exclusive store directory for v1.
+Use `.agit/` as the exclusive v1 store directory.
 
-- Config: `.agit/config.json`
-- Objects: `.agit/objects/`
-- Refs: `.agit/refs/sessions/`
-- Blame: `.agit/blame/`
-- Index: `.agit/index.db`
-- Logs: `.agit/log/hook-error.log`
-- Ignore file: `.agitignore`
+```text
+.agit/
+|-- objects/
+|-- refs/
+|   `-- sessions/
+|-- log/
+|-- tmp/
+`-- index.db
+```
 
-A future migration path to read/write `.regent/` will be considered only after a dedicated compatibility plan is written and byte-level format parity is verified.
+Project-specific ignore rules live in `.agitignore` at the repository root.
 
 ## Consequences
 
-- Users of `re_gent` will not accidentally mix stores with `agit` v1.
-- A future migration command (`agit migrate-from-regent` or similar) can handle adoption.
-- `.agit/` should be added to `.gitignore` (never committed to the repository it observes).
+- Users will not accidentally mix `agit` and `re_gent` stores.
+- `.agit/` must stay out of git; it is local session history.
+- Future `.regent/` import or migration support must be explicit and documented.
+- Examples, tests, and user-facing docs should use `.agit/` consistently.

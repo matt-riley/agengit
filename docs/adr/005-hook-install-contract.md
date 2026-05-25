@@ -1,63 +1,39 @@
-# ADR 005: Hook Installation Contract
+# ADR 005: Install hooks without trampling user config
 
 **Status:** Accepted
+**Editorial note:** Reworded on 2026-05-25 for clarity; the decision is unchanged.
 
 ## Context
 
-`agit init` must write hook configuration into agent config files (e.g., `.claude/settings.json`, Codex CLI config, Gemini CLI config). These files are user-owned and may contain existing settings. Incorrect writes can break the agent for the user.
+`agit init` writes hook configuration into user-owned files such as:
+
+- `~/.claude/settings.json`
+- `~/.codex/hooks.json`
+- `~/.gemini/settings.json`
+
+Those files may already contain carefully arranged user settings. A recorder that clobbers them would be about as welcome as a goose in a server room.
 
 ## Decision
 
-### Sentinel-managed blocks
+`agit init` must:
 
-All `agit`-managed content is wrapped in clearly marked sentinel comments:
+- detect supported agent binaries on `PATH`;
+- create a backup before changing an existing config file;
+- write the absolute path to the current `agit` binary;
+- add `_agit` metadata so `doctor` and `uninstall` can recognize managed config;
+- preserve unrelated user-owned config keys;
+- be safe to run more than once.
 
-```
-// BEGIN AGIT MANAGED — do not edit this block manually
-...
-// END AGIT MANAGED
-```
+`agit uninstall` must:
 
-For JSON config files that don't support comments, `agit` uses a dedicated `"_agit"` key in the relevant config object.
-
-### Backup before write
-
-Before modifying any agent config file, `agit` creates a `.bak` copy:
-
-```
-.claude/settings.json.agit.bak
-```
-
-The backup is a verbatim copy of the file as it existed before `agit` touched it.
-
-### Idempotent init
-
-`agit init` can be run multiple times safely:
-
-- If a sentinel block already exists, it is replaced in-place with the current canonical content.
-- The rest of the file is preserved exactly.
-- Re-running after a binary update refreshes the absolute path in hook configs.
-
-### Absolute path requirement
-
-Hook commands in agent configs must use the **absolute path** to the `agit` binary (discovered at `agit init` time via `std.fs.selfExePath`). Relying on `PATH` is fragile across login shells, non-interactive shells, and shell re-configuration.
-
-### Uninstall
-
-`agit uninstall`:
-
-- Removes only sentinel-managed blocks.
-- Preserves all user-owned content in agent config files.
-- Reports a warning if a managed block was manually edited (content drift detected by comparing against the expected canonical block).
-- Does not delete `.agit/` — store contents are preserved.
-
-### Drift detection
-
-Before each `agit init` re-run, the installer checks whether a managed block has been manually modified since the last install. If drift is detected, the user is warned and asked to confirm overwrite.
+- remove only hooks that match the recorded `agit` binary metadata;
+- remove `_agit` metadata when managed hooks are gone;
+- preserve user-owned settings and hooks;
+- leave `.agit/` data in place.
 
 ## Consequences
 
-- User config files are never silently clobbered.
-- `agit init` can be safely re-run after binary updates.
-- `agit uninstall` leaves the system exactly as it was before `agit init` (plus the `.bak` files).
-- The absolute-path requirement means hook configs become stale if the binary moves; `agit doctor` detects and reports this.
+- Users can try `agit` without handing it the keys to every config cupboard.
+- Binary moves can make hook paths stale; `agit doctor` should report that mismatch.
+- Backups may remain after uninstall, which is preferable to losing user config.
+- Hook config formats should stay as close as possible to each agent's native shape.
