@@ -1,5 +1,6 @@
 const std = @import("std");
 const exe_path_mod = @import("../util/exe_path.zig");
+const home_mod = @import("../util/home.zig");
 
 pub fn run(
     io: std.Io,
@@ -12,7 +13,8 @@ pub fn run(
     var stdout_buf: [4096]u8 = undefined;
     var stdout = std.Io.File.stdout().writer(io, &stdout_buf);
 
-    const home = environ.getPosix("HOME") orelse return error.MissingHOME;
+    const home = try home_mod.getAlloc(gpa, environ);
+    defer gpa.free(home);
     const exe = try exe_path_mod.getAlloc(io, gpa);
     defer gpa.free(exe);
 

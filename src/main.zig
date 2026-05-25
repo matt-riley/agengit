@@ -162,6 +162,7 @@ test "version starts with a digit" {
 test {
     _ = @import("util/file_lock.zig");
     _ = @import("util/exe_path.zig");
+    _ = @import("util/home.zig");
     _ = @import("store/store.zig");
     _ = @import("store/ignore.zig");
     _ = @import("store/diff.zig");
