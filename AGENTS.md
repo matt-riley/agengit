@@ -26,3 +26,9 @@ History follows Conventional Commit-style prefixes such as `feat:`, `fix:`, `doc
 
 ## Security & Configuration Tips
 Never commit `.agit/`, `zig-out/`, `.zig-cache/`, or local agent config files. Hook installers modify user-level Claude, Codex, and Gemini configuration, so tests should use temporary directories and fixtures rather than real home-directory files. Treat captured session data as private unless explicitly reviewed.
+
+## Learned Rules
+
+<!-- Append new repository-specific rules below this line. Higher-numbered rules override older ones. -->
+
+1. [PROCESS] Always target only top-level `.agit/tmp/*.json` files when an agengit test intends to corrupt a staging file — because recursive walks also see session turn-state files under `.agit/tmp/turns/` and can accidentally exercise recovery-turn behavior instead of corrupt-staging handling.
