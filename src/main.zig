@@ -5,6 +5,7 @@ const file_lock_mod = @import("util/file_lock.zig");
 const hook_mod = @import("hook.zig");
 
 const cli = struct {
+    const help = @import("cli/help.zig");
     const init_cmd = @import("cli/init.zig");
     const uninstall = @import("cli/uninstall.zig");
     const doctor = @import("cli/doctor.zig");
@@ -178,6 +179,7 @@ test {
     _ = @import("store/snapshot.zig");
     _ = @import("recorder.zig");
     _ = @import("hook.zig");
+    _ = @import("cli/help.zig");
     _ = @import("cli/claude_hook.zig");
     _ = @import("cli/claude_tool_batch_hook.zig");
     _ = @import("cli/codex_hook.zig");

@@ -3,6 +3,24 @@ const store_mod = @import("../store/store.zig");
 const exe_path_mod = @import("../util/exe_path.zig");
 const home_mod = @import("../util/home.zig");
 const file_lock_mod = @import("../util/file_lock.zig");
+const help_mod = @import("help.zig");
+
+pub const usage = help_mod.UsageSpec{
+    .name = "doctor",
+    .synopsis = "[OPTIONS]",
+    .description = "Check store health and agent hook configuration.",
+    .options = &.{
+        .{ .flag = "--locks", .description = "List currently held lock files with age and executable path." },
+        .{ .flag = "--stats", .description = "Print finalize retry/object-write counters." },
+        .{ .flag = "--last-hook-error", .description = "Pretty-print the newest hook-error log entry." },
+        .{ .flag = "-h, --help", .description = "Display this help and exit." },
+    },
+    .examples = &.{
+        .{ .description = "check store and agent health", .command = "" },
+        .{ .description = "show lock files in use", .command = "--locks" },
+        .{ .description = "show finalize statistics", .command = "--stats" },
+    },
+};
 
 const DoctorOptions = struct {
     locks: bool = false,
@@ -85,31 +103,16 @@ fn parseOptions(iter: *std.process.Args.Iterator, stdout: *std.Io.File.Writer) !
         } else if (std.mem.eql(u8, arg, "--last-hook-error")) {
             options.last_hook_error = true;
         } else if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
-            try printUsage(stdout);
+            try help_mod.renderUsage(stdout, usage);
             return error.HelpShown;
         } else {
-            try stdout.interface.print("agit doctor: unknown option '{s}'\n\n", .{arg});
-            try printUsage(stdout);
+            try stdout.interface.print("error: unknown option '{s}'\n\n", .{arg});
+            try help_mod.renderUsage(stdout, usage);
             try stdout.flush();
             return error.InvalidArgument;
         }
     }
     return options;
-}
-
-fn printUsage(stdout: *std.Io.File.Writer) !void {
-    try stdout.interface.writeAll(
-        \\Usage: agit doctor [--locks] [--stats] [--last-hook-error]
-        \\
-        \\Check store health and agent hook configuration.
-        \\
-        \\Options:
-        \\  --locks      List currently held lock files with age and executable path.
-        \\  --stats      Print finalize retry/object-write counters.
-        \\  --last-hook-error  Pretty-print the newest hook-error log entry.
-        \\  -h, --help   Display this help and exit.
-        \\
-    );
 }
 
 fn printFinalizeStats(store: *const store_mod.Store, stdout: *std.Io.File.Writer) !void {

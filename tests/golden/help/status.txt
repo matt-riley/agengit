@@ -1,0 +1,14 @@
+USAGE:
+    agit status [OPTIONS]
+
+DESCRIPTION:
+    Show current repository state and agit store statistics.
+
+OPTIONS:
+    -h, --help
+        Display this help and exit.
+
+EXAMPLES:
+    # show repository status
+    agit status
+

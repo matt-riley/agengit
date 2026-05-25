@@ -1,0 +1,17 @@
+USAGE:
+    agit blame [OPTIONS] <FILE>
+
+DESCRIPTION:
+    Show per-line step attribution for a file path.
+
+OPTIONS:
+    -h, --help
+        Display this help and exit.
+
+EXAMPLES:
+    # show blame for a file
+    agit blame src/main.zig
+
+NOTES:
+    Blame recording is not yet available. Blame maps will be written in a future version.
+

@@ -1,0 +1,16 @@
+USAGE:
+    agit log [OPTIONS] [SESSION_ID]
+
+DESCRIPTION:
+    Show step history for a session.
+
+OPTIONS:
+    -h, --help
+        Display this help and exit.
+
+EXAMPLES:
+    # show most recent session steps
+    agit log
+    # show steps for a specific session
+    agit log session-abc123
+

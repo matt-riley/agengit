@@ -1,0 +1,18 @@
+USAGE:
+    agit reindex [OPTIONS]
+
+DESCRIPTION:
+    Rebuild the SQLite index from object/ref truth.
+
+OPTIONS:
+    --from <HASH>
+        Incrementally replay steps newer than <HASH> that are reachable from session refs.
+    -h, --help
+        Display this help and exit.
+
+EXAMPLES:
+    # rebuild entire index
+    agit reindex
+    # incrementally update from a hash
+    agit reindex --from abc123def
+

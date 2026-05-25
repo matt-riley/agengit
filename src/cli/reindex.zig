@@ -2,6 +2,21 @@ const std = @import("std");
 const store_mod = @import("../store/store.zig");
 const object = @import("../store/object.zig");
 const hash_mod = @import("../store/hash.zig");
+const help_mod = @import("help.zig");
+
+pub const usage = help_mod.UsageSpec{
+    .name = "reindex",
+    .synopsis = "[OPTIONS]",
+    .description = "Rebuild the SQLite index from object/ref truth.",
+    .options = &.{
+        .{ .flag = "--from <HASH>", .description = "Incrementally replay steps newer than <HASH> that are reachable from session refs." },
+        .{ .flag = "-h, --help", .description = "Display this help and exit." },
+    },
+    .examples = &.{
+        .{ .description = "rebuild entire index", .command = "" },
+        .{ .description = "incrementally update from a hash", .command = "--from abc123def" },
+    },
+};
 
 const Options = struct {
     from: ?hash_mod.Hash = null,
@@ -56,41 +71,28 @@ fn parseOptions(iter: *std.process.Args.Iterator, stdout: *std.Io.File.Writer) !
     while (iter.next()) |arg| {
         if (std.mem.eql(u8, arg, "--from")) {
             const value = iter.next() orelse {
-                try stdout.interface.writeAll("agit reindex: --from requires a 64-character hash\n\n");
-                try printUsage(stdout);
+                try stdout.interface.writeAll("error: --from requires a 64-character hash\n\n");
+                try help_mod.renderUsage(stdout, usage);
                 try stdout.flush();
                 return error.InvalidArgument;
             };
             options.from = hash_mod.Hash.fromHex(value) catch {
-                try stdout.interface.print("agit reindex: invalid --from hash '{s}'\n\n", .{value});
-                try printUsage(stdout);
+                try stdout.interface.print("error: invalid --from hash '{s}'\n\n", .{value});
+                try help_mod.renderUsage(stdout, usage);
                 try stdout.flush();
                 return error.InvalidArgument;
             };
         } else if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
-            try printUsage(stdout);
+            try help_mod.renderUsage(stdout, usage);
             return error.HelpShown;
         } else {
-            try stdout.interface.print("agit reindex: unknown option '{s}'\n\n", .{arg});
-            try printUsage(stdout);
+            try stdout.interface.print("error: unknown option '{s}'\n\n", .{arg});
+            try help_mod.renderUsage(stdout, usage);
             try stdout.flush();
             return error.InvalidArgument;
         }
     }
     return options;
-}
-
-fn printUsage(stdout: *std.Io.File.Writer) !void {
-    try stdout.interface.writeAll(
-        \\Usage: agit reindex [--from <hash>]
-        \\
-        \\Rebuild the SQLite index from object/ref truth.
-        \\
-        \\Options:
-        \\  --from <hash>  Incrementally replay steps newer than <hash> that are reachable from session refs.
-        \\  -h, --help     Display this help and exit.
-        \\
-    );
 }
 
 pub fn reindex(io: std.Io, gpa: std.mem.Allocator, store: *store_mod.Store) !ReindexStats {

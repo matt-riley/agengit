@@ -1,0 +1,14 @@
+USAGE:
+    agit uninstall [OPTIONS]
+
+DESCRIPTION:
+    Remove agit hooks from agent configurations.
+
+OPTIONS:
+    -h, --help
+        Display this help and exit.
+
+EXAMPLES:
+    # remove all hooks
+    agit uninstall
+

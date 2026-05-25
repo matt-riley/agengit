@@ -2,6 +2,19 @@ const std = @import("std");
 const exe_path_mod = @import("../util/exe_path.zig");
 const home_mod = @import("../util/home.zig");
 const atomic_json_mod = @import("../util/atomic_json.zig");
+const help_mod = @import("help.zig");
+
+pub const usage = help_mod.UsageSpec{
+    .name = "uninstall",
+    .synopsis = "[OPTIONS]",
+    .description = "Remove agit hooks from agent configurations.",
+    .options = &.{
+        .{ .flag = "-h, --help", .description = "Display this help and exit." },
+    },
+    .examples = &.{
+        .{ .description = "remove all hooks", .command = "" },
+    },
+};
 
 pub fn run(
     io: std.Io,
@@ -9,10 +22,23 @@ pub fn run(
     environ: std.process.Environ,
     iter: *std.process.Args.Iterator,
 ) !void {
-    _ = iter;
-
     var stdout_buf: [4096]u8 = undefined;
     var stdout = std.Io.File.stdout().writer(io, &stdout_buf);
+
+    // Parse --help / -h
+    var help_requested = false;
+    while (iter.next()) |arg| {
+        if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
+            help_requested = true;
+            break;
+        }
+    }
+
+    if (help_requested) {
+        try help_mod.renderUsage(&stdout, usage);
+        try stdout.flush();
+        return;
+    }
 
     const home = try home_mod.getAlloc(gpa, environ);
     defer gpa.free(home);

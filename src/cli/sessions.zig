@@ -1,13 +1,39 @@
 const std = @import("std");
 const store_mod = @import("../store/store.zig");
 const status = @import("status.zig");
+const help_mod = @import("help.zig");
+
+pub const usage = help_mod.UsageSpec{
+    .name = "sessions",
+    .synopsis = "[OPTIONS]",
+    .description = "List recorded agent sessions from the index.",
+    .options = &.{
+        .{ .flag = "-h, --help", .description = "Display this help and exit." },
+    },
+    .examples = &.{
+        .{ .description = "list all sessions", .command = "" },
+    },
+};
 
 // Phase 6 implementation: list recorded agent sessions from the index.
 pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator) !void {
-    _ = iter;
-
     var stdout_buf: [8192]u8 = undefined;
     var stdout = std.Io.File.stdout().writer(io, &stdout_buf);
+
+    // Parse --help / -h
+    var help_requested = false;
+    while (iter.next()) |arg| {
+        if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
+            help_requested = true;
+            break;
+        }
+    }
+
+    if (help_requested) {
+        try help_mod.renderUsage(&stdout, usage);
+        try stdout.flush();
+        return;
+    }
 
     var store = (try status.openStoreOrDie(io, gpa, &stdout)) orelse return;
     defer store.deinit(io);

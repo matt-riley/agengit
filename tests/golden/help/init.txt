@@ -1,0 +1,18 @@
+USAGE:
+    agit init [OPTIONS]
+
+DESCRIPTION:
+    Set up agit hooks for installed agent CLIs.
+
+OPTIONS:
+    --force
+        Back up and replace malformed/non-object existing JSON config.
+    -h, --help
+        Display this help and exit.
+
+EXAMPLES:
+    # install hooks for available agents
+    agit init
+    # reinstall even if config exists
+    agit init --force
+
