@@ -26,7 +26,6 @@ jobs:
           - { target: aarch64-linux-musl, archive: agit-aarch64-linux.tar.gz,  binary: agit }
           - { target: aarch64-macos,      archive: agit-aarch64-macos.tar.gz,  binary: agit }
           - { target: x86_64-macos,       archive: agit-x86_64-macos.tar.gz,   binary: agit }
-          - { target: x86_64-windows,     archive: agit-x86_64-windows.zip,    binary: agit.exe }
     steps:
       - uses: actions/checkout@v4
         with:
@@ -39,17 +38,10 @@ jobs:
       - name: Build release binary
         run: zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSafe
 
-      - name: Create archive (Unix)
-        if: ${{ !contains(matrix.target, 'windows') }}
+      - name: Create archive
         run: |
           mkdir -p dist
           tar -czf dist/${{ matrix.archive }} -C zig-out/bin ${{ matrix.binary }}
-
-      - name: Create archive (Windows)
-        if: contains(matrix.target, 'windows')
-        run: |
-          mkdir -p dist
-          zip -j dist/${{ matrix.archive }} zig-out/bin/${{ matrix.binary }}
 
       - name: Upload to release
         run: gh release upload "${{ needs.release-please.outputs.tag_name }}" dist/${{ matrix.archive }} --clobber
@@ -69,7 +61,6 @@ jobs:
           gh release download "${{ needs.release-please.outputs.tag_name }}" \
             --repo "${{ github.repository }}" \
             --pattern "agit-*.tar.gz" \
-            --pattern "agit-*.zip" \
             --dir dist
           cd dist
           sha256sum * > checksums.txt
@@ -100,7 +91,7 @@ jobs:
         env:
           TAG: ${{ needs.release-please.outputs.tag_name }}
           TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
-          GH_TOKEN: ${{ secrets.TAP_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           if [ -z "${TAP_TOKEN:-}" ]; then

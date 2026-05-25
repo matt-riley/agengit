@@ -88,7 +88,6 @@ zig build -Dtarget=x86_64-linux-musl -Doptimize=ReleaseSafe
 zig build -Dtarget=aarch64-linux-musl -Doptimize=ReleaseSafe
 zig build -Dtarget=aarch64-macos -Doptimize=ReleaseSafe
 zig build -Dtarget=x86_64-macos -Doptimize=ReleaseSafe
-zig build -Dtarget=x86_64-windows -Doptimize=ReleaseSafe
 ```
 
 The docs should stay honest: if the binary cannot do it today, call it planned.
