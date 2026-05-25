@@ -1,5 +1,6 @@
 const std = @import("std");
 const exe_path_mod = @import("../util/exe_path.zig");
+const fs_mod = @import("../util/fs.zig");
 const home_mod = @import("../util/home.zig");
 
 pub fn run(
@@ -178,7 +179,7 @@ fn writeFileAtomic(io: std.Io, path: []const u8, content: []const u8) !void {
     var af = try std.Io.Dir.cwd().createFileAtomic(io, path, .{ .replace = true, .make_path = false });
     defer af.deinit(io);
     try af.file.writeStreamingAll(io, content);
-    try af.replace(io);
+    try fs_mod.atomicReplace(io, &af);
 }
 
 test "removeClaude removes agit-managed hooks and returns changed" {

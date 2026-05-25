@@ -1,5 +1,6 @@
 const std = @import("std");
 const hash_mod = @import("hash.zig");
+const fs_mod = @import("../util/fs.zig");
 
 pub const Hash = hash_mod.Hash;
 
@@ -72,13 +73,7 @@ pub fn write(io: std.Io, root: std.Io.Dir, data: []const u8) !Hash {
     defer af.deinit(io);
 
     try af.file.writeStreamingAll(io, data);
-    try af.file.sync(io);
-
-    // link() fails with PathAlreadyExists for duplicate content — that's fine.
-    af.link(io) catch |err| switch (err) {
-        error.PathAlreadyExists => {},
-        else => return err,
-    };
+    _ = try fs_mod.linkDurable(io, &af);
 
     return h;
 }

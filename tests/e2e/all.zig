@@ -15,6 +15,7 @@ test {
 
     _ = @import("record_replay/concurrent_writers.zig");
     _ = @import("record_replay/crash_recovery.zig");
+    _ = @import("record_replay/durable_writes.zig");
 
     _ = @import("doctor/healthy_store.zig");
     _ = @import("doctor/drifted_store.zig");

@@ -1,5 +1,6 @@
 const std = @import("std");
 const clap = @import("clap");
+const fs_mod = @import("util/fs.zig");
 
 const cli = struct {
     const init_cmd = @import("cli/init.zig");
@@ -53,6 +54,8 @@ const top_params = clap.parseParamsComptime(
 );
 
 pub fn main(init: std.process.Init) !void {
+    fs_mod.configureFromEnviron(init.minimal.environ);
+
     var stdout_buf: [4096]u8 = undefined;
     var stderr_buf: [512]u8 = undefined;
     var stdout = std.Io.File.stdout().writer(init.io, &stdout_buf);
@@ -161,6 +164,7 @@ test "version starts with a digit" {
 // Pull util module tests into the main test binary.
 test {
     _ = @import("util/file_lock.zig");
+    _ = @import("util/fs.zig");
     _ = @import("util/exe_path.zig");
     _ = @import("util/home.zig");
     _ = @import("store/store.zig");

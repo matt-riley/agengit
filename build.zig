@@ -64,16 +64,37 @@ pub fn build(b: *std.Build) void {
     const test_e2e_step = b.step("test-e2e", "Run end-to-end tests");
     test_e2e_step.dependOn(&run_e2e_tests.step);
 
+    const durable_bench = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("bench/durable.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{
+                    .name = "fs_util",
+                    .module = b.createModule(.{
+                        .root_source_file = b.path("src/util/fs.zig"),
+                        .target = target,
+                        .optimize = optimize,
+                    }),
+                },
+            },
+        }),
+    });
+    const run_durable_bench = b.addRunArtifact(durable_bench);
+    const bench_durable_step = b.step("bench-durable", "Run durable-write microbenchmark");
+    bench_durable_step.dependOn(&run_durable_bench.step);
+
     const fmt_step = b.step("fmt", "Format source files");
     const fmt = b.addFmt(.{
-        .paths = &.{ "src", "tests", "build.zig" },
+        .paths = &.{ "src", "tests", "bench", "build.zig" },
         .check = false,
     });
     fmt_step.dependOn(&fmt.step);
 
     const check_step = b.step("check-fmt", "Check formatting");
     const check_fmt = b.addFmt(.{
-        .paths = &.{ "src", "tests", "build.zig" },
+        .paths = &.{ "src", "tests", "bench", "build.zig" },
         .check = true,
     });
     check_step.dependOn(&check_fmt.step);

@@ -153,9 +153,14 @@ cat .agit/log/hook-error.log
 ```sh
 zig build test
 zig build test-e2e
+zig build bench-durable
 zig build check-fmt
 zig build -Dtarget=x86_64-linux-musl -Doptimize=ReleaseSafe
 ```
+
+Durability fsync is enabled by default for atomic store/config writes. Set
+`AGIT_FSYNC=0` only for tests or microbenchmarks when you intentionally want to
+skip directory fsync.
 
 E2E golden files live under `tests/golden/`. Regenerate them intentionally with:
 
