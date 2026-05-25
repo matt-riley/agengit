@@ -1,6 +1,6 @@
 # ADR 007: Atomic ref and index updates with startup reconciliation
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-05-25
 
 ## Context

@@ -359,18 +359,11 @@ pub const Recorder = struct {
                 current_head,
                 step_hash,
                 &step,
+                msgs.items,
+                staging_val.tool_calls,
             );
 
             if (!ok) continue;
-
-            // Insert messages and tool_calls into the index.
-            var step_hex = step_hash.toHex();
-            for (msgs.items, 0..) |msg, i| {
-                try self.store.index.insertMessage(&step_hex, @intCast(i), msg.role, msg.content);
-            }
-            for (staging_val.tool_calls, 0..) |tc, i| {
-                try self.store.index.insertToolCall(&step_hex, @intCast(i), tc.tool_name, tc.args, tc.result);
-            }
             return;
         }
         return error.CasConflict;

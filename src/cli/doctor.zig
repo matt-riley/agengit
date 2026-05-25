@@ -16,6 +16,7 @@ pub fn run(
 ) !void {
     var stdout_buf: [4096]u8 = undefined;
     var stdout = std.Io.File.stdout().writer(io, &stdout_buf);
+    var has_failures = false;
 
     const options = parseOptions(iter, &stdout) catch |err| switch (err) {
         error.HelpShown => {
@@ -34,10 +35,25 @@ pub fn run(
     var store = store_mod.Store.open(io, std.Io.Dir.cwd(), gpa) catch |err| {
         try stdout.interface.print("  ✗ .agit/ store: {s}\n", .{@errorName(err)});
         try stdout.flush();
-        return;
+        std.process.exit(1);
     };
     defer store.deinit(io);
     try stdout.interface.writeAll("  ✓ .agit/ store: ok\n");
+
+    const reconcile = try store.reconcile(io, gpa, .dry_run);
+    if (reconcile.drifted > 0 or reconcile.index_ahead > 0) {
+        has_failures = true;
+        try stdout.interface.print(
+            "  ✗ ref/index drift: {d} repairable, {d} index-ahead session{s}\n",
+            .{
+                reconcile.drifted,
+                reconcile.index_ahead,
+                if (reconcile.drifted + reconcile.index_ahead == 1) "" else "s",
+            },
+        );
+    } else {
+        try stdout.interface.writeAll("  ✓ ref/index drift: none detected\n");
+    }
 
     try checkAgitIgnore(io, std.Io.Dir.cwd(), gpa, &stdout);
     try checkStaging(io, gpa, store.root, &stdout);
@@ -47,11 +63,12 @@ pub fn run(
     try checkConfigTmpFiles(io, gpa, home, "claude", ".claude/settings.json", &stdout);
     try checkConfigTmpFiles(io, gpa, home, "codex", ".codex/hooks.json", &stdout);
     try checkConfigTmpFiles(io, gpa, home, "gemini", ".gemini/settings.json", &stdout);
-    try checkAgent(io, gpa, home, exe, "claude", ".claude/settings.json", &stdout);
-    try checkAgent(io, gpa, home, exe, "codex", ".codex/hooks.json", &stdout);
-    try checkAgent(io, gpa, home, exe, "gemini", ".gemini/settings.json", &stdout);
+    if (!try checkAgent(io, gpa, home, exe, "claude", ".claude/settings.json", &stdout)) has_failures = true;
+    if (!try checkAgent(io, gpa, home, exe, "codex", ".codex/hooks.json", &stdout)) has_failures = true;
+    if (!try checkAgent(io, gpa, home, exe, "gemini", ".gemini/settings.json", &stdout)) has_failures = true;
 
     try stdout.flush();
+    if (has_failures) std.process.exit(1);
 }
 
 fn parseOptions(iter: *std.process.Args.Iterator, stdout: *std.Io.File.Writer) !DoctorOptions {
@@ -273,11 +290,11 @@ fn checkAgent(
     agent_name: []const u8,
     rel_config: []const u8,
     stdout: *std.Io.File.Writer,
-) !void {
+) !bool {
     const has_bin = detectBinary(io, gpa, agent_name);
     if (!has_bin) {
         try stdout.interface.print("  - {s}: not installed\n", .{agent_name});
-        return;
+        return true;
     }
     try stdout.interface.print("  ✓ {s}: binary found\n", .{agent_name});
 
@@ -290,44 +307,46 @@ fn checkAgent(
 
     const text = (readFileAllocOrNull(io, aa, config_path) catch |err| {
         try stdout.interface.print("  ✗ {s}: config unreadable ({s}): {s}\n", .{ agent_name, config_path, @errorName(err) });
-        return;
+        return false;
     }) orelse {
         try stdout.interface.print("  ✗ {s}: config not found ({s})\n", .{ agent_name, config_path });
-        return;
+        return false;
     };
 
     const root_val = std.json.parseFromSliceLeaky(std.json.Value, aa, text, .{
         .allocate = .alloc_always,
     }) catch {
         try stdout.interface.print("  ✗ {s}: config not valid JSON ({s})\n", .{ agent_name, config_path });
-        return;
+        return false;
     };
 
     if (root_val != .object) {
         try stdout.interface.print("  ✗ {s}: config root is not an object\n", .{agent_name});
-        return;
+        return false;
     }
 
     const agit = root_val.object.get("_agit");
     if (agit == null or agit.? != .object) {
         try stdout.interface.print("  ✗ {s}: agit not initialized (no _agit metadata)\n", .{agent_name});
-        return;
+        return false;
     }
 
     const bin_val = agit.?.object.get("binary");
     if (bin_val == null or bin_val.? != .string) {
         try stdout.interface.print("  ✗ {s}: _agit.binary missing\n", .{agent_name});
-        return;
+        return false;
     }
 
     const stored = bin_val.?.string;
     if (std.mem.eql(u8, stored, exe)) {
         try stdout.interface.print("  ✓ {s}: hooks configured (binary matches)\n", .{agent_name});
+        return true;
     } else {
         try stdout.interface.print(
             "  ✗ {s}: binary mismatch (config has {s}, current is {s})\n",
             .{ agent_name, stored, exe },
         );
+        return false;
     }
 }
 
