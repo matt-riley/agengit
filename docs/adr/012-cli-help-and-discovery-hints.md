@@ -1,6 +1,6 @@
 # ADR 012: Consistent CLI help and repo-discovery hints
 
-**Status:** Proposed
+**Status:** Implemented
 **Date:** 2026-05-25
 
 ## Context
