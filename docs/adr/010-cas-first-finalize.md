@@ -1,6 +1,6 @@
 # ADR 010: CAS-first finalize to avoid retry churn
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-05-25
 
 ## Context
@@ -89,3 +89,15 @@ object is unchanged and not rewritten.
 - The recorder is easier to reason about: one phase pure and idempotent,
   one phase transactional. Future readers (or future me) get clearer
   failure surfaces.
+
+## Implementation
+
+1. Added `Store.commitFinalizedStep` so CAS parent checks happen under the
+   session lock before writing a step object.
+2. `recordAssistantAndFinalize` now retries with configurable
+   `max_finalize_retries` (default 5), using the observed parent from the
+   previous failed attempt.
+3. Added durable counters in SQLite meta:
+   - `metrics.finalize_retries_total`
+   - `metrics.finalize_objects_written_total`
+4. Added `agit doctor --stats` output for the finalize counters.

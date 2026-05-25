@@ -29,6 +29,8 @@ pub const BlameMap = blame_mod.BlameMap;
 pub const BlameEntry = blame_mod.BlameEntry;
 pub const freeBlameMap = blame_mod.freeBlameMap;
 pub const computeBlame = blame_mod.computeBlame;
+pub const finalize_retries_metric_key = "metrics.finalize_retries_total";
+pub const finalize_objects_metric_key = "metrics.finalize_objects_written_total";
 
 /// The agit content-addressed object store and associated index.
 ///
@@ -552,6 +554,117 @@ pub const Store = struct {
         try self.index.metaSet(seq_key, seq_str);
     }
 
+    pub const FinalizeCommitInput = struct {
+        origin: []const u8,
+        session_id: []const u8,
+        turn_id: []const u8,
+        tree_hash: []const u8,
+        timestamp: i64,
+        causes: []const Cause,
+        messages: []const StepMessage,
+        tool_calls: []const StepToolCall,
+        expected_parent: ?Hash,
+        retry_delta: i64 = 0,
+    };
+
+    pub const FinalizeCommitResult = union(enum) {
+        committed: Hash,
+        parent_moved: ?Hash,
+        duplicate_turn: [64]u8,
+    };
+
+    pub fn commitFinalizedStep(
+        self: *Store,
+        io: std.Io,
+        gpa: std.mem.Allocator,
+        input: FinalizeCommitInput,
+    ) !FinalizeCommitResult {
+        const path = try ref.buildRefPath(gpa, input.origin, input.session_id);
+        defer gpa.free(path);
+
+        const lock_path = try std.fmt.allocPrint(gpa, "{s}.lock", .{path});
+        defer gpa.free(lock_path);
+
+        const ref_parent_end = std.mem.lastIndexOfScalar(u8, path, '/') orelse 0;
+        if (ref_parent_end > 0) {
+            try self.root.createDirPath(io, path[0..ref_parent_end]);
+        }
+
+        var lock = try file_lock.LockFile.acquire(io, self.root, lock_path, .{});
+        defer lock.release(io);
+
+        const current_data = self.root.readFileAlloc(io, path, gpa, .unlimited) catch |err| switch (err) {
+            error.FileNotFound => null,
+            else => return err,
+        };
+        defer if (current_data) |d| gpa.free(d);
+
+        const current: ?Hash = if (current_data) |d| blk: {
+            const trimmed = std.mem.trim(u8, d, " \r\n");
+            break :blk Hash.fromHex(trimmed) catch return error.CorruptRef;
+        } else null;
+
+        const matches = if (input.expected_parent) |exp|
+            if (current) |cur| cur.eql(exp) else false
+        else
+            current == null;
+        if (!matches) return .{ .parent_moved = current };
+
+        if (try self.index.queryStepHash(input.origin, input.session_id, input.turn_id)) |existing_hex| {
+            return .{ .duplicate_turn = existing_hex };
+        }
+
+        var parent_hex_buf: [64]u8 = undefined;
+        const parent_str: ?[]const u8 = if (current) |h| blk: {
+            parent_hex_buf = h.toHex();
+            break :blk parent_hex_buf[0..];
+        } else null;
+
+        const step = Step{
+            .parent = parent_str,
+            .tree = input.tree_hash,
+            .session_id = input.session_id,
+            .origin = input.origin,
+            .turn_id = input.turn_id,
+            .causes = input.causes,
+            .timestamp = input.timestamp,
+            .messages = input.messages,
+            .tool_calls = input.tool_calls,
+        };
+        const step_hash = try self.writeStep(io, gpa, step);
+        const step_hex = step_hash.toHex();
+
+        try self.index.db.transaction();
+        errdefer self.index.db.rollback();
+
+        try self.index.upsertSession(input.origin, input.session_id, &step_hex);
+        try self.index.insertStep(
+            &step_hex,
+            input.origin,
+            input.session_id,
+            input.turn_id,
+            parent_str,
+            input.tree_hash,
+            input.timestamp,
+        );
+        for (input.messages, 0..) |msg, i| {
+            try self.index.insertMessage(&step_hex, @intCast(i), msg.role, msg.content);
+        }
+        for (input.tool_calls, 0..) |tc, i| {
+            try self.index.insertToolCall(&step_hex, @intCast(i), tc.tool_name, tc.args, tc.result);
+        }
+        try self.updateSessionMetaLocked(gpa, input.origin, input.session_id, step_hash);
+        if (input.retry_delta > 0) {
+            try self.index.addMetaCounter(finalize_retries_metric_key, input.retry_delta);
+        }
+        try self.index.addMetaCounter(finalize_objects_metric_key, 1);
+
+        try ref.writeRefToPath(io, self.root, path, step_hash);
+        try self.index.db.commit();
+
+        return .{ .committed = step_hash };
+    }
+
     /// Compare-and-swap the session HEAD ref and, within the same lock window,
     /// upsert the session and insert the step into the index.
     ///
@@ -643,6 +756,23 @@ pub const Store = struct {
         return true;
     }
 };
+
+fn countObjectFiles(io: std.Io, gpa: std.mem.Allocator, root: std.Io.Dir) !usize {
+    var obj_dir = root.openDir(io, "objects", .{ .iterate = true }) catch |err| switch (err) {
+        error.FileNotFound, error.NotDir => return 0,
+        else => return err,
+    };
+    defer obj_dir.close(io);
+
+    var walker = try obj_dir.walk(gpa);
+    defer walker.deinit();
+
+    var count: usize = 0;
+    while (try walker.next(io)) |entry| {
+        if (entry.kind == .file) count += 1;
+    }
+    return count;
+}
 
 test "store open creates structure" {
     var tmp = std.testing.tmpDir(.{});
@@ -741,6 +871,80 @@ test "store casRef refuses duplicate turn id with different hash" {
     const head = try s.readRef(io, gpa, step1.origin, step1.session_id);
     try std.testing.expect(head != null);
     try std.testing.expect(h1.eql(head.?));
+}
+
+test "commitFinalizedStep retries without rewriting step object" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+
+    var s = try Store.open(io, tmp.dir, gpa);
+    defer s.deinit(io);
+
+    const step1 = Step{
+        .parent = null,
+        .tree = "a" ** 64,
+        .session_id = "sess-r",
+        .origin = "github.com/u/r",
+        .turn_id = "t1",
+        .causes = &.{},
+        .timestamp = 1000,
+    };
+    const h1 = try s.writeStep(io, gpa, step1);
+    try std.testing.expect(try s.casRef(io, gpa, step1.origin, step1.session_id, null, h1, &step1, step1.messages, step1.tool_calls));
+
+    const before_count = try countObjectFiles(io, gpa, s.root);
+
+    const first_try = try s.commitFinalizedStep(io, gpa, .{
+        .origin = step1.origin,
+        .session_id = step1.session_id,
+        .turn_id = "t2",
+        .tree_hash = "b" ** 64,
+        .timestamp = 1001,
+        .causes = &.{},
+        .messages = &.{.{ .role = "assistant", .content = "hello" }},
+        .tool_calls = &.{},
+        .expected_parent = null,
+    });
+    try std.testing.expect(first_try == .parent_moved);
+    try std.testing.expect(first_try.parent_moved != null);
+
+    const wrong_parent = Hash.ofBytes("wrong-parent");
+    const second_try = try s.commitFinalizedStep(io, gpa, .{
+        .origin = step1.origin,
+        .session_id = step1.session_id,
+        .turn_id = "t2",
+        .tree_hash = "b" ** 64,
+        .timestamp = 1001,
+        .causes = &.{},
+        .messages = &.{.{ .role = "assistant", .content = "hello" }},
+        .tool_calls = &.{},
+        .expected_parent = wrong_parent,
+    });
+    try std.testing.expect(second_try == .parent_moved);
+
+    const third_try = try s.commitFinalizedStep(io, gpa, .{
+        .origin = step1.origin,
+        .session_id = step1.session_id,
+        .turn_id = "t2",
+        .tree_hash = "b" ** 64,
+        .timestamp = 1001,
+        .causes = &.{},
+        .messages = &.{.{ .role = "assistant", .content = "hello" }},
+        .tool_calls = &.{},
+        .expected_parent = h1,
+        .retry_delta = 2,
+    });
+    try std.testing.expect(third_try == .committed);
+
+    const after_count = try countObjectFiles(io, gpa, s.root);
+    try std.testing.expectEqual(before_count + 1, after_count);
+
+    const retries = try s.index.readMetaCounter(finalize_retries_metric_key);
+    const objects = try s.index.readMetaCounter(finalize_objects_metric_key);
+    try std.testing.expectEqual(@as(i64, 2), retries);
+    try std.testing.expectEqual(@as(i64, 1), objects);
 }
 
 test "reconcile repairs when ref is ahead of index" {

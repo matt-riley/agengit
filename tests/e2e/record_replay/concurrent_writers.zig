@@ -65,6 +65,11 @@ test "record_replay/concurrent_writers" {
     try std.testing.expect(sessions <= 8);
     try std.testing.expectEqual(sessions, steps);
 
+    var doctor = try sandbox.run(&.{ "doctor", "--stats" }, null);
+    defer doctor.deinit(gpa);
+    const objects_written = try parseNamedValue(doctor.stdout, "objects_written_total=");
+    try std.testing.expectEqual(steps, objects_written);
+
     const err_log = try readOptional(&sandbox, ".agit/log/hook-error.log");
     defer if (err_log) |buf| gpa.free(buf);
     if (err_log) |buf| {
@@ -93,4 +98,13 @@ fn parseCount(output: []const u8, prefix: []const u8) !usize {
     while (end < rest.len and rest[end] >= '0' and rest[end] <= '9') : (end += 1) {}
     if (end == i) return error.InvalidFormat;
     return std.fmt.parseUnsigned(usize, rest[i..end], 10);
+}
+
+fn parseNamedValue(output: []const u8, key: []const u8) !usize {
+    const start = std.mem.indexOf(u8, output, key) orelse return error.InvalidFormat;
+    const rest = output[start + key.len ..];
+    var end: usize = 0;
+    while (end < rest.len and rest[end] >= '0' and rest[end] <= '9') : (end += 1) {}
+    if (end == 0) return error.InvalidFormat;
+    return std.fmt.parseUnsigned(usize, rest[0..end], 10);
 }
