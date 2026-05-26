@@ -65,6 +65,23 @@ pub const fsck_usage = help_mod.UsageSpec{
     },
 };
 
+pub const gc_usage = help_mod.UsageSpec{
+    .name = "gc",
+    .synopsis = "[OPTIONS]",
+    .description = "Prune unreachable store data and stale temporary files.",
+    .options = &.{
+        .{ .long = "json", .description = "Render gc results as structured JSON." },
+        .{ .long = "grace-hours", .value_name = "N", .description = "Only prune unreachable objects/tmp files older than <N> hours. Defaults to 2." },
+        .{ .long = "prune-before", .value_name = "YYYY-MM-DD", .description = "Delete session refs whose head-step timestamp is older than UTC midnight on the given date before sweeping." },
+        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
+    },
+    .examples = &.{
+        .{ .description = "prune unreachable store data with the default grace period", .command = "" },
+        .{ .description = "immediately prune stale data without the 2-hour grace window", .command = "--grace-hours 0" },
+        .{ .description = "drop sessions older than a UTC date before sweeping", .command = "--prune-before 2026-01-01" },
+    },
+};
+
 pub const status_usage = help_mod.UsageSpec{
     .name = "status",
     .synopsis = "[OPTIONS]",
@@ -208,6 +225,7 @@ pub const public_commands = [_]help_mod.CommandSpec{
     .{ .name = "uninstall", .summary = "Remove agit hooks from agent configurations", .usage = &uninstall_usage },
     .{ .name = "doctor", .summary = "Check agent hook configurations and store health", .usage = &doctor_usage },
     .{ .name = "fsck", .summary = "Verify store integrity without mutating data", .usage = &fsck_usage },
+    .{ .name = "gc", .summary = "Prune unreachable store data and stale temporaries", .usage = &gc_usage },
     .{ .name = "status", .summary = "Show current repository state", .usage = &status_usage },
     .{ .name = "sessions", .summary = "List recorded agent sessions", .usage = &sessions_usage },
     .{ .name = "log", .summary = "Show step history for a session", .usage = &log_usage },

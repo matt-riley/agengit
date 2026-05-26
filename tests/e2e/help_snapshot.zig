@@ -146,6 +146,17 @@ test "golden/help/fsck" {
     try golden.assertGolden(&sandbox, "tests/golden/help/fsck.txt", result.stdout);
 }
 
+test "golden/help/gc" {
+    var sandbox = try harness.Sandbox.init(std.testing.allocator);
+    defer sandbox.deinit();
+
+    var result = try sandbox.run(&.{ "gc", "--help" }, null);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(u8, 0), result.exit_code);
+
+    try golden.assertGolden(&sandbox, "tests/golden/help/gc.txt", result.stdout);
+}
+
 test "golden/help/reindex" {
     var sandbox = try harness.Sandbox.init(std.testing.allocator);
     defer sandbox.deinit();

@@ -3,8 +3,8 @@ const config_mod = @import("store/config.zig");
 const store_mod = @import("store/store.zig");
 const object = @import("store/object.zig");
 const redact_mod = @import("privacy/redact.zig");
-const file_lock_mod = @import("util/file_lock.zig");
 const fs_mod = @import("util/fs.zig");
+const file_lock_mod = @import("util/file_lock.zig");
 
 pub const Hash = store_mod.Hash;
 pub const Ignorer = store_mod.Ignorer;
@@ -377,6 +377,11 @@ pub const Recorder = struct {
             }
             return;
         }
+
+        // Hold the gc maintenance lock across snapshot/object writes and ref advance
+        // so gc cannot prune deduplicated objects between capture and finalize.
+        var maintenance_lock = try file_lock_mod.LockFile.acquire(io, self.store.root, "gc.lock", .{});
+        defer maintenance_lock.release(io);
 
         // Take a workspace snapshot — this is the same tree regardless of CAS retries.
         const tree_hash = try self.store.snapshot(

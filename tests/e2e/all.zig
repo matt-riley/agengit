@@ -34,4 +34,5 @@ test {
     _ = @import("fsck/healthy_store.zig");
     _ = @import("fsck/object_hash_mismatch.zig");
     _ = @import("fsck/reindex_repairs_index.zig");
+    _ = @import("gc/prune_and_cleanup.zig");
 }

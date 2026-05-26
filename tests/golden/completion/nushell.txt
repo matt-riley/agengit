@@ -5,6 +5,7 @@ def "nu-complete agit command" [] {
         { value: 'uninstall', description: 'Remove agit hooks from agent configurations' }
         { value: 'doctor', description: 'Check agent hook configurations and store health' }
         { value: 'fsck', description: 'Verify store integrity without mutating data' }
+        { value: 'gc', description: 'Prune unreachable store data and stale temporaries' }
         { value: 'status', description: 'Show current repository state' }
         { value: 'sessions', description: 'List recorded agent sessions' }
         { value: 'log', description: 'Show step history for a session' }
@@ -47,6 +48,13 @@ extern "agit doctor" [
 extern "agit fsck" [
     --json
     --reindex
+    --help(-h)
+]
+
+extern "agit gc" [
+    --json
+    --grace-hours: string
+    --prune-before: string
     --help(-h)
 ]
 
