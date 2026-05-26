@@ -12,6 +12,7 @@ _agit() {
         'sessions:List recorded agent sessions'
         'log:Show step history for a session'
         'show:Show details of a step'
+        'grep:Search recorded messages and tool activity'
         'blame:Show per-line step attribution for a file'
         'cat:Print a raw object by hash'
         'privacy:Scan reachable content for sensitive data'
@@ -83,6 +84,19 @@ _agit() {
                         '--json[Render the step details as structured JSON.]' \
                         '--redacted[Redact obvious secrets in the rendered output.]' \
                         '--full[Render full output even when redaction is the repo default.]' \
+                        '--help[Display this help and exit.]'
+                    ;;
+                grep)
+                    _arguments \
+                        '--json[Render grep matches as structured JSON.]' \
+                        '--origin[Only search matches recorded by the given origin.]:name' \
+                        '--session[Only search one session id, or pass origin/session-id to disambiguate.]:id' \
+                        '--since[Only include matches on or after UTC midnight for the given date.]:YYYY-MM-DD' \
+                        '--until[Only include matches before UTC midnight after the given date.]:YYYY-MM-DD' \
+                        '--limit[Return at most <N> matches. Defaults to 20.]:N' \
+                        '--context[Use <N> snippet tokens around each match. Defaults to 12.]:N' \
+                        '--redacted[Redact obvious secrets in rendered snippets.]' \
+                        '--full[Render full snippets even when redaction is the repo default.]' \
                         '--help[Display this help and exit.]'
                     ;;
                 blame)

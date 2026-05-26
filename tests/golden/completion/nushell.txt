@@ -10,6 +10,7 @@ def "nu-complete agit command" [] {
         { value: 'sessions', description: 'List recorded agent sessions' }
         { value: 'log', description: 'Show step history for a session' }
         { value: 'show', description: 'Show details of a step' }
+        { value: 'grep', description: 'Search recorded messages and tool activity' }
         { value: 'blame', description: 'Show per-line step attribution for a file' }
         { value: 'cat', description: 'Print a raw object by hash' }
         { value: 'privacy', description: 'Scan reachable content for sensitive data' }
@@ -75,6 +76,19 @@ extern "agit log" [
 
 extern "agit show" [
     --json
+    --redacted
+    --full
+    --help(-h)
+]
+
+extern "agit grep" [
+    --json
+    --origin: string
+    --session: string
+    --since: string
+    --until: string
+    --limit: string
+    --context: string
     --redacted
     --full
     --help(-h)

@@ -137,6 +137,29 @@ pub const show_usage = help_mod.UsageSpec{
     },
 };
 
+pub const grep_usage = help_mod.UsageSpec{
+    .name = "grep",
+    .synopsis = "[OPTIONS] <QUERY>",
+    .description = "Search recorded messages and tool activity across all sessions.",
+    .options = &.{
+        .{ .long = "json", .description = "Render grep matches as structured JSON." },
+        .{ .long = "origin", .value_name = "name", .description = "Only search matches recorded by the given origin." },
+        .{ .long = "session", .value_name = "id", .description = "Only search one session id, or pass origin/session-id to disambiguate." },
+        .{ .long = "since", .value_name = "YYYY-MM-DD", .description = "Only include matches on or after UTC midnight for the given date." },
+        .{ .long = "until", .value_name = "YYYY-MM-DD", .description = "Only include matches before UTC midnight after the given date." },
+        .{ .long = "limit", .value_name = "N", .description = "Return at most <N> matches. Defaults to 20." },
+        .{ .long = "context", .value_name = "N", .description = "Use <N> snippet tokens around each match. Defaults to 12." },
+        .{ .long = "redacted", .description = "Redact obvious secrets in rendered snippets." },
+        .{ .long = "full", .description = "Render full snippets even when redaction is the repo default." },
+        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
+    },
+    .examples = &.{
+        .{ .description = "search all recorded sessions for a term", .command = "factorial" },
+        .{ .description = "filter matches to one origin and date range", .command = "--origin claude --since 2026-05-01 --until 2026-05-31 factorial" },
+        .{ .description = "search a specific session", .command = "--session claude/session-abc123 token" },
+    },
+};
+
 pub const blame_usage = help_mod.UsageSpec{
     .name = "blame",
     .synopsis = "[OPTIONS] <FILE>",
@@ -230,6 +253,7 @@ pub const public_commands = [_]help_mod.CommandSpec{
     .{ .name = "sessions", .summary = "List recorded agent sessions", .usage = &sessions_usage },
     .{ .name = "log", .summary = "Show step history for a session", .usage = &log_usage },
     .{ .name = "show", .summary = "Show details of a step", .usage = &show_usage },
+    .{ .name = "grep", .summary = "Search recorded messages and tool activity", .usage = &grep_usage },
     .{ .name = "blame", .summary = "Show per-line step attribution for a file", .usage = &blame_usage },
     .{ .name = "cat", .summary = "Print a raw object by hash", .usage = &cat_usage },
     .{ .name = "privacy", .summary = "Scan reachable content for sensitive data", .usage = &privacy_usage },

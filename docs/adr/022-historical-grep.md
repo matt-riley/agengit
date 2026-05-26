@@ -1,6 +1,6 @@
 # ADR 022: Historical content search (agit grep)
 
-**Status:** Proposed
+**Status:** Implemented
 **Date:** 2026-05-25
 
 ## Context
@@ -19,7 +19,8 @@ Implement an `agit grep` command that provides full-text search across all
 recorded sessions:
 
 1. **SQLite FTS5 Integration:** Enable the FTS5 extension in the SQLite
-   `index.db`. Add virtual tables for `messages` and `tool_calls` content.
+   `index.db`. Add an FTS5 virtual table populated from `messages` and
+   `tool_calls` content.
 2. **Search Scope:** By default, search all messages and tool call arguments/results
    across all sessions in the current repository.
 3. **Filtering:** Support filtering by agent origin (`--origin`), session ID
@@ -29,8 +30,8 @@ recorded sessions:
 
 ## Plan
 
-1. Update `src/store/index.zig` to create FTS5 virtual tables and triggers
-   that keep the search index in sync with the base tables.
+1. Update `src/store/index.zig` to create the FTS5 virtual table and keep it
+   in sync from the index write paths and `agit reindex`.
 2. Implement the `grep` command in `cli/grep.zig`.
 3. Add support for "context" (showing lines before/after the match).
 4. Update `agit reindex` to also rebuild the FTS5 index.

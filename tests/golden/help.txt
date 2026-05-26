@@ -16,6 +16,7 @@ Commands:
   sessions      List recorded agent sessions
   log           Show step history for a session
   show          Show details of a step
+  grep          Search recorded messages and tool activity
   blame         Show per-line step attribution for a file
   cat           Print a raw object by hash
   privacy       Scan reachable content for sensitive data

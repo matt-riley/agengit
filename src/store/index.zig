@@ -5,7 +5,7 @@ const zqlite = @import("zqlite");
 pub const Index = struct {
     db: zqlite.Conn,
 
-    pub const current_schema_version: i64 = 5;
+    pub const current_schema_version: i64 = 6;
     pub const objects_complete_meta_key = "index.objects.complete";
 
     pub const ObjectPrefixMatches = struct {
@@ -76,8 +76,11 @@ pub const Index = struct {
         if (current_version < 4) {
             try self.applyMigration4();
         }
-        if (current_version < current_schema_version) {
+        if (current_version < 5) {
             try self.applyMigration5();
+        }
+        if (current_version < 6) {
+            try self.applyMigration6();
         }
     }
 
@@ -224,6 +227,57 @@ pub const Index = struct {
         try self.db.commit();
     }
 
+    fn applyMigration6(self: Index) !void {
+        try self.db.transaction();
+        errdefer self.db.rollback();
+
+        try self.db.execNoArgs(
+            \\create virtual table if not exists search_entries using fts5(
+            \\  entry_kind unindexed,
+            \\  origin unindexed,
+            \\  session_id unindexed,
+            \\  turn_id unindexed,
+            \\  step_hash unindexed,
+            \\  timestamp unindexed,
+            \\  seq unindexed,
+            \\  label unindexed,
+            \\  content,
+            \\  tokenize='unicode61'
+            \\)
+        );
+
+        try self.db.execNoArgs(
+            \\insert into search_entries (entry_kind, origin, session_id, turn_id, step_hash, timestamp, seq, label, content)
+            \\select 'message', s.session_origin, s.session_id, s.turn_id, m.step_hash,
+            \\       cast(s.timestamp as text), cast(m.seq as text), m.role, m.content
+            \\from messages m
+            \\join steps s on s.hash = m.step_hash
+        );
+        try self.db.execNoArgs(
+            \\insert into search_entries (entry_kind, origin, session_id, turn_id, step_hash, timestamp, seq, label, content)
+            \\select 'tool_args', s.session_origin, s.session_id, s.turn_id, t.step_hash,
+            \\       cast(s.timestamp as text), cast(t.seq as text), t.tool_name, t.args
+            \\from tool_calls t
+            \\join steps s on s.hash = t.step_hash
+        );
+        try self.db.execNoArgs(
+            \\insert into search_entries (entry_kind, origin, session_id, turn_id, step_hash, timestamp, seq, label, content)
+            \\select 'tool_result', s.session_origin, s.session_id, s.turn_id, t.step_hash,
+            \\       cast(s.timestamp as text), cast(t.seq as text), t.tool_name, t.result
+            \\from tool_calls t
+            \\join steps s on s.hash = t.step_hash
+            \\where t.result is not null
+        );
+
+        try self.db.exec(
+            "insert into schema_migrations (version) values (?)",
+            .{@as(i64, 6)},
+        );
+
+        try self.db.execNoArgs("pragma user_version = 6");
+        try self.db.commit();
+    }
+
     /// Insert or update a session's HEAD pointer.
     pub fn upsertSession(
         self: Index,
@@ -262,6 +316,7 @@ pub const Index = struct {
     pub fn truncate(self: Index) !void {
         try self.db.transaction();
         errdefer self.db.rollback();
+        try self.db.execNoArgs("delete from search_entries");
         try self.db.execNoArgs("delete from tool_calls");
         try self.db.execNoArgs("delete from messages");
         try self.db.execNoArgs("delete from steps");
@@ -346,6 +401,8 @@ pub const Index = struct {
             "insert or ignore into messages (step_hash, seq, role, content) values (?, ?, ?, ?)",
             .{ step_hash, seq, role, content },
         );
+        if (self.db.changes() == 0) return;
+        try self.insertSearchEntry("message", step_hash, seq, role, content);
     }
 
     /// Insert a tool_call row for a step. Idempotent via (step_hash, seq) uniqueness.
@@ -361,6 +418,26 @@ pub const Index = struct {
             "insert or ignore into tool_calls (step_hash, seq, tool_name, args, result) values (?, ?, ?, ?, ?)",
             .{ step_hash, seq, tool_name, args, result },
         );
+        if (self.db.changes() == 0) return;
+        try self.insertSearchEntry("tool_args", step_hash, seq, tool_name, args);
+        if (result) |result_text| {
+            try self.insertSearchEntry("tool_result", step_hash, seq, tool_name, result_text);
+        }
+    }
+
+    fn insertSearchEntry(
+        self: Index,
+        entry_kind: []const u8,
+        step_hash: []const u8,
+        seq: i64,
+        label: []const u8,
+        content: []const u8,
+    ) !void {
+        try self.db.exec(
+            \\insert into search_entries (entry_kind, origin, session_id, turn_id, step_hash, timestamp, seq, label, content)
+            \\select ?, session_origin, session_id, turn_id, hash, cast(timestamp as text), cast(? as text), ?, ?
+            \\from steps where hash=?
+        , .{ entry_kind, seq, label, content, step_hash });
     }
 
     pub fn hasStep(self: Index, hash: []const u8) !bool {
@@ -514,6 +591,59 @@ pub const Index = struct {
         return list.toOwnedSlice(gpa);
     }
 
+    pub fn searchEntries(
+        self: Index,
+        gpa: std.mem.Allocator,
+        options: SearchOptions,
+    ) ![]const SearchRow {
+        var list: std.ArrayList(SearchRow) = .empty;
+        errdefer {
+            for (list.items) |row| freeSearchRow(gpa, row);
+            list.deinit(gpa);
+        }
+
+        var rs = try self.db.rows(
+            \\select entry_kind, origin, session_id, turn_id, step_hash, cast(timestamp as integer), label,
+            \\       snippet(search_entries, 8, '[', ']', '…', ?)
+            \\from search_entries
+            \\where search_entries match ?
+            \\  and (? is null or origin = ?)
+            \\  and (? is null or session_id = ?)
+            \\  and (? is null or cast(timestamp as integer) >= ?)
+            \\  and (? is null or cast(timestamp as integer) < ?)
+            \\order by cast(timestamp as integer) desc, step_hash desc, cast(seq as integer) asc, entry_kind asc
+            \\limit ?
+        , .{
+            @as(i64, @intCast(options.context_tokens)),
+            options.match_query,
+            options.origin,
+            options.origin,
+            options.session_id,
+            options.session_id,
+            options.since_ms,
+            options.since_ms,
+            options.until_ms_exclusive,
+            options.until_ms_exclusive,
+            @as(i64, @intCast(options.limit)),
+        });
+        defer rs.deinit();
+
+        while (rs.next()) |row| {
+            try list.append(gpa, .{
+                .entry_kind = try gpa.dupe(u8, row.get([]const u8, 0)),
+                .origin = try gpa.dupe(u8, row.get([]const u8, 1)),
+                .session_id = try gpa.dupe(u8, row.get([]const u8, 2)),
+                .turn_id = try gpa.dupe(u8, row.get([]const u8, 3)),
+                .step_hash = try gpa.dupe(u8, row.get([]const u8, 4)),
+                .timestamp = row.get(i64, 5),
+                .label = try gpa.dupe(u8, row.get([]const u8, 6)),
+                .snippet = try gpa.dupe(u8, row.get([]const u8, 7)),
+            });
+        }
+        if (rs.err) |err| return err;
+        return list.toOwnedSlice(gpa);
+    }
+
     /// Return the most recent session that has a committed HEAD ref, or null.
     /// Caller must call `freeSessionRow(gpa, result)` when done.
     pub fn mostRecentSession(self: Index, gpa: std.mem.Allocator) !?SessionRow {
@@ -561,6 +691,27 @@ pub const StepRow = struct {
     timestamp: i64,
 };
 
+pub const SearchOptions = struct {
+    match_query: []const u8,
+    origin: ?[]const u8 = null,
+    session_id: ?[]const u8 = null,
+    since_ms: ?i64 = null,
+    until_ms_exclusive: ?i64 = null,
+    limit: usize,
+    context_tokens: usize,
+};
+
+pub const SearchRow = struct {
+    entry_kind: []const u8,
+    origin: []const u8,
+    session_id: []const u8,
+    turn_id: []const u8,
+    step_hash: []const u8,
+    timestamp: i64,
+    label: []const u8,
+    snippet: []const u8,
+};
+
 pub fn freeSessionRow(gpa: std.mem.Allocator, r: SessionRow) void {
     gpa.free(r.origin);
     gpa.free(r.session_id);
@@ -581,6 +732,21 @@ pub fn freeSessionRows(gpa: std.mem.Allocator, rows: []const SessionRow) void {
 
 pub fn freeStepRows(gpa: std.mem.Allocator, rows: []const StepRow) void {
     for (rows) |r| freeStepRow(gpa, r);
+    gpa.free(rows);
+}
+
+pub fn freeSearchRow(gpa: std.mem.Allocator, row: SearchRow) void {
+    gpa.free(row.entry_kind);
+    gpa.free(row.origin);
+    gpa.free(row.session_id);
+    gpa.free(row.turn_id);
+    gpa.free(row.step_hash);
+    gpa.free(row.label);
+    gpa.free(row.snippet);
+}
+
+pub fn freeSearchRows(gpa: std.mem.Allocator, rows: []const SearchRow) void {
+    for (rows) |row| freeSearchRow(gpa, row);
     gpa.free(rows);
 }
 
@@ -647,7 +813,7 @@ test "index migrate creates query-path indexes" {
     const user_ver = try idx.db.row("pragma user_version", .{});
     try std.testing.expect(user_ver != null);
     defer user_ver.?.deinit();
-    try std.testing.expectEqual(@as(i64, 5), user_ver.?.get(i64, 0));
+    try std.testing.expectEqual(@as(i64, 6), user_ver.?.get(i64, 0));
 }
 
 test "index upsertSession and insertStep" {
@@ -737,6 +903,10 @@ test "index truncate" {
     const objects_row = try idx.db.row("select count(*) from objects", .{});
     defer objects_row.?.deinit();
     try std.testing.expectEqual(@as(i64, 0), objects_row.?.get(i64, 0));
+
+    const search_row = try idx.db.row("select count(*) from search_entries", .{});
+    defer search_row.?.deinit();
+    try std.testing.expectEqual(@as(i64, 0), search_row.?.get(i64, 0));
 }
 
 test "index meta round trip" {
@@ -802,4 +972,145 @@ test "index object lookup and completeness marker" {
     try std.testing.expectEqual(true, (try idx.getObjectsComplete()).?);
     try idx.setObjectsComplete(false);
     try std.testing.expectEqual(false, (try idx.getObjectsComplete()).?);
+}
+
+test "index search entries stay deduplicated and searchable" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const n = try tmp.dir.realPath(io, &path_buf);
+    var db_path_buf: [std.fs.max_path_bytes + 12]u8 = undefined;
+    const db_path = try std.fmt.bufPrintZ(&db_path_buf, "{s}/index.db", .{path_buf[0..n]});
+
+    const idx = try Index.open(db_path);
+    defer idx.close();
+    try idx.migrate();
+
+    try idx.upsertSession("claude", "session-1", null);
+    try idx.insertStep("a" ** 64, "claude", "session-1", "turn-1", null, "b" ** 64, 1_700_000_000_000);
+    try idx.insertMessage("a" ** 64, 0, "user", "factorial debugging");
+    try idx.insertMessage("a" ** 64, 0, "user", "factorial debugging");
+    try idx.insertToolCall("a" ** 64, 1, "Bash", "{\"command\":\"echo factorial\"}", "factorial result");
+    try idx.insertToolCall("a" ** 64, 1, "Bash", "{\"command\":\"echo factorial\"}", "factorial result");
+
+    const rows = try idx.searchEntries(gpa, .{
+        .match_query = "\"factorial\"",
+        .limit = 10,
+        .context_tokens = 8,
+    });
+    defer freeSearchRows(gpa, rows);
+
+    try std.testing.expectEqual(@as(usize, 3), rows.len);
+
+    const count_row = try idx.db.row("select count(*) from search_entries", .{});
+    defer count_row.?.deinit();
+    try std.testing.expectEqual(@as(i64, 3), count_row.?.get(i64, 0));
+}
+
+test "migration 6 backfills search entries for existing indexes" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const n = try tmp.dir.realPath(io, &path_buf);
+    var db_path_buf: [std.fs.max_path_bytes + 12]u8 = undefined;
+    const db_path = try std.fmt.bufPrintZ(&db_path_buf, "{s}/index.db", .{path_buf[0..n]});
+
+    const idx = try Index.open(db_path);
+    defer idx.close();
+
+    try idx.db.execNoArgs(
+        \\create table schema_migrations (
+        \\  version    integer primary key,
+        \\  applied_at integer not null default (unixepoch())
+        \\)
+    );
+    try idx.db.execNoArgs(
+        \\create table sessions (
+        \\  origin     text not null,
+        \\  session_id text not null,
+        \\  head_hash  text,
+        \\  updated_at integer not null default (unixepoch()),
+        \\  primary key (origin, session_id)
+        \\)
+    );
+    try idx.db.execNoArgs(
+        \\create table steps (
+        \\  hash           text primary key,
+        \\  session_origin text not null,
+        \\  session_id     text not null,
+        \\  turn_id        text not null,
+        \\  parent_hash    text,
+        \\  tree_hash      text not null,
+        \\  timestamp      integer not null
+        \\)
+    );
+    try idx.db.execNoArgs(
+        \\create table messages (
+        \\  id         integer primary key,
+        \\  step_hash  text not null,
+        \\  role       text not null,
+        \\  content    text not null,
+        \\  seq        integer not null default 0
+        \\)
+    );
+    try idx.db.execNoArgs(
+        \\create table tool_calls (
+        \\  id         integer primary key,
+        \\  step_hash  text not null,
+        \\  tool_name  text not null,
+        \\  args       text not null,
+        \\  result     text,
+        \\  seq        integer not null default 0
+        \\)
+    );
+    try idx.db.execNoArgs(
+        \\create table meta (
+        \\  key   text primary key,
+        \\  value text not null
+        \\)
+    );
+    try idx.db.execNoArgs(
+        \\create table objects (
+        \\  hash       text primary key,
+        \\  kind       text not null,
+        \\  size       integer not null,
+        \\  created_at integer not null default (unixepoch())
+        \\)
+    );
+    try idx.db.exec("insert into schema_migrations (version) values (?)", .{@as(i64, 5)});
+    try idx.db.execNoArgs("pragma user_version = 5");
+
+    try idx.db.exec(
+        "insert into sessions (origin, session_id, head_hash) values (?, ?, ?)",
+        .{ "claude", "session-legacy", "f" ** 64 },
+    );
+    try idx.db.exec(
+        "insert into steps (hash, session_origin, session_id, turn_id, parent_hash, tree_hash, timestamp) values (?, ?, ?, ?, ?, ?, ?)",
+        .{ "a" ** 64, "claude", "session-legacy", "turn-1", null, "b" ** 64, @as(i64, 1_700_000_000_000) },
+    );
+    try idx.db.exec(
+        "insert into messages (step_hash, role, content, seq) values (?, ?, ?, ?)",
+        .{ "a" ** 64, "user", "legacy factorial prompt", @as(i64, 0) },
+    );
+    try idx.db.exec(
+        "insert into tool_calls (step_hash, tool_name, args, result, seq) values (?, ?, ?, ?, ?)",
+        .{ "a" ** 64, "Bash", "{\"command\":\"echo factorial\"}", "factorial", @as(i64, 1) },
+    );
+
+    try idx.migrate();
+
+    const rows = try idx.searchEntries(gpa, .{
+        .match_query = "\"factorial\"",
+        .limit = 10,
+        .context_tokens = 8,
+    });
+    defer freeSearchRows(gpa, rows);
+
+    try std.testing.expectEqual(@as(usize, 3), rows.len);
 }

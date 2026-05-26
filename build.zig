@@ -6,7 +6,11 @@ pub fn build(b: *std.Build) void {
     const sanitize_c = b.option(std.zig.SanitizeC, "sanitize-c", "Enable C-family undefined behavior sanitizers") orelse .full;
 
     const clap_dep = b.dependency("clap", .{ .target = target, .optimize = optimize });
-    const zqlite_dep = b.dependency("zqlite", .{ .target = target, .optimize = optimize });
+    const zqlite_dep = b.dependency("zqlite", .{
+        .target = target,
+        .optimize = optimize,
+        .sqlite3 = &[_][]const u8{ "-std=c99", "-DSQLITE_ENABLE_FTS5" },
+    });
     const hook_module = b.createModule(.{
         .root_source_file = b.path("src/hook.zig"),
         .target = target,

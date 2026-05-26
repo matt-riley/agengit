@@ -55,6 +55,17 @@ test "structured_output/status sessions log and show json" {
     try std.testing.expectEqualStrings("abc123def456", step.get("session_id").?.string);
     try std.testing.expectEqual(@as(usize, 2), step.get("messages").?.array.items.len);
     try std.testing.expectEqual(@as(usize, 2), step.get("tool_calls").?.array.items.len);
+
+    var grep_result = try sandbox.run(&.{ "grep", "--json", "factorial" }, null);
+    defer grep_result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(u8, 0), grep_result.exit_code);
+    try expectEnvelope(grep_result.stdout, "grep");
+
+    var grep_json = try parseJson(grep_result.stdout);
+    defer grep_json.deinit();
+    const matches = grep_json.value.object.get("data").?.object.get("matches").?.array.items;
+    try std.testing.expect(matches.len >= 1);
+    try std.testing.expectEqualStrings("claude", matches[0].object.get("origin").?.string);
 }
 
 test "structured_output/doctor json emits stable checks" {
