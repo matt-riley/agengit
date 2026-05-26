@@ -2,6 +2,7 @@ test {
     _ = @import("help_snapshot.zig");
     _ = @import("completion_snapshot.zig");
     _ = @import("structured_output.zig");
+    _ = @import("object_prefix_resolution.zig");
 
     _ = @import("init/fresh.zig");
     _ = @import("init/existing_user_config.zig");

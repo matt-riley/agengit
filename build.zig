@@ -121,6 +121,24 @@ pub fn build(b: *std.Build) void {
     const bench_durable_step = b.step("bench-durable", "Run durable-write microbenchmark");
     bench_durable_step.dependOn(&run_durable_bench.step);
 
+    const resolve_prefix_bench = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("bench/resolve_prefix.zig"),
+            .target = target,
+            .optimize = optimize,
+            .sanitize_c = sanitize_c,
+            .imports = &.{
+                .{ .name = "test_support", .module = test_support_module },
+            },
+        }),
+    });
+    const run_resolve_prefix_bench = b.addRunArtifact(resolve_prefix_bench);
+    if (b.args) |args| {
+        run_resolve_prefix_bench.addArgs(args);
+    }
+    const bench_resolve_prefix_step = b.step("bench-resolve-prefix", "Run object-prefix resolution benchmark");
+    bench_resolve_prefix_step.dependOn(&run_resolve_prefix_bench.step);
+
     const fuzz_hooks = b.addExecutable(.{
         .name = "fuzz-hooks",
         .root_module = b.createModule(.{

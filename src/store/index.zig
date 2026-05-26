@@ -5,6 +5,13 @@ const zqlite = @import("zqlite");
 pub const Index = struct {
     db: zqlite.Conn,
 
+    pub const objects_complete_meta_key = "index.objects.complete";
+
+    pub const ObjectPrefixMatches = struct {
+        count: usize = 0,
+        hashes: [2][64]u8 = undefined,
+    };
+
     /// Open (or create) the index database at `db_path_z`.
     pub fn open(db_path_z: [:0]const u8) !Index {
         const flags = zqlite.OpenFlags.Create | zqlite.OpenFlags.ReadWrite | zqlite.OpenFlags.EXResCode;
@@ -54,6 +61,9 @@ pub const Index = struct {
         }
         if (current_version < 4) {
             try self.applyMigration4();
+        }
+        if (current_version < 5) {
+            try self.applyMigration5();
         }
     }
 
@@ -178,6 +188,28 @@ pub const Index = struct {
         try self.db.commit();
     }
 
+    fn applyMigration5(self: Index) !void {
+        try self.db.transaction();
+        errdefer self.db.rollback();
+
+        try self.db.execNoArgs(
+            \\create table if not exists objects (
+            \\  hash       text primary key,
+            \\  kind       text not null,
+            \\  size       integer not null,
+            \\  created_at integer not null default (unixepoch())
+            \\)
+        );
+
+        try self.db.exec(
+            "insert into schema_migrations (version) values (?)",
+            .{@as(i64, 5)},
+        );
+
+        try self.db.execNoArgs("pragma user_version = 5");
+        try self.db.commit();
+    }
+
     /// Insert or update a session's HEAD pointer.
     pub fn upsertSession(
         self: Index,
@@ -220,7 +252,72 @@ pub const Index = struct {
         try self.db.execNoArgs("delete from messages");
         try self.db.execNoArgs("delete from steps");
         try self.db.execNoArgs("delete from sessions");
+        try self.db.execNoArgs("delete from objects");
         try self.db.commit();
+    }
+
+    pub fn insertObject(self: Index, hash: []const u8, kind: []const u8, size: usize) !void {
+        try self.db.exec(
+            "insert or ignore into objects (hash, kind, size) values (?, ?, ?)",
+            .{ hash, kind, @as(i64, @intCast(size)) },
+        );
+    }
+
+    pub fn hasObject(self: Index, hash: []const u8) !bool {
+        const row = try self.db.row(
+            "select 1 from objects where hash=? limit 1",
+            .{hash},
+        );
+        if (row) |r| {
+            defer r.deinit();
+            return true;
+        }
+        return false;
+    }
+
+    pub fn countObjects(self: Index) !i64 {
+        const row = try self.db.row("select count(*) from objects", .{}) orelse return 0;
+        defer row.deinit();
+        return row.get(i64, 0);
+    }
+
+    pub fn lookupObjectPrefix(self: Index, prefix: []const u8) !ObjectPrefixMatches {
+        var pattern_buf: [65]u8 = undefined;
+        if (prefix.len > 64) return error.InvalidHash;
+        @memcpy(pattern_buf[0..prefix.len], prefix);
+        pattern_buf[prefix.len] = '%';
+        const pattern = pattern_buf[0 .. prefix.len + 1];
+
+        var rows = try self.db.rows(
+            "select hash from objects where hash like ? order by hash asc limit 3",
+            .{pattern},
+        );
+        defer rows.deinit();
+
+        var matches: ObjectPrefixMatches = .{};
+        while (rows.next()) |row| {
+            const hash = row.get([]const u8, 0);
+            if (hash.len != 64) continue;
+            if (matches.count < matches.hashes.len) {
+                @memcpy(matches.hashes[matches.count][0..], hash);
+            }
+            matches.count += 1;
+        }
+        if (rows.err) |err| return err;
+        return matches;
+    }
+
+    pub fn setObjectsComplete(self: Index, complete: bool) !void {
+        try self.metaSet(objects_complete_meta_key, if (complete) "1" else "0");
+    }
+
+    pub fn getObjectsComplete(self: Index) !?bool {
+        const row = try self.db.row(
+            "select value from meta where key=?",
+            .{objects_complete_meta_key},
+        ) orelse return null;
+        defer row.deinit();
+        return std.mem.eql(u8, row.get([]const u8, 0), "1");
     }
 
     /// Insert a message row for a step. Idempotent via (step_hash, seq) uniqueness.
@@ -526,10 +623,17 @@ test "index migrate creates query-path indexes" {
     try std.testing.expect(meta_tbl != null);
     defer meta_tbl.?.deinit();
 
+    const objects_tbl = try idx.db.row(
+        "select 1 from sqlite_master where type='table' and name='objects'",
+        .{},
+    );
+    try std.testing.expect(objects_tbl != null);
+    defer objects_tbl.?.deinit();
+
     const user_ver = try idx.db.row("pragma user_version", .{});
     try std.testing.expect(user_ver != null);
     defer user_ver.?.deinit();
-    try std.testing.expectEqual(@as(i64, 4), user_ver.?.get(i64, 0));
+    try std.testing.expectEqual(@as(i64, 5), user_ver.?.get(i64, 0));
 }
 
 test "index upsertSession and insertStep" {
@@ -609,11 +713,16 @@ test "index truncate" {
 
     try idx.upsertSession("origin", "s1", null);
     try idx.insertStep("a" ** 64, "origin", "s1", "t1", null, "b" ** 64, 1000);
+    try idx.insertObject("a" ** 64, "step", 123);
     try idx.truncate();
 
     const row = try idx.db.row("select count(*) from steps", .{});
     defer row.?.deinit();
     try std.testing.expectEqual(@as(i64, 0), row.?.get(i64, 0));
+
+    const objects_row = try idx.db.row("select count(*) from objects", .{});
+    defer objects_row.?.deinit();
+    try std.testing.expectEqual(@as(i64, 0), objects_row.?.get(i64, 0));
 }
 
 test "index meta round trip" {
@@ -642,4 +751,41 @@ test "index meta round trip" {
     try idx.metaDelete("k");
     const missing = try idx.metaGet(gpa, "k");
     try std.testing.expect(missing == null);
+}
+
+test "index object lookup and completeness marker" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = std.testing.io;
+
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const n = try tmp.dir.realPath(io, &path_buf);
+    var db_path_buf: [std.fs.max_path_bytes + 12]u8 = undefined;
+    const db_path = try std.fmt.bufPrintZ(&db_path_buf, "{s}/index.db", .{path_buf[0..n]});
+
+    const idx = try Index.open(db_path);
+    defer idx.close();
+    try idx.migrate();
+
+    try idx.insertObject("aa" ++ ("0" ** 62), "blob", 10);
+    try idx.insertObject("aa" ++ ("1" ** 62), "tree", 20);
+    try idx.insertObject("bb" ++ ("2" ** 62), "step", 30);
+
+    const aa_matches = try idx.lookupObjectPrefix("aa");
+    try std.testing.expectEqual(@as(usize, 2), aa_matches.count);
+    try std.testing.expectEqualStrings("aa" ++ ("0" ** 62), &aa_matches.hashes[0]);
+    try std.testing.expectEqualStrings("aa" ++ ("1" ** 62), &aa_matches.hashes[1]);
+
+    const bb_matches = try idx.lookupObjectPrefix("bb");
+    try std.testing.expectEqual(@as(usize, 1), bb_matches.count);
+    try std.testing.expectEqualStrings("bb" ++ ("2" ** 62), &bb_matches.hashes[0]);
+
+    try std.testing.expectEqual(@as(i64, 3), try idx.countObjects());
+    try std.testing.expect(try idx.hasObject("bb" ++ ("2" ** 62)));
+
+    try std.testing.expect((try idx.getObjectsComplete()) == null);
+    try idx.setObjectsComplete(true);
+    try std.testing.expectEqual(true, (try idx.getObjectsComplete()).?);
+    try idx.setObjectsComplete(false);
+    try std.testing.expectEqual(false, (try idx.getObjectsComplete()).?);
 }

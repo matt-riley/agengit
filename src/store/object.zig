@@ -4,6 +4,17 @@ const fs_mod = @import("../util/fs.zig");
 
 pub const Hash = hash_mod.Hash;
 
+pub const WriteDetails = struct {
+    hash: Hash,
+    size: usize,
+};
+
+pub const PrefixResolution = union(enum) {
+    not_found,
+    unique: Hash,
+    ambiguous: [2]Hash,
+};
+
 /// An entry inside a Tree object.
 pub const TreeEntry = struct {
     path: []const u8,
@@ -56,7 +67,7 @@ pub const Step = struct {
 
 /// Write `data` to the content-addressed object store under `root`.
 /// Returns the BLAKE3 hash. Idempotent: writing the same bytes twice succeeds.
-pub fn write(io: std.Io, root: std.Io.Dir, data: []const u8) !Hash {
+pub fn writeDetailed(io: std.Io, root: std.Io.Dir, data: []const u8) !WriteDetails {
     const h = Hash.ofBytes(data);
     const hex = h.toHex();
 
@@ -75,7 +86,14 @@ pub fn write(io: std.Io, root: std.Io.Dir, data: []const u8) !Hash {
     try af.file.writeStreamingAll(io, data);
     _ = try fs_mod.linkDurable(io, &af);
 
-    return h;
+    return .{
+        .hash = h,
+        .size = data.len,
+    };
+}
+
+pub fn write(io: std.Io, root: std.Io.Dir, data: []const u8) !Hash {
+    return (try writeDetailed(io, root, data)).hash;
 }
 
 /// Read and return the raw bytes for the object identified by `h`.
@@ -87,13 +105,52 @@ pub fn read(io: std.Io, root: std.Io.Dir, gpa: std.mem.Allocator, h: Hash) ![]u8
     return root.readFileAlloc(io, obj_path, gpa, .unlimited);
 }
 
-/// Walk the object store and resolve a hex prefix to a full Hash.
-/// Returns error.ObjectNotFound if no match, error.AmbiguousPrefix if multiple.
-pub fn resolvePrefix(io: std.Io, root: std.Io.Dir, gpa: std.mem.Allocator, prefix: []const u8) !Hash {
+pub fn detectKind(data: []const u8) []const u8 {
+    if (std.mem.indexOf(u8, data, "\"type\":\"tree\"") != null) return "tree";
+    if (std.mem.indexOf(u8, data, "\"type\":\"step\"") != null) return "step";
+    if (std.mem.indexOf(u8, data, "\"type\":\"blame\"") != null) return "blame";
+    return "blob";
+}
+
+fn updateResolution(current: *PrefixResolution, h: Hash) void {
+    switch (current.*) {
+        .not_found => current.* = .{ .unique = h },
+        .unique => |first| current.* = .{ .ambiguous = .{ first, h } },
+        .ambiguous => {},
+    }
+}
+
+/// Walk the object store and resolve a hex prefix to a full Hash or a pair of candidates.
+pub fn resolvePrefixDetailed(io: std.Io, root: std.Io.Dir, gpa: std.mem.Allocator, prefix: []const u8) !PrefixResolution {
     if (prefix.len == 0 or prefix.len > hash_mod.hex_len) return error.InvalidHash;
 
+    var found: PrefixResolution = .not_found;
+
+    if (prefix.len >= 2) {
+        var shard_path_buf: [11]u8 = undefined;
+        const shard_path = std.fmt.bufPrint(&shard_path_buf, "objects/{s}", .{prefix[0..2]}) catch unreachable;
+        var shard_dir = root.openDir(io, shard_path, .{ .iterate = true }) catch |err| switch (err) {
+            error.FileNotFound, error.NotDir => return .not_found,
+            else => return err,
+        };
+        defer shard_dir.close(io);
+
+        var iter = shard_dir.iterate();
+        while (try iter.next(io)) |entry| {
+            if (entry.kind != .file) continue;
+            if (entry.name.len != 62) continue;
+            var hex_buf: [64]u8 = undefined;
+            @memcpy(hex_buf[0..2], prefix[0..2]);
+            @memcpy(hex_buf[2..64], entry.name[0..62]);
+            const h = Hash.fromHex(&hex_buf) catch continue;
+            if (!h.hasPrefix(prefix)) continue;
+            updateResolution(&found, h);
+        }
+        return found;
+    }
+
     var obj_dir = root.openDir(io, "objects", .{ .iterate = true }) catch |err| switch (err) {
-        error.FileNotFound, error.NotDir => return error.ObjectNotFound,
+        error.FileNotFound, error.NotDir => return .not_found,
         else => return err,
     };
     defer obj_dir.close(io);
@@ -101,28 +158,39 @@ pub fn resolvePrefix(io: std.Io, root: std.Io.Dir, gpa: std.mem.Allocator, prefi
     var walker = try obj_dir.walk(gpa);
     defer walker.deinit();
 
-    var found: ?Hash = null;
     while (try walker.next(io)) |entry| {
         if (entry.kind != .file) continue;
-        // Each file path is "<2>/<62>" = 65 bytes total.
         if (entry.path.len != 65) continue;
         var hex_buf: [64]u8 = undefined;
         @memcpy(hex_buf[0..2], entry.path[0..2]);
         @memcpy(hex_buf[2..64], entry.path[3..65]);
         const h = Hash.fromHex(&hex_buf) catch continue;
         if (!h.hasPrefix(prefix)) continue;
-        if (found != null) return error.AmbiguousPrefix;
-        found = h;
+        updateResolution(&found, h);
     }
-    return found orelse error.ObjectNotFound;
+    return found;
+}
+
+/// Walk the object store and resolve a hex prefix to a full Hash.
+/// Returns error.ObjectNotFound if no match, error.AmbiguousPrefix if multiple.
+pub fn resolvePrefix(io: std.Io, root: std.Io.Dir, gpa: std.mem.Allocator, prefix: []const u8) !Hash {
+    return switch (try resolvePrefixDetailed(io, root, gpa, prefix)) {
+        .not_found => error.ObjectNotFound,
+        .unique => |h| h,
+        .ambiguous => error.AmbiguousPrefix,
+    };
 }
 
 /// Serialize `tree` as JSON and write it to the object store.
-pub fn writeTree(io: std.Io, root: std.Io.Dir, gpa: std.mem.Allocator, tree: Tree) !Hash {
+pub fn writeTreeDetailed(io: std.Io, root: std.Io.Dir, gpa: std.mem.Allocator, tree: Tree) !WriteDetails {
     var aw: std.Io.Writer.Allocating = .init(gpa);
     defer aw.deinit();
     try std.json.Stringify.value(tree, .{}, &aw.writer);
-    return write(io, root, aw.writer.buffered());
+    return writeDetailed(io, root, aw.writer.buffered());
+}
+
+pub fn writeTree(io: std.Io, root: std.Io.Dir, gpa: std.mem.Allocator, tree: Tree) !Hash {
+    return (try writeTreeDetailed(io, root, gpa, tree)).hash;
 }
 
 /// Read and deserialize a Tree from the object store.
@@ -134,11 +202,15 @@ pub fn readTree(io: std.Io, root: std.Io.Dir, gpa: std.mem.Allocator, h: Hash) !
 }
 
 /// Serialize `step` as JSON and write it to the object store.
-pub fn writeStep(io: std.Io, root: std.Io.Dir, gpa: std.mem.Allocator, step: Step) !Hash {
+pub fn writeStepDetailed(io: std.Io, root: std.Io.Dir, gpa: std.mem.Allocator, step: Step) !WriteDetails {
     var aw: std.Io.Writer.Allocating = .init(gpa);
     defer aw.deinit();
     try std.json.Stringify.value(step, .{}, &aw.writer);
-    return write(io, root, aw.writer.buffered());
+    return writeDetailed(io, root, aw.writer.buffered());
+}
+
+pub fn writeStep(io: std.Io, root: std.Io.Dir, gpa: std.mem.Allocator, step: Step) !Hash {
+    return (try writeStepDetailed(io, root, gpa, step)).hash;
 }
 
 /// Read and deserialize a Step from the object store.
@@ -243,18 +315,45 @@ test "resolvePrefix returns ObjectNotFound for empty store" {
     );
 }
 
-test "resolvePrefix returns AmbiguousPrefix for colliding prefix" {
+test "resolvePrefixDetailed returns ambiguous candidates for colliding prefix" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const io = std.testing.io;
+    var first_by_nibble: [16]?Hash = .{null} ** 16;
+    var collision_prefix: ?u8 = null;
+    var expected: [2]Hash = undefined;
 
-    // Write two objects that definitely have different hashes; use full hex to avoid collision.
-    _ = try write(io, tmp.dir, "object alpha");
-    _ = try write(io, tmp.dir, "object beta");
+    var i: usize = 0;
+    while (collision_prefix == null) : (i += 1) {
+        var data_buf: [32]u8 = undefined;
+        const data = try std.fmt.bufPrint(&data_buf, "object-{d}", .{i});
+        const h = try write(io, tmp.dir, data);
+        const hex = h.toHex();
+        const nibble = std.fmt.charToDigit(hex[0], 16) catch unreachable;
+        if (first_by_nibble[nibble]) |existing| {
+            collision_prefix = hex[0];
+            expected = .{ existing, h };
+        } else {
+            first_by_nibble[nibble] = h;
+        }
+    }
 
-    // An empty prefix matches everything.
-    try std.testing.expectError(
-        error.InvalidHash,
-        resolvePrefix(io, tmp.dir, std.testing.allocator, ""),
-    );
+    var prefix_buf = [_]u8{collision_prefix.?};
+    const resolution = try resolvePrefixDetailed(io, tmp.dir, std.testing.allocator, &prefix_buf);
+    switch (resolution) {
+        .ambiguous => |matches| {
+            try std.testing.expect(
+                (matches[0].eql(expected[0]) and matches[1].eql(expected[1])) or
+                    (matches[0].eql(expected[1]) and matches[1].eql(expected[0])),
+            );
+        },
+        else => return error.TestUnexpectedResult,
+    }
+}
+
+test "detectKind classifies structured and raw objects" {
+    try std.testing.expectEqualStrings("tree", detectKind("{\"type\":\"tree\"}"));
+    try std.testing.expectEqualStrings("step", detectKind("{\"type\":\"step\"}"));
+    try std.testing.expectEqualStrings("blame", detectKind("{\"type\":\"blame\"}"));
+    try std.testing.expectEqualStrings("blob", detectKind("plain text"));
 }

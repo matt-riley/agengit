@@ -47,20 +47,44 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
     var store = try status.openStoreOrExit(io, gpa, &stdout, .human, usage.name);
     defer store.deinit(io);
 
-    const h = store.resolvePrefix(io, gpa, prefix) catch |err| {
-        switch (err) {
-            error.ObjectNotFound => try stdout.interface.print(
-                "error: object '{s}' not found\n",
-                .{prefix},
-            ),
-            error.AmbiguousPrefix => try stdout.interface.print(
-                "error: ambiguous prefix '{s}' — be more specific\n",
-                .{prefix},
-            ),
-            else => try stdout.interface.print("error: {s}\n", .{@errorName(err)}),
-        }
+    const resolution = store.resolvePrefix(io, gpa, prefix) catch |err| {
+        try status.writeDiagnostic(&stdout, .human, usage.name, .{
+            .code = "object_lookup_failed",
+            .message = "Failed to resolve object prefix.",
+            .hint = @errorName(err),
+            .hash = prefix,
+        });
         try stdout.flush();
-        return;
+        std.process.exit(1);
+    };
+    const h = switch (resolution) {
+        .not_found => {
+            try status.writeDiagnostic(&stdout, .human, usage.name, .{
+                .code = "object_not_found",
+                .message = "Object not found.",
+                .hint = "Use a longer or different hash prefix.",
+                .hash = prefix,
+            });
+            try stdout.flush();
+            std.process.exit(1);
+        },
+        .ambiguous => |matches| {
+            var candidate_hex: [2][64]u8 = .{ matches[0].toHex(), matches[1].toHex() };
+            if (std.mem.lessThan(u8, candidate_hex[1][0..], candidate_hex[0][0..])) {
+                std.mem.swap([64]u8, &candidate_hex[0], &candidate_hex[1]);
+            }
+            const candidates = [_][]const u8{ candidate_hex[0][0..], candidate_hex[1][0..] };
+            try status.writeDiagnostic(&stdout, .human, usage.name, .{
+                .code = "ambiguous_hash_prefix",
+                .message = "Hash prefix is ambiguous.",
+                .hint = "Use a longer hash prefix.",
+                .hash = prefix,
+                .candidates = candidates[0..],
+            });
+            try stdout.flush();
+            std.process.exit(1);
+        },
+        .unique => |resolved| resolved,
     };
 
     const data = try store.readBlob(io, gpa, h);

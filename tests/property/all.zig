@@ -9,6 +9,7 @@ const store_mod = test_support.store;
 const total_turns = 1000;
 
 const CanonicalIndex = struct {
+    objects: []u8,
     sessions: []u8,
     steps: []u8,
     messages: []u8,
@@ -16,6 +17,7 @@ const CanonicalIndex = struct {
     meta: []u8,
 
     fn deinit(self: *CanonicalIndex, gpa: std.mem.Allocator) void {
+        gpa.free(self.objects);
         gpa.free(self.sessions);
         gpa.free(self.steps);
         gpa.free(self.messages);
@@ -25,6 +27,7 @@ const CanonicalIndex = struct {
     }
 
     fn expectEqual(self: CanonicalIndex, other: CanonicalIndex) !void {
+        try std.testing.expectEqualStrings(self.objects, other.objects);
         try std.testing.expectEqualStrings(self.sessions, other.sessions);
         try std.testing.expectEqualStrings(self.steps, other.steps);
         try std.testing.expectEqualStrings(self.messages, other.messages);
@@ -154,12 +157,33 @@ fn writeWorkspaceFile(
 
 fn captureCanonicalIndex(gpa: std.mem.Allocator, store: *store_mod.Store) !CanonicalIndex {
     return .{
+        .objects = try captureObjects(gpa, store),
         .sessions = try captureSessions(gpa, store),
         .steps = try captureSteps(gpa, store),
         .messages = try captureMessages(gpa, store),
         .tool_calls = try captureToolCalls(gpa, store),
         .meta = try captureMeta(gpa, store),
     };
+}
+
+fn captureObjects(gpa: std.mem.Allocator, store: *store_mod.Store) ![]u8 {
+    var aw: std.Io.Writer.Allocating = .init(gpa);
+    defer aw.deinit();
+
+    var rows = try store.index.db.rows(
+        "select hash, kind, size from objects order by hash",
+        .{},
+    );
+    defer rows.deinit();
+    while (rows.next()) |row| {
+        try aw.writer.print("{s}\t{s}\t{d}\n", .{
+            row.get([]const u8, 0),
+            row.get([]const u8, 1),
+            row.get(i64, 2),
+        });
+    }
+    if (rows.err) |err| return err;
+    return try gpa.dupe(u8, aw.writer.buffered());
 }
 
 fn captureSessions(gpa: std.mem.Allocator, store: *store_mod.Store) ![]u8 {

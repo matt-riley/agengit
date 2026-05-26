@@ -84,6 +84,8 @@ pub fn run(
         try stdout.interface.writeAll("  ✓ ref/index drift: none detected\n");
     }
 
+    if (!try checkObjectIndex(io, gpa, &store, &stdout)) has_failures = true;
+
     try checkAgitIgnore(io, std.Io.Dir.cwd(), gpa, &stdout);
     try checkStaging(io, gpa, store.root, &stdout);
     if (options.locks) try checkLocks(io, gpa, store.root, &stdout);
@@ -203,6 +205,8 @@ fn runJson(
             .message = "No ref/index drift detected.",
         });
     }
+
+    try checks.append(gpa, try collectObjectIndexCheck(io, gpa, aa, &store));
 
     const agit_ignore = try collectAgitIgnoreDiagnostics(io, std.Io.Dir.cwd(), gpa);
     switch (agit_ignore) {
@@ -426,6 +430,68 @@ fn collectAgitIgnoreDiagnostics(
         rule_count += 1;
     }
     return .{ .readable = rule_count };
+}
+
+fn checkObjectIndex(
+    io: std.Io,
+    gpa: std.mem.Allocator,
+    store: *store_mod.Store,
+    stdout: *std.Io.File.Writer,
+) !bool {
+    const audit = try store.auditObjectIndex(io, gpa);
+    if (!audit.indexed_complete and audit.disk_count > 0) {
+        try stdout.interface.print(
+            "  ✗ object index: cache is not backfilled ({d} object{s} on disk); run `agit reindex`\n",
+            .{ audit.disk_count, if (audit.disk_count == 1) "" else "s" },
+        );
+        return false;
+    }
+    if (audit.missing_rows > 0 or audit.indexed_count != audit.disk_count) {
+        try stdout.interface.print(
+            "  ✗ object index: disk={d} indexed={d} missing_rows={d}; run `agit reindex`\n",
+            .{ audit.disk_count, audit.indexed_count, audit.missing_rows },
+        );
+        return false;
+    }
+    try stdout.interface.writeAll("  ✓ object index: in sync\n");
+    return true;
+}
+
+fn collectObjectIndexCheck(
+    io: std.Io,
+    gpa: std.mem.Allocator,
+    aa: std.mem.Allocator,
+    store: *store_mod.Store,
+) !output_mod.Check {
+    const audit = try store.auditObjectIndex(io, gpa);
+    if (!audit.indexed_complete and audit.disk_count > 0) {
+        return .{
+            .code = "object_index_drift",
+            .status = .@"error",
+            .message = try std.fmt.allocPrint(aa, "Object cache is not backfilled for {d} on-disk object(s).", .{audit.disk_count}),
+            .hint = "Run `agit reindex` to rebuild the objects cache.",
+            .path = ".agit/objects",
+        };
+    }
+    if (audit.missing_rows > 0 or audit.indexed_count != audit.disk_count) {
+        return .{
+            .code = "object_index_drift",
+            .status = .@"error",
+            .message = try std.fmt.allocPrint(aa, "Object cache drift detected: disk={d}, indexed={d}, missing_rows={d}.", .{
+                audit.disk_count,
+                audit.indexed_count,
+                audit.missing_rows,
+            }),
+            .hint = "Run `agit reindex` to rebuild the objects cache.",
+            .path = ".agit/objects",
+        };
+    }
+    return .{
+        .code = "object_index_ok",
+        .status = .ok,
+        .message = "Object cache is in sync with on-disk objects.",
+        .path = ".agit/objects",
+    };
 }
 
 fn checkStaging(

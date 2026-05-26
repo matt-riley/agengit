@@ -77,6 +77,7 @@ test "structured_output/doctor json emits stable checks" {
     try std.testing.expect(checks.len > 0);
     try std.testing.expect(hasCheckCode(checks, "store_ok"));
     try std.testing.expect(hasCheckCode(checks, "ref_index_drift"));
+    try std.testing.expect(hasCheckCode(checks, "object_index_ok"));
 }
 
 fn seedClaudeSession(sandbox: *harness.Sandbox) !void {
