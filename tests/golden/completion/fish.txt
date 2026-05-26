@@ -33,6 +33,7 @@ complete -c agit -f -n '__fish_seen_subcommand_from log' -l json -d 'Render the 
 complete -c agit -f -n '__fish_seen_subcommand_from log' -s h -l help -d 'Display this help and exit.'
 complete -c agit -f -n '__fish_seen_subcommand_from show' -l json -d 'Render the step details as structured JSON.'
 complete -c agit -f -n '__fish_seen_subcommand_from show' -s h -l help -d 'Display this help and exit.'
+complete -c agit -f -n '__fish_seen_subcommand_from blame' -l no-limits -d 'Disable the blame file-size cap for this invocation when blame output is available.'
 complete -c agit -f -n '__fish_seen_subcommand_from blame' -s h -l help -d 'Display this help and exit.'
 complete -c agit -f -n '__fish_seen_subcommand_from cat' -s h -l help -d 'Display this help and exit.'
 complete -c agit -f -n '__fish_seen_subcommand_from reindex' -l from -r -d 'Incrementally replay steps newer than <HASH> that are reachable from session refs.'

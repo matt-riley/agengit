@@ -7,7 +7,7 @@ pub const Hash = hash_mod.Hash;
 
 /// One entry in a blame map: the step hash that last touched this line.
 pub const BlameEntry = struct {
-    step: []const u8, // 64-char lowercase hex, heap-owned
+    step: []const u8, // 64-char lowercase hex, allocator-owned and deduplicated
 };
 
 /// Associates each line of a file with the step that introduced it.
@@ -26,7 +26,16 @@ pub const BlameMap = struct {
 /// Free all memory allocated by `computeBlame`.
 /// Do NOT call on BlameMap values from `readBlame`; use `parsed.deinit()`.
 pub fn freeBlameMap(gpa: std.mem.Allocator, bm: BlameMap) void {
-    for (bm.lines) |e| gpa.free(@constCast(e.step));
+    for (bm.lines, 0..) |e, i| {
+        var seen = false;
+        for (bm.lines[0..i]) |prior| {
+            if (prior.step.ptr == e.step.ptr) {
+                seen = true;
+                break;
+            }
+        }
+        if (!seen) gpa.free(@constCast(e.step));
+    }
     gpa.free(@constCast(bm.lines));
     gpa.free(@constCast(bm.path));
 }
@@ -42,7 +51,7 @@ pub fn freeBlameMap(gpa: std.mem.Allocator, bm: BlameMap) void {
 /// Returns `error.BlameLengthMismatch` when `old_blame` is provided but its
 /// line count does not match `old_lines.len`.
 pub fn computeBlame(
-    gpa: std.mem.Allocator,
+    allocator: std.mem.Allocator,
     path: []const u8,
     old_lines: []const []const u8,
     new_lines: []const []const u8,
@@ -53,25 +62,30 @@ pub fn computeBlame(
         if (ob.lines.len != old_lines.len) return error.BlameLengthMismatch;
     }
 
-    const edits = try diff_mod.diff(gpa, old_lines, new_lines);
-    defer gpa.free(edits);
+    const edits = try diff_mod.diff(allocator, old_lines, new_lines);
+    defer allocator.free(edits);
 
     var entries: std.ArrayList(BlameEntry) = .empty;
+    var interned_steps: std.ArrayList([]const u8) = .empty;
     errdefer {
-        for (entries.items) |e| gpa.free(@constCast(e.step));
-        entries.deinit(gpa);
+        for (interned_steps.items) |step| allocator.free(@constCast(step));
+        interned_steps.deinit(allocator);
+        entries.deinit(allocator);
     }
+
+    const owned_path = try allocator.dupe(u8, path);
+    errdefer allocator.free(owned_path);
 
     var old_idx: usize = 0;
     for (edits) |edit| {
         switch (edit.op) {
             .equal => {
                 const src = if (old_blame) |ob| ob.lines[old_idx].step else step_hex;
-                try entries.append(gpa, .{ .step = try gpa.dupe(u8, src) });
+                try entries.append(allocator, .{ .step = try internStep(allocator, &interned_steps, src) });
                 old_idx += 1;
             },
             .insert => {
-                try entries.append(gpa, .{ .step = try gpa.dupe(u8, step_hex) });
+                try entries.append(allocator, .{ .step = try internStep(allocator, &interned_steps, step_hex) });
             },
             .delete => {
                 old_idx += 1;
@@ -79,10 +93,25 @@ pub fn computeBlame(
         }
     }
 
+    interned_steps.deinit(allocator);
     return BlameMap{
-        .path = try gpa.dupe(u8, path),
-        .lines = try entries.toOwnedSlice(gpa),
+        .path = owned_path,
+        .lines = try entries.toOwnedSlice(allocator),
     };
+}
+
+fn internStep(
+    allocator: std.mem.Allocator,
+    interned_steps: *std.ArrayList([]const u8),
+    src: []const u8,
+) ![]const u8 {
+    for (interned_steps.items) |existing| {
+        if (std.mem.eql(u8, existing, src)) return existing;
+    }
+    const owned = try allocator.dupe(u8, src);
+    errdefer allocator.free(owned);
+    try interned_steps.append(allocator, owned);
+    return owned;
 }
 
 /// Serialize a BlameMap and write it to the object store.  Returns the hash.
@@ -187,4 +216,16 @@ test "writeBlame and readBlame round-trip" {
     try std.testing.expectEqualStrings("a.zig", parsed.value.path);
     try std.testing.expectEqual(@as(usize, 2), parsed.value.lines.len);
     try std.testing.expectEqualStrings(step_hex, parsed.value.lines[0].step);
+}
+
+test "computeBlame: deduplicates repeated step ids" {
+    const gpa = std.testing.allocator;
+    const lines = [_][]const u8{ "alpha", "beta", "gamma" };
+    const step_hex = "c" ** 64;
+
+    const bm = try computeBlame(gpa, "src/foo.zig", &.{}, &lines, null, step_hex);
+    defer freeBlameMap(gpa, bm);
+
+    try std.testing.expectEqual(@intFromPtr(bm.lines[0].step.ptr), @intFromPtr(bm.lines[1].step.ptr));
+    try std.testing.expectEqual(@intFromPtr(bm.lines[1].step.ptr), @intFromPtr(bm.lines[2].step.ptr));
 }

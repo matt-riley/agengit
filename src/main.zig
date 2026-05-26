@@ -1,6 +1,7 @@
 const std = @import("std");
 const clap = @import("clap");
 const fs_mod = @import("util/fs.zig");
+const file_limits_mod = @import("util/file_limits.zig");
 const file_lock_mod = @import("util/file_lock.zig");
 const hook_mod = @import("hook.zig");
 const registry = @import("cli/registry.zig");
@@ -61,6 +62,7 @@ const top_params = clap.parseParamsComptime(
 
 pub fn main(init: std.process.Init) !void {
     fs_mod.configureFromEnviron(init.minimal.environ);
+    file_limits_mod.configureFromEnviron(init.minimal.environ);
     file_lock_mod.configureFromEnviron(init.minimal.environ);
     hook_mod.configureFromEnviron(init.minimal.environ);
 
@@ -145,7 +147,9 @@ test "version starts with a digit" {
 
 // Pull util module tests into the main test binary.
 test {
+    _ = @import("util/buf_pool.zig");
     _ = @import("util/file_lock.zig");
+    _ = @import("util/file_limits.zig");
     _ = @import("util/fs.zig");
     _ = @import("util/exe_path.zig");
     _ = @import("util/home.zig");

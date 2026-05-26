@@ -69,6 +69,7 @@ _agit() {
                     ;;
                 blame)
                     _arguments \
+                        '--no-limits[Disable the blame file-size cap for this invocation when blame output is available.]' \
                         '--help[Display this help and exit.]'
                     ;;
                 cat)

@@ -1,6 +1,6 @@
 # ADR 016: Snapshot, diff, and blame performance
 
-**Status:** Proposed
+**Status:** Implemented
 **Date:** 2026-05-25
 
 ## Context

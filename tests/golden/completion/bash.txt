@@ -37,7 +37,7 @@ _agit_complete() {
         COMPREPLY=($(compgen -W "--json -h --help " -- "$cur"))
         ;;
     blame)
-        COMPREPLY=($(compgen -W "-h --help " -- "$cur"))
+        COMPREPLY=($(compgen -W "--no-limits -h --help " -- "$cur"))
         ;;
     cat)
         COMPREPLY=($(compgen -W "-h --help " -- "$cur"))
