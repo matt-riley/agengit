@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.14.0](https://github.com/matt-riley/agengit/compare/v1.13.0...v1.14.0) (2026-05-26)
+
+
+### Features
+
+* add fsck integrity verification ([e3cba1f](https://github.com/matt-riley/agengit/commit/e3cba1f36f36d91e0cb8888de7a8d0f900db9759))
+* add gc store maintenance command ([f026533](https://github.com/matt-riley/agengit/commit/f0265336ce8064bda3eae1f9c62b802657e8a7f1))
+* add historical grep command ([2bc6be9](https://github.com/matt-riley/agengit/commit/2bc6be92a226aabe83a4cb52fb4b02f71f0d673d))
+* **privacy:** implement ADR 026 controls ([a46079e](https://github.com/matt-riley/agengit/commit/a46079e19509d79f3b287381e4121ab0b1c758de))
+* **store:** cache object prefix resolution ([ae921f6](https://github.com/matt-riley/agengit/commit/ae921f6e9f550ca629f60187d8492d4b02a96366))
+* sync README commands from usage specs ([87950ef](https://github.com/matt-riley/agengit/commit/87950ef1977ba85e43264504edea30193d053055))
+
+
+### Bug Fixes
+
+* **tests:** create sandbox agit repo for privacy scan ([0428623](https://github.com/matt-riley/agengit/commit/04286238a5a9546c03e830fcb46c505b7a23a0d0))
+
+
+### Performance Improvements
+
+* **store:** optimize snapshot and blame hot paths ([0544219](https://github.com/matt-riley/agengit/commit/0544219bd5e454cff9560dac9d792e11f19761d9))
+
 ## [1.13.0](https://github.com/matt-riley/agengit/compare/v1.12.0...v1.13.0) (2026-05-25)
 
 
