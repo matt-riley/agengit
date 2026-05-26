@@ -5,7 +5,7 @@ const zqlite = @import("zqlite");
 pub const Index = struct {
     db: zqlite.Conn,
 
-    pub const current_schema_version: i64 = 6;
+    pub const current_schema_version: i64 = 7;
     pub const objects_complete_meta_key = "index.objects.complete";
 
     pub const ObjectPrefixMatches = struct {
@@ -81,6 +81,9 @@ pub const Index = struct {
         }
         if (current_version < 6) {
             try self.applyMigration6();
+        }
+        if (current_version < 7) {
+            try self.applyMigration7();
         }
     }
 
@@ -278,6 +281,37 @@ pub const Index = struct {
         try self.db.commit();
     }
 
+    fn applyMigration7(self: Index) !void {
+        try self.db.transaction();
+        errdefer self.db.rollback();
+
+        try self.db.execNoArgs(
+            \\create table if not exists packed_objects (
+            \\  hash         text primary key references objects(hash) on delete cascade,
+            \\  pack_name    text not null,
+            \\  offset       integer not null,
+            \\  packed_len   integer not null,
+            \\  unpacked_len integer not null,
+            \\  kind         text not null,
+            \\  encoding     text not null,
+            \\  base_hash    text,
+            \\  depth        integer not null,
+            \\  crc32        integer not null
+            \\)
+        );
+        try self.db.execNoArgs(
+            "create index if not exists packed_objects_pack_name_offset on packed_objects(pack_name, offset)",
+        );
+
+        try self.db.exec(
+            "insert into schema_migrations (version) values (?)",
+            .{@as(i64, 7)},
+        );
+
+        try self.db.execNoArgs("pragma user_version = 7");
+        try self.db.commit();
+    }
+
     /// Insert or update a session's HEAD pointer.
     pub fn upsertSession(
         self: Index,
@@ -321,6 +355,7 @@ pub const Index = struct {
         try self.db.execNoArgs("delete from messages");
         try self.db.execNoArgs("delete from steps");
         try self.db.execNoArgs("delete from sessions");
+        try self.db.execNoArgs("delete from packed_objects");
         try self.db.execNoArgs("delete from objects");
         try self.db.commit();
     }
@@ -342,6 +377,86 @@ pub const Index = struct {
             return true;
         }
         return false;
+    }
+
+    pub const PackedObjectRow = struct {
+        pack_name: []u8,
+        offset: u64,
+        packed_len: u64,
+        unpacked_len: u64,
+        kind: []u8,
+        encoding: []u8,
+        base_hash: ?[]u8,
+        depth: u16,
+        crc32: u32,
+
+        pub fn deinit(self: *PackedObjectRow, gpa: std.mem.Allocator) void {
+            gpa.free(self.pack_name);
+            gpa.free(self.kind);
+            gpa.free(self.encoding);
+            if (self.base_hash) |base_hash| gpa.free(base_hash);
+            self.* = undefined;
+        }
+    };
+
+    pub fn insertPackedObject(
+        self: Index,
+        hash: []const u8,
+        pack_name: []const u8,
+        offset: u64,
+        packed_len: u64,
+        unpacked_len: u64,
+        kind: []const u8,
+        encoding: []const u8,
+        base_hash: ?[]const u8,
+        depth: u16,
+        crc32: u32,
+    ) !void {
+        try self.db.exec(
+            \\insert into packed_objects (hash, pack_name, offset, packed_len, unpacked_len, kind, encoding, base_hash, depth, crc32)
+            \\values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            \\on conflict(hash) do update set
+            \\  pack_name = excluded.pack_name,
+            \\  offset = excluded.offset,
+            \\  packed_len = excluded.packed_len,
+            \\  unpacked_len = excluded.unpacked_len,
+            \\  kind = excluded.kind,
+            \\  encoding = excluded.encoding,
+            \\  base_hash = excluded.base_hash,
+            \\  depth = excluded.depth,
+            \\  crc32 = excluded.crc32
+        , .{
+            hash,
+            pack_name,
+            @as(i64, @intCast(offset)),
+            @as(i64, @intCast(packed_len)),
+            @as(i64, @intCast(unpacked_len)),
+            kind,
+            encoding,
+            base_hash,
+            @as(i64, depth),
+            @as(i64, crc32),
+        });
+    }
+
+    pub fn lookupPackedObject(self: Index, gpa: std.mem.Allocator, hash: []const u8) !?PackedObjectRow {
+        const row = try self.db.row(
+            \\select pack_name, offset, packed_len, unpacked_len, kind, encoding, base_hash, depth, crc32
+            \\from packed_objects where hash=? limit 1
+        , .{hash}) orelse return null;
+        defer row.deinit();
+
+        return .{
+            .pack_name = try gpa.dupe(u8, row.get([]const u8, 0)),
+            .offset = @intCast(row.get(i64, 1)),
+            .packed_len = @intCast(row.get(i64, 2)),
+            .unpacked_len = @intCast(row.get(i64, 3)),
+            .kind = try gpa.dupe(u8, row.get([]const u8, 4)),
+            .encoding = try gpa.dupe(u8, row.get([]const u8, 5)),
+            .base_hash = if (row.get(?[]const u8, 6)) |base_hash| try gpa.dupe(u8, base_hash) else null,
+            .depth = @intCast(row.get(i64, 7)),
+            .crc32 = @intCast(row.get(i64, 8)),
+        };
     }
 
     pub fn countObjects(self: Index) !i64 {
@@ -810,10 +925,17 @@ test "index migrate creates query-path indexes" {
     try std.testing.expect(objects_tbl != null);
     defer objects_tbl.?.deinit();
 
+    const packed_objects_tbl = try idx.db.row(
+        "select 1 from sqlite_master where type='table' and name='packed_objects'",
+        .{},
+    );
+    try std.testing.expect(packed_objects_tbl != null);
+    defer packed_objects_tbl.?.deinit();
+
     const user_ver = try idx.db.row("pragma user_version", .{});
     try std.testing.expect(user_ver != null);
     defer user_ver.?.deinit();
-    try std.testing.expectEqual(@as(i64, 6), user_ver.?.get(i64, 0));
+    try std.testing.expectEqual(@as(i64, 7), user_ver.?.get(i64, 0));
 }
 
 test "index upsertSession and insertStep" {

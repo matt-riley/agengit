@@ -6,6 +6,7 @@ const file_lock_mod = @import("../util/file_lock.zig");
 const hash_mod = @import("hash.zig");
 const index_mod = @import("index.zig");
 const object_mod = @import("object.zig");
+const pack_mod = @import("pack.zig");
 const ref_mod = @import("ref.zig");
 
 pub const Severity = enum {
@@ -119,6 +120,7 @@ pub fn scan(io: std.Io, gpa: std.mem.Allocator, store_root: std.Io.Dir, store_ab
     var reachable_steps = std.AutoHashMap([hash_mod.hex_len]u8, StepInfo).init(aa);
 
     try scanObjects(io, gpa, aa, store_root, &objects, &findings, &stats, &categories);
+    try scanPackedObjects(io, gpa, aa, store_root, &objects, &findings, &stats, &categories);
     try validateReachability(aa, &objects, &findings, &stats, &categories);
     try scanRefs(io, gpa, aa, store_root, &objects, &sessions, &reachable_steps, &findings, &stats, &categories);
     try warnOnUnknownLooseObjects(aa, &objects, &findings, &stats, &categories);
@@ -202,6 +204,44 @@ fn scanObjects(
 
         const record = try inspectObjectData(aa, raw, object_path, &hex_buf, findings, stats, categories);
         try objects.put(hex_buf, record);
+    }
+}
+
+fn scanPackedObjects(
+    io: std.Io,
+    gpa: std.mem.Allocator,
+    aa: std.mem.Allocator,
+    store_root: std.Io.Dir,
+    objects: *std.AutoHashMap([hash_mod.hex_len]u8, ObjectRecord),
+    findings: *std.ArrayList(Finding),
+    stats: *Stats,
+    categories: *CategoryState,
+) !void {
+    const pack_files = try pack_mod.listPackFiles(io, store_root, gpa);
+    defer pack_mod.freePackFiles(gpa, pack_files);
+
+    for (pack_files) |pack_name| {
+        const entries = pack_mod.readPackEntries(io, store_root, gpa, pack_name) catch |err| {
+            try appendFinding(aa, findings, stats, categories, .@"error", .object_integrity, .{
+                .code = "pack_read_failed",
+                .message = try std.fmt.allocPrint(aa, "Packed object file could not be parsed: {s}.", .{pack_name}),
+                .hint = @errorName(err),
+                .path = try std.fmt.allocPrint(aa, ".agit/objects/pack/{s}", .{pack_name}),
+            });
+            continue;
+        };
+        defer pack_mod.freeParsedEntries(gpa, entries);
+
+        for (entries) |entry| {
+            stats.object_files += 1;
+            const hex = entry.meta.hash.toHex();
+            const object_path = try std.fmt.allocPrint(aa, ".agit/objects/pack/{s}@{d}", .{
+                pack_name,
+                entry.meta.offset,
+            });
+            const record = try inspectObjectData(aa, entry.raw, object_path, &hex, findings, stats, categories);
+            try objects.put(hex, record);
+        }
     }
 }
 
@@ -1132,7 +1172,7 @@ fn appendOkFindings(
     if (!categories.object_integrity_issue) {
         appendFindingNoFail(aa, findings, stats, .ok, .{
             .code = "object_integrity_ok",
-            .message = tryAllocPrint(aa, "Validated {d} loose object file(s).", .{stats.object_files}),
+            .message = tryAllocPrint(aa, "Validated {d} stored object(s).", .{stats.object_files}),
         });
     }
     if (!categories.reachability_issue) {

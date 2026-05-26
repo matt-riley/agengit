@@ -1,6 +1,7 @@
 const std = @import("std");
 const hash_mod = @import("hash.zig");
 const object = @import("object.zig");
+const pack_mod = @import("pack.zig");
 const ref = @import("ref.zig");
 const index_mod = @import("index.zig");
 const file_lock = @import("../util/file_lock.zig");
@@ -52,6 +53,7 @@ pub const Store = struct {
     pub fn openWithOptions(io: std.Io, repo_dir: std.Io.Dir, gpa: std.mem.Allocator, options: OpenOptions) !Store {
         // Ensure .agit/ and its subdirectories exist.
         try repo_dir.createDirPath(io, ".agit/objects");
+        try repo_dir.createDirPath(io, ".agit/objects/pack");
         try repo_dir.createDirPath(io, ".agit/refs/sessions");
         try repo_dir.createDirPath(io, ".agit/log");
         try repo_dir.createDirPath(io, ".agit/tmp");
@@ -172,24 +174,46 @@ pub const Store = struct {
 
     /// Read raw bytes for the object identified by `h`. Caller owns result.
     pub fn readBlob(self: *Store, io: std.Io, gpa: std.mem.Allocator, h: Hash) ![]u8 {
-        return object.read(io, self.root, gpa, h);
+        return object.read(io, self.root, gpa, h) catch |err| switch (err) {
+            error.FileNotFound, error.NotDir => {
+                const hex = h.toHex();
+                if (try self.index.lookupPackedObject(gpa, &hex)) |packed_row| {
+                    var packed_entry = packed_row;
+                    defer packed_entry.deinit(gpa);
+                    return pack_mod.readObject(io, self.root, gpa, packed_entry.pack_name, packed_entry.offset);
+                }
+                if (try pack_mod.readObjectByHash(io, self.root, gpa, h)) |packed_result| {
+                    const found = packed_result;
+                    gpa.free(found.pack_name);
+                    return found.raw;
+                }
+                return err;
+            },
+            else => return err,
+        };
     }
 
     /// Read and deserialize a Tree object. Caller must call `.deinit()`.
     pub fn readTree(self: *Store, io: std.Io, gpa: std.mem.Allocator, h: Hash) !std.json.Parsed(Tree) {
-        return object.readTree(io, self.root, gpa, h);
+        const data = try self.readBlob(io, gpa, h);
+        defer gpa.free(data);
+        return std.json.parseFromSlice(Tree, gpa, data, .{ .allocate = .alloc_always });
     }
 
     /// Read and deserialize a Step object. Caller must call `.deinit()`.
     pub fn readStep(self: *Store, io: std.Io, gpa: std.mem.Allocator, h: Hash) !std.json.Parsed(Step) {
-        return object.readStep(io, self.root, gpa, h);
+        const data = try self.readBlob(io, gpa, h);
+        defer gpa.free(data);
+        return std.json.parseFromSlice(Step, gpa, data, .{ .allocate = .alloc_always });
     }
 
     /// Resolve a hex prefix to object candidates.
     pub fn resolvePrefix(self: *Store, io: std.Io, gpa: std.mem.Allocator, prefix: []const u8) !object.PrefixResolution {
         if (try self.shouldUseObjectIndex()) {
             const matches = self.index.lookupObjectPrefix(prefix) catch {
-                return object.resolvePrefixDetailed(io, self.root, gpa, prefix);
+                const loose = try object.resolvePrefixDetailed(io, self.root, gpa, prefix);
+                const packed_matches = try pack_mod.lookupPrefix(io, self.root, gpa, prefix);
+                return mergePrefixResolution(loose, packed_matches);
             };
             return switch (matches.count) {
                 0 => .not_found,
@@ -213,7 +237,9 @@ pub const Store = struct {
     };
 
     pub fn auditObjectIndex(self: *Store, io: std.Io, gpa: std.mem.Allocator) !ObjectIndexAudit {
-        const disk_count = try countObjectFiles(io, gpa, self.root);
+        const loose_count = try countObjectFiles(io, gpa, self.root);
+        const pack_count = try pack_mod.countEntries(io, self.root, gpa);
+        const disk_count = loose_count + pack_count;
         const indexed_count: usize = @intCast(try self.index.countObjects());
         var missing_rows: usize = 0;
 
@@ -237,6 +263,17 @@ pub const Store = struct {
             @memcpy(hex_buf[0..2], entry.path[0..2]);
             @memcpy(hex_buf[2..64], entry.path[3..65]);
             if (!try self.index.hasObject(&hex_buf)) missing_rows += 1;
+        }
+
+        const pack_files = try pack_mod.listPackFiles(io, self.root, gpa);
+        defer pack_mod.freePackFiles(gpa, pack_files);
+        for (pack_files) |pack_name| {
+            const entries = try pack_mod.readPackEntries(io, self.root, gpa, pack_name);
+            defer pack_mod.freeParsedEntries(gpa, entries);
+            for (entries) |entry| {
+                const hex = entry.meta.hash.toHex();
+                if (!try self.index.hasObject(&hex)) missing_rows += 1;
+            }
         }
 
         return .{
@@ -273,7 +310,9 @@ pub const Store = struct {
 
     /// Read a BlameMap from the object store.  Caller calls `parsed.deinit()`.
     pub fn readBlame(self: *Store, io: std.Io, gpa: std.mem.Allocator, h: Hash) !std.json.Parsed(BlameMap) {
-        return blame_mod.readBlame(io, self.root, gpa, h);
+        const data = try self.readBlob(io, gpa, h);
+        defer gpa.free(data);
+        return std.json.parseFromSlice(BlameMap, gpa, data, .{ .allocate = .alloc_always });
     }
 
     // ── Ref operations ───────────────────────────────────────────────────────
@@ -758,8 +797,9 @@ pub const Store = struct {
 
     fn ensureObjectIndexState(self: *Store, io: std.Io, gpa: std.mem.Allocator) !void {
         if ((try self.index.getObjectsComplete()) != null) return;
-        const disk_objects = try countObjectFiles(io, gpa, self.root);
-        try self.index.setObjectsComplete(disk_objects == 0);
+        const loose_objects = try countObjectFiles(io, gpa, self.root);
+        const packed_objects = try pack_mod.countEntries(io, self.root, gpa);
+        try self.index.setObjectsComplete(loose_objects == 0 and packed_objects == 0);
     }
 
     fn shouldUseObjectIndex(self: *Store) !bool {
@@ -870,9 +910,37 @@ fn countObjectFiles(io: std.Io, gpa: std.mem.Allocator, root: std.Io.Dir) !usize
 
     var count: usize = 0;
     while (try walker.next(io)) |entry| {
-        if (entry.kind == .file) count += 1;
+        if (entry.kind != .file) continue;
+        if (entry.path.len != 65 or entry.path[2] != '/') continue;
+        count += 1;
     }
     return count;
+}
+
+fn mergePrefixResolution(loose: object.PrefixResolution, packed_matches: pack_mod.PrefixMatches) object.PrefixResolution {
+    var current = loose;
+    var i: usize = 0;
+    while (i < @min(packed_matches.count, packed_matches.hashes.len)) : (i += 1) {
+        const candidate = packed_matches.hashes[i];
+        switch (current) {
+            .not_found => current = .{ .unique = candidate },
+            .unique => |existing| {
+                if (!existing.eql(candidate)) {
+                    current = .{ .ambiguous = .{ existing, candidate } };
+                    return current;
+                }
+            },
+            .ambiguous => return current,
+        }
+    }
+    if (packed_matches.count > packed_matches.hashes.len) {
+        return switch (current) {
+            .not_found => .{ .ambiguous = .{ packed_matches.hashes[0], packed_matches.hashes[1] } },
+            .unique => |existing| .{ .ambiguous = .{ existing, packed_matches.hashes[0] } },
+            .ambiguous => current,
+        };
+    }
+    return current;
 }
 
 test "store open creates structure" {
