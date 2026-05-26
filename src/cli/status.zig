@@ -112,6 +112,12 @@ pub fn writeDiagnostic(
             if (diagnostic.hint) |hint| {
                 try writer.interface.print("hint: {s}\n", .{hint});
             }
+            if (diagnostic.candidates) |candidates| {
+                try writer.interface.writeAll("candidates:\n");
+                for (candidates) |candidate| {
+                    try writer.interface.print("  - {s}\n", .{candidate});
+                }
+            }
         },
         .json => try output_mod.writeDiagnosticEnvelope(writer, command_name, diagnostic),
     }

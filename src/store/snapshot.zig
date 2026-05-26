@@ -1,5 +1,6 @@
 const std = @import("std");
 const hash_mod = @import("hash.zig");
+const index_mod = @import("index.zig");
 const object = @import("object.zig");
 const ignore_mod = @import("ignore.zig");
 const fs_mod = @import("../util/fs.zig");
@@ -34,6 +35,7 @@ pub fn snapshot(
     repo_dir: std.Io.Dir,
     gpa: std.mem.Allocator,
     store_root: std.Io.Dir,
+    index: ?*index_mod.Index,
     ignorer: *const Ignorer,
     config: SnapshotConfig,
 ) !Hash {
@@ -72,8 +74,12 @@ pub fn snapshot(
 
         if (isBinary(data)) continue;
 
-        const blob_hash = try object.write(io, store_root, data);
+        const blob_write = try object.writeDetailed(io, store_root, data);
+        const blob_hash = blob_write.hash;
         const blob_hex = blob_hash.toHex();
+        if (index) |idx| {
+            try idx.insertObject(&blob_hex, "blob", blob_write.size);
+        }
 
         const norm_path = try gpa.dupe(u8, entry.path);
         if (comptime std.fs.path.sep != '/') {
@@ -97,7 +103,12 @@ pub fn snapshot(
     }.lessThan);
 
     const tree = object.Tree{ .entries = entries.items };
-    return object.writeTree(io, store_root, gpa, tree);
+    const tree_write = try object.writeTreeDetailed(io, store_root, gpa, tree);
+    const tree_hex = tree_write.hash.toHex();
+    if (index) |idx| {
+        try idx.insertObject(&tree_hex, "tree", tree_write.size);
+    }
+    return tree_write.hash;
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────
@@ -133,7 +144,7 @@ test "snapshot: captures text files" {
     try tmp.dir.createDirPath(io, ".agit/objects");
 
     const ignorer = Ignorer.initDefault(gpa);
-    const h = try snapshot(io, tmp.dir, gpa, tmp.dir, &ignorer, .{});
+    const h = try snapshot(io, tmp.dir, gpa, tmp.dir, null, &ignorer, .{});
 
     var parsed = try object.readTree(io, tmp.dir, gpa, h);
     defer parsed.deinit();
@@ -157,7 +168,7 @@ test "snapshot: excludes ignored directories" {
     try tmp.dir.createDirPath(io, ".agit/objects");
 
     const ignorer = Ignorer.initDefault(gpa);
-    const h = try snapshot(io, tmp.dir, gpa, tmp.dir, &ignorer, .{});
+    const h = try snapshot(io, tmp.dir, gpa, tmp.dir, null, &ignorer, .{});
 
     var parsed = try object.readTree(io, tmp.dir, gpa, h);
     defer parsed.deinit();
@@ -178,7 +189,7 @@ test "snapshot: excludes secret files and binary files" {
     try tmp.dir.createDirPath(io, ".agit/objects");
 
     const ignorer = Ignorer.initDefault(gpa);
-    const h = try snapshot(io, tmp.dir, gpa, tmp.dir, &ignorer, .{});
+    const h = try snapshot(io, tmp.dir, gpa, tmp.dir, null, &ignorer, .{});
 
     var parsed = try object.readTree(io, tmp.dir, gpa, h);
     defer parsed.deinit();
@@ -202,8 +213,8 @@ test "snapshot: deterministic hash for identical content" {
     try tmp2.dir.createDirPath(io, ".agit/objects");
 
     const ignorer = Ignorer.initDefault(gpa);
-    const h1 = try snapshot(io, tmp1.dir, gpa, tmp1.dir, &ignorer, .{});
-    const h2 = try snapshot(io, tmp2.dir, gpa, tmp2.dir, &ignorer, .{});
+    const h1 = try snapshot(io, tmp1.dir, gpa, tmp1.dir, null, &ignorer, .{});
+    const h2 = try snapshot(io, tmp2.dir, gpa, tmp2.dir, null, &ignorer, .{});
 
     try std.testing.expect(h1.eql(h2));
 }

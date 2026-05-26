@@ -64,6 +64,7 @@ pub const Store = struct {
         var store = Store{ .root = root, .index = idx };
         errdefer store.deinit(io);
 
+        try store.ensureObjectIndexState(io, gpa);
         _ = try store.reconcile(io, gpa, .repair);
         return store;
     }
@@ -130,17 +131,26 @@ pub const Store = struct {
 
     /// Write raw bytes to the object store. Returns the content hash.
     pub fn writeBlob(self: *Store, io: std.Io, data: []const u8) !Hash {
-        return object.write(io, self.root, data);
+        const written = try object.writeDetailed(io, self.root, data);
+        const hex = written.hash.toHex();
+        try self.index.insertObject(&hex, "blob", written.size);
+        return written.hash;
     }
 
     /// Write a Tree object. Returns its hash.
     pub fn writeTree(self: *Store, io: std.Io, gpa: std.mem.Allocator, tree: Tree) !Hash {
-        return object.writeTree(io, self.root, gpa, tree);
+        const written = try object.writeTreeDetailed(io, self.root, gpa, tree);
+        const hex = written.hash.toHex();
+        try self.index.insertObject(&hex, "tree", written.size);
+        return written.hash;
     }
 
     /// Write a Step object. Returns its hash.
     pub fn writeStep(self: *Store, io: std.Io, gpa: std.mem.Allocator, step: Step) !Hash {
-        return object.writeStep(io, self.root, gpa, step);
+        const written = try object.writeStepDetailed(io, self.root, gpa, step);
+        const hex = written.hash.toHex();
+        try self.index.insertObject(&hex, "step", written.size);
+        return written.hash;
     }
 
     // ── Object reads ─────────────────────────────────────────────────────────
@@ -160,10 +170,66 @@ pub const Store = struct {
         return object.readStep(io, self.root, gpa, h);
     }
 
-    /// Resolve a hex prefix to a full object Hash.
-    /// Returns error.ObjectNotFound or error.AmbiguousPrefix on bad input.
-    pub fn resolvePrefix(self: *Store, io: std.Io, gpa: std.mem.Allocator, prefix: []const u8) !Hash {
-        return object.resolvePrefix(io, self.root, gpa, prefix);
+    /// Resolve a hex prefix to object candidates.
+    pub fn resolvePrefix(self: *Store, io: std.Io, gpa: std.mem.Allocator, prefix: []const u8) !object.PrefixResolution {
+        if (try self.shouldUseObjectIndex()) {
+            const matches = self.index.lookupObjectPrefix(prefix) catch {
+                return object.resolvePrefixDetailed(io, self.root, gpa, prefix);
+            };
+            return switch (matches.count) {
+                0 => .not_found,
+                1 => .{ .unique = try Hash.fromHex(&matches.hashes[0]) },
+                else => .{
+                    .ambiguous = .{
+                        try Hash.fromHex(&matches.hashes[0]),
+                        try Hash.fromHex(&matches.hashes[1]),
+                    },
+                },
+            };
+        }
+        return object.resolvePrefixDetailed(io, self.root, gpa, prefix);
+    }
+
+    pub const ObjectIndexAudit = struct {
+        indexed_complete: bool,
+        disk_count: usize,
+        indexed_count: usize,
+        missing_rows: usize,
+    };
+
+    pub fn auditObjectIndex(self: *Store, io: std.Io, gpa: std.mem.Allocator) !ObjectIndexAudit {
+        const disk_count = try countObjectFiles(io, gpa, self.root);
+        const indexed_count: usize = @intCast(try self.index.countObjects());
+        var missing_rows: usize = 0;
+
+        var obj_dir = self.root.openDir(io, "objects", .{ .iterate = true }) catch |err| switch (err) {
+            error.FileNotFound, error.NotDir => return .{
+                .indexed_complete = (try self.index.getObjectsComplete()) orelse false,
+                .disk_count = 0,
+                .indexed_count = indexed_count,
+                .missing_rows = 0,
+            },
+            else => return err,
+        };
+        defer obj_dir.close(io);
+
+        var walker = try obj_dir.walk(gpa);
+        defer walker.deinit();
+        while (try walker.next(io)) |entry| {
+            if (entry.kind != .file) continue;
+            if (entry.path.len != 65) continue;
+            var hex_buf: [64]u8 = undefined;
+            @memcpy(hex_buf[0..2], entry.path[0..2]);
+            @memcpy(hex_buf[2..64], entry.path[3..65]);
+            if (!try self.index.hasObject(&hex_buf)) missing_rows += 1;
+        }
+
+        return .{
+            .indexed_complete = (try self.index.getObjectsComplete()) orelse false,
+            .disk_count = disk_count,
+            .indexed_count = indexed_count,
+            .missing_rows = missing_rows,
+        };
     }
 
     // ── Snapshot ─────────────────────────────────────────────────────────────
@@ -177,14 +243,17 @@ pub const Store = struct {
         ignorer: *const Ignorer,
         config: SnapshotConfig,
     ) !Hash {
-        return snapshot_mod.snapshot(io, repo_dir, gpa, self.root, ignorer, config);
+        return snapshot_mod.snapshot(io, repo_dir, gpa, self.root, &self.index, ignorer, config);
     }
 
     // ── Blame ─────────────────────────────────────────────────────────────────
 
     /// Write a BlameMap to the object store.  Returns its hash.
     pub fn writeBlame(self: *Store, io: std.Io, gpa: std.mem.Allocator, bm: BlameMap) !Hash {
-        return blame_mod.writeBlame(io, self.root, gpa, bm);
+        const written = try blame_mod.writeBlameDetailed(io, self.root, gpa, bm);
+        const hex = written.hash.toHex();
+        try self.index.insertObject(&hex, "blame", written.size);
+        return written.hash;
     }
 
     /// Read a BlameMap from the object store.  Caller calls `parsed.deinit()`.
@@ -355,11 +424,16 @@ pub const Store = struct {
         while (i > 0) : (i -= 1) {
             const h = chain.items[i - 1];
             const hex = h.toHex();
+            const raw = self.readBlob(io, gpa, h) catch {
+                return false;
+            };
+            defer gpa.free(raw);
             var parsed = self.readStep(io, gpa, h) catch {
                 return false;
             };
             defer parsed.deinit();
             const step = parsed.value;
+            try self.index.insertObject(&hex, "step", raw.len);
             try self.index.insertStep(
                 &hex,
                 step.origin,
@@ -631,12 +705,14 @@ pub const Store = struct {
             .messages = input.messages,
             .tool_calls = input.tool_calls,
         };
-        const step_hash = try self.writeStep(io, gpa, step);
+        const step_write = try object.writeStepDetailed(io, self.root, gpa, step);
+        const step_hash = step_write.hash;
         const step_hex = step_hash.toHex();
 
         try self.index.db.transaction();
         errdefer self.index.db.rollback();
 
+        try self.index.insertObject(&step_hex, "step", step_write.size);
         try self.index.upsertSession(input.origin, input.session_id, &step_hex);
         try self.index.insertStep(
             &step_hex,
@@ -663,6 +739,16 @@ pub const Store = struct {
         try self.index.db.commit();
 
         return .{ .committed = step_hash };
+    }
+
+    fn ensureObjectIndexState(self: *Store, io: std.Io, gpa: std.mem.Allocator) !void {
+        if ((try self.index.getObjectsComplete()) != null) return;
+        const disk_objects = try countObjectFiles(io, gpa, self.root);
+        try self.index.setObjectsComplete(disk_objects == 0);
+    }
+
+    fn shouldUseObjectIndex(self: *Store) !bool {
+        return (try self.index.getObjectsComplete()) orelse false;
     }
 
     /// Compare-and-swap the session HEAD ref and, within the same lock window,

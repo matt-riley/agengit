@@ -13,6 +13,7 @@ pub const Diagnostic = struct {
     hint: ?[]const u8 = null,
     path: ?[]const u8 = null,
     hash: ?[]const u8 = null,
+    candidates: ?[]const []const u8 = null,
 };
 
 pub const CheckStatus = enum {
@@ -90,4 +91,5 @@ test "writeDiagnosticEnvelope encodes diagnostic details" {
     try std.testing.expectEqualStrings("Object not found.", diagnostic.get("message").?.string);
     try std.testing.expectEqualStrings("Use a longer hash prefix.", diagnostic.get("hint").?.string);
     try std.testing.expectEqualStrings("abc123", diagnostic.get("hash").?.string);
+    try std.testing.expect(diagnostic.get("candidates").? == .null);
 }

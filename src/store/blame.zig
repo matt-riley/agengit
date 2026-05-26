@@ -86,17 +86,26 @@ pub fn computeBlame(
 }
 
 /// Serialize a BlameMap and write it to the object store.  Returns the hash.
+pub fn writeBlameDetailed(
+    io: std.Io,
+    root: std.Io.Dir,
+    gpa: std.mem.Allocator,
+    bm: BlameMap,
+) !object.WriteDetails {
+    var aw = std.Io.Writer.Allocating.init(gpa);
+    defer aw.deinit();
+    try std.json.Stringify.value(bm, .{}, &aw.writer);
+    const data = aw.writer.buffered();
+    return object.writeDetailed(io, root, data);
+}
+
 pub fn writeBlame(
     io: std.Io,
     root: std.Io.Dir,
     gpa: std.mem.Allocator,
     bm: BlameMap,
 ) !Hash {
-    var aw = std.Io.Writer.Allocating.init(gpa);
-    defer aw.deinit();
-    try std.json.Stringify.value(bm, .{}, &aw.writer);
-    const data = aw.writer.buffered();
-    return object.write(io, root, data);
+    return (try writeBlameDetailed(io, root, gpa, bm)).hash;
 }
 
 /// Read a BlameMap from the object store by hash.

@@ -119,6 +119,9 @@ Structured CLI output uses the `cli-json-v1` envelope documented in
 Do not commit `.agit/`. Canonical history is in `objects/`; `index.db` is a
 query accelerator and can be rebuilt with `agit reindex`.
 
+If `agit doctor` reports that the object index cache is not backfilled after an
+upgrade, run `agit reindex` once to repopulate it from `.agit/objects/`.
+
 ## Snapshot and privacy notes
 
 By default, snapshots skip `.git/`, `.agit/`, common dependency/build/cache
@@ -156,6 +159,7 @@ zig build test-e2e
 zig build test-property
 zig build fuzz-hooks -- --time=60s
 zig build bench-durable
+zig build bench-resolve-prefix
 ./scripts/smoke-doctor.sh
 zig build fmt
 zig build check-fmt

@@ -1,6 +1,6 @@
 # ADR 015: Scalable object prefix resolution
 
-**Status:** Proposed
+**Status:** Implemented
 **Date:** 2026-05-25
 
 ## Context

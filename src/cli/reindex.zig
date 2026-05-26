@@ -97,10 +97,14 @@ fn parseOptions(iter: *std.process.Args.Iterator, stdout: *std.Io.File.Writer) !
 
 pub fn reindex(io: std.Io, gpa: std.mem.Allocator, store: *store_mod.Store) !ReindexStats {
     var stats = ReindexStats{ .sessions = 0, .steps = 0 };
+    try store.index.setObjectsComplete(false);
 
     // Walk every object in the store and parse those with type=="step".
     var obj_dir = store.root.openDir(io, "objects", .{ .iterate = true }) catch |err| switch (err) {
-        error.FileNotFound => return stats, // empty store
+        error.FileNotFound => {
+            try store.index.setObjectsComplete(true);
+            return stats;
+        }, // empty store
         else => return err,
     };
     defer obj_dir.close(io);
@@ -127,9 +131,9 @@ pub fn reindex(io: std.Io, gpa: std.mem.Allocator, store: *store_mod.Store) !Rei
         const h = hash_mod.Hash.fromHex(&hex_buf) catch continue;
         const h_hex = h.toHex();
 
-        // Read object and try to parse as Step.
         const data = object.read(io, store.root, gpa, h) catch continue;
         defer gpa.free(data);
+        try store.index.insertObject(&h_hex, object.detectKind(data), data.len);
 
         // Cheap pre-check: the JSON must contain "\"type\":\"step\"".
         if (std.mem.indexOf(u8, data, "\"type\":\"step\"") == null) continue;
@@ -192,6 +196,7 @@ pub fn reindex(io: std.Io, gpa: std.mem.Allocator, store: *store_mod.Store) !Rei
         }
     }
 
+    try store.index.setObjectsComplete(true);
     return stats;
 }
 
@@ -301,9 +306,12 @@ fn replayFromHead(
     while (i > 0) : (i -= 1) {
         const h = chain.items[i - 1];
         const h_hex = h.toHex();
+        const raw = try store.readBlob(io, gpa, h);
+        defer gpa.free(raw);
         var parsed = try store.readStep(io, gpa, h);
         defer parsed.deinit();
         const step = parsed.value;
+        try store.index.insertObject(&h_hex, "step", raw.len);
         try store.index.insertStep(
             &h_hex,
             step.origin,
@@ -400,6 +408,9 @@ test "reindex repairs missing rows from objects and refs" {
     try std.testing.expect(msg_row != null);
     defer msg_row.?.deinit();
     try std.testing.expectEqualStrings("ok", msg_row.?.get([]const u8, 0));
+
+    try std.testing.expect(try store.index.hasObject(&h_hex));
+    try std.testing.expectEqual(true, (try store.index.getObjectsComplete()).?);
 }
 
 test "reindex --from replays newer steps reachable from refs" {
@@ -449,4 +460,5 @@ test "reindex --from replays newer steps reachable from refs" {
     try std.testing.expectEqual(@as(usize, 1), stats.sessions);
     try std.testing.expectEqual(@as(usize, 1), stats.steps);
     try std.testing.expect(try store.index.hasStep(&h2_hex));
+    try std.testing.expect(try store.index.hasObject(&h2_hex));
 }

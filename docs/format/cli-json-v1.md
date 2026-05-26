@@ -26,7 +26,8 @@ Diagnostics appear inside `data` and use stable codes:
   "message": "Not an agit repository.",
   "hint": "Run `agit init` from the repository root to start recording.",
   "path": ".",
-  "hash": null
+  "hash": null,
+  "candidates": null
 }
 ```
 
@@ -35,6 +36,7 @@ Diagnostics appear inside `data` and use stable codes:
 - `hint` — optional next step or extra detail
 - `path` — optional related file/path
 - `hash` — optional related object hash or prefix
+- `candidates` — optional candidate hashes when a short prefix is ambiguous
 
 Doctor checks extend the same shape with a `status` field whose values are
 `ok`, `info`, `warn`, or `error`.
