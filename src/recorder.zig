@@ -1,6 +1,8 @@
 const std = @import("std");
+const config_mod = @import("store/config.zig");
 const store_mod = @import("store/store.zig");
 const object = @import("store/object.zig");
+const redact_mod = @import("privacy/redact.zig");
 const file_lock_mod = @import("util/file_lock.zig");
 const fs_mod = @import("util/fs.zig");
 
@@ -234,6 +236,7 @@ pub const Recorder = struct {
     store: store_mod.Store,
     repo_dir: std.Io.Dir,
     ignorer: Ignorer,
+    privacy_config: config_mod.Loaded,
     max_finalize_retries: u32,
 
     /// Open a Recorder anchored at the nearest repository root.
@@ -259,21 +262,28 @@ pub const Recorder = struct {
 
         // Non-fatal: fall back to defaults if .agitignore is absent or unreadable.
         const ignorer = Ignorer.fromDir(io, repo_dir, gpa) catch Ignorer.initDefault(gpa);
+        const privacy_config = config_mod.loadOrDefaultFromStore(io, s.root, gpa);
 
         return .{
             .gpa = gpa,
             .store = s,
             .repo_dir = repo_dir,
             .ignorer = ignorer,
+            .privacy_config = privacy_config,
             .max_finalize_retries = @max(@as(u32, 1), options.max_finalize_retries),
         };
     }
 
     pub fn deinit(self: *Recorder, io: std.Io) void {
         self.ignorer.deinit();
+        self.privacy_config.deinit();
         self.store.deinit(io);
         self.repo_dir.close(io);
         self.* = undefined;
+    }
+
+    pub fn originEnabled(self: *const Recorder, origin: []const u8) bool {
+        return self.privacy_config.value.privacy.originEnabled(origin);
     }
 
     /// Upsert a session record in the index (no-op if already present).
@@ -290,7 +300,9 @@ pub const Recorder = struct {
         prompt: UserPrompt,
     ) !void {
         const key = stagingKey(meta.origin, meta.session_id, turn_id);
-        try self.appendMessage(io, &key, .{ .role = "user", .content = prompt.content });
+        const content = try self.captureText(self.privacy_config.value.privacy.capture.prompts, "prompt", prompt.content);
+        defer self.gpa.free(content);
+        try self.appendMessage(io, &key, .{ .role = "user", .content = content });
     }
 
     /// Append a tool invocation to the turn's staging file.
@@ -302,10 +314,17 @@ pub const Recorder = struct {
         tool: ToolUse,
     ) !void {
         const key = stagingKey(meta.origin, meta.session_id, turn_id);
+        const args = try self.captureText(self.privacy_config.value.privacy.capture.tool_args, "tool arguments", tool.args);
+        defer self.gpa.free(args);
+        const result = if (tool.result) |value| blk: {
+            const captured = try self.captureText(self.privacy_config.value.privacy.capture.tool_results, "tool result", value);
+            break :blk captured;
+        } else null;
+        defer if (result) |value| self.gpa.free(value);
         try self.appendToolCall(io, &key, .{
             .tool_name = tool.tool_name,
-            .args = tool.args,
-            .result = tool.result,
+            .args = args,
+            .result = result,
         });
     }
 
@@ -338,7 +357,9 @@ pub const Recorder = struct {
         var msgs: std.ArrayList(StepMessage) = .empty;
         defer msgs.deinit(self.gpa);
         try msgs.appendSlice(self.gpa, staging_val.messages);
-        try msgs.append(self.gpa, .{ .role = "assistant", .content = response.content });
+        const assistant = try self.captureText(self.privacy_config.value.privacy.capture.assistant, "assistant message", response.content);
+        defer self.gpa.free(assistant);
+        try msgs.append(self.gpa, .{ .role = "assistant", .content = assistant });
 
         // Merge causes from staging and the caller.
         var all_causes: std.ArrayList(Cause) = .empty;
@@ -363,7 +384,10 @@ pub const Recorder = struct {
             self.repo_dir,
             self.gpa,
             &self.ignorer,
-            .{},
+            .{
+                .capture_level = self.privacy_config.value.privacy.capture.snapshots,
+                .custom_literals = self.privacy_config.value.privacy.custom_literals,
+            },
         );
         var tree_hex = tree_hash.toHex();
 
@@ -582,6 +606,25 @@ pub const Recorder = struct {
         try fs_mod.syncDir(io, log_dir);
     }
 
+    fn captureText(
+        self: *const Recorder,
+        level: config_mod.CaptureLevel,
+        label: []const u8,
+        text: []const u8,
+    ) ![]u8 {
+        return switch (level) {
+            .full => try self.gpa.dupe(u8, text),
+            .redacted => try redact_mod.redactAlloc(self.gpa, text, .{
+                .custom_literals = self.privacy_config.value.privacy.custom_literals,
+            }),
+            .metadata_only => try std.fmt.allocPrint(self.gpa, "[[agit {s} metadata-only: {d} bytes]]", .{
+                label,
+                text.len,
+            }),
+            .disabled => try std.fmt.allocPrint(self.gpa, "[[agit {s} capture disabled]]", .{label}),
+        };
+    }
+
     fn quarantineStagingPath(
         self: *Recorder,
         io: std.Io,
@@ -637,6 +680,7 @@ fn makeRecorder(io: std.Io, dir: std.Io.Dir, gpa: std.mem.Allocator) !Recorder {
         .store = s,
         .repo_dir = try dir.openDir(io, ".", .{}),
         .ignorer = ignorer,
+        .privacy_config = config_mod.Loaded.default(),
         .max_finalize_retries = 5,
     };
 }

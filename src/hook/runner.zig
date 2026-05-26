@@ -115,6 +115,7 @@ fn processPayload(
 
     var rec = try Recorder.open(io, workspace.dir, gpa);
     defer rec.deinit(io);
+    if (!rec.originEnabled(adapter.origin)) return;
 
     var normalized = try event_mod.normalize(io, gpa, &rec, parsed.root, diagnostic, .{
         .origin = adapter.origin,

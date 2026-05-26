@@ -111,6 +111,8 @@ pub const show_usage = help_mod.UsageSpec{
     .description = "Show details of a recorded step object by its BLAKE3 hash.",
     .options = &.{
         .{ .long = "json", .description = "Render the step details as structured JSON." },
+        .{ .long = "redacted", .description = "Redact obvious secrets in the rendered output." },
+        .{ .long = "full", .description = "Render full output even when redaction is the repo default." },
         .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
     },
     .examples = &.{
@@ -137,10 +139,26 @@ pub const cat_usage = help_mod.UsageSpec{
     .synopsis = "[OPTIONS] <HASH>",
     .description = "Print a raw object by its BLAKE3 hash.",
     .options = &.{
+        .{ .long = "redacted", .description = "Redact obvious secrets in the rendered object output." },
+        .{ .long = "full", .description = "Render full object output even when redaction is the repo default." },
         .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
     },
     .examples = &.{
         .{ .description = "print object content", .command = "abc123def" },
+    },
+};
+
+pub const privacy_usage = help_mod.UsageSpec{
+    .name = "privacy",
+    .synopsis = "scan [OPTIONS]",
+    .description = "Scan reachable captured content for sensitive data without printing secret values.",
+    .options = &.{
+        .{ .long = "json", .description = "Render privacy scan findings as structured JSON." },
+        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
+    },
+    .examples = &.{
+        .{ .description = "scan captured content for sensitive data", .command = "scan" },
+        .{ .description = "emit machine-readable privacy findings", .command = "scan --json" },
     },
 };
 
@@ -196,6 +214,7 @@ pub const public_commands = [_]help_mod.CommandSpec{
     .{ .name = "show", .summary = "Show details of a step", .usage = &show_usage },
     .{ .name = "blame", .summary = "Show per-line step attribution for a file", .usage = &blame_usage },
     .{ .name = "cat", .summary = "Print a raw object by hash", .usage = &cat_usage },
+    .{ .name = "privacy", .summary = "Scan reachable content for sensitive data", .usage = &privacy_usage },
     .{ .name = "reindex", .summary = "Rebuild the index from the object store", .usage = &reindex_usage },
     .{ .name = "version", .summary = "Print version information", .usage = &version_usage },
     .{ .name = "completion", .summary = "Generate shell completion scripts", .usage = &completion_usage },

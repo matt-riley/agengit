@@ -18,6 +18,8 @@ test {
     _ = @import("hooks/gemini_payloads.zig");
     _ = @import("hooks/payload_diagnostics.zig");
     _ = @import("hooks/turn_identity_and_cwd.zig");
+    _ = @import("privacy/capture_policy.zig");
+    _ = @import("privacy/scan.zig");
 
     _ = @import("record_replay/concurrent_writers.zig");
     _ = @import("record_replay/crash_recovery.zig");

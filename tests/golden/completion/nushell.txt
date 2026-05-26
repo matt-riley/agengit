@@ -11,6 +11,7 @@ def "nu-complete agit command" [] {
         { value: 'show', description: 'Show details of a step' }
         { value: 'blame', description: 'Show per-line step attribution for a file' }
         { value: 'cat', description: 'Print a raw object by hash' }
+        { value: 'privacy', description: 'Scan reachable content for sensitive data' }
         { value: 'reindex', description: 'Rebuild the index from the object store' }
         { value: 'version', description: 'Print version information' }
         { value: 'completion', description: 'Generate shell completion scripts' }
@@ -66,6 +67,8 @@ extern "agit log" [
 
 extern "agit show" [
     --json
+    --redacted
+    --full
     --help(-h)
 ]
 
@@ -75,6 +78,13 @@ extern "agit blame" [
 ]
 
 extern "agit cat" [
+    --redacted
+    --full
+    --help(-h)
+]
+
+extern "agit privacy" [
+    --json
     --help(-h)
 ]
 
