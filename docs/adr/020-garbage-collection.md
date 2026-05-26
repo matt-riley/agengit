@@ -1,6 +1,6 @@
 # ADR 020: Garbage collection and store maintenance
 
-**Status:** Proposed
+**Status:** Implemented
 **Date:** 2026-05-25
 
 ## Context
@@ -40,15 +40,16 @@ Introduce an `agit gc` command that performs automated store maintenance:
 
 ## Plan
 
-1. Implement reachability traversal in `src/store/store.zig`. This requires
+1. Implement reachability traversal in `src/store/gc.zig`. This requires
    loading and parsing step and tree objects recursively.
 2. Add `cli/gc.zig` to implement the `gc` command.
-3. Add a `--prune=<date>` flag to `agit gc` to also delete session refs
-   older than a certain date before running the object prune.
+3. Add a `--prune-before <YYYY-MM-DD>` flag to `agit gc` to delete session refs
+   older than UTC midnight on a given date before running the object prune.
 4. Update `agit doctor` to report the amount of "reachable" vs "total"
    object storage to hint when `gc` is needed.
 5. Add safety checks to ensure `gc` does not run if a session is actively
-   recording (using a global store lock).
+   recording by refusing to proceed when live lock files are present and by
+   taking a dedicated `gc.lock` during the maintenance pass.
 
 ## Testing
 

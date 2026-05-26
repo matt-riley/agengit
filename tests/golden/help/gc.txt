@@ -1,0 +1,24 @@
+USAGE:
+    agit gc [OPTIONS]
+
+DESCRIPTION:
+    Prune unreachable store data and stale temporary files.
+
+OPTIONS:
+    --json
+        Render gc results as structured JSON.
+    --grace-hours <N>
+        Only prune unreachable objects/tmp files older than <N> hours. Defaults to 2.
+    --prune-before <YYYY-MM-DD>
+        Delete session refs whose head-step timestamp is older than UTC midnight on the given date before sweeping.
+    -h, --help
+        Display this help and exit.
+
+EXAMPLES:
+    # prune unreachable store data with the default grace period
+    agit gc
+    # immediately prune stale data without the 2-hour grace window
+    agit gc --grace-hours 0
+    # drop sessions older than a UTC date before sweeping
+    agit gc --prune-before 2026-01-01
+

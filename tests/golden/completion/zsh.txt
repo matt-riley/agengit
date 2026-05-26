@@ -7,6 +7,7 @@ _agit() {
         'uninstall:Remove agit hooks from agent configurations'
         'doctor:Check agent hook configurations and store health'
         'fsck:Verify store integrity without mutating data'
+        'gc:Prune unreachable store data and stale temporaries'
         'status:Show current repository state'
         'sessions:List recorded agent sessions'
         'log:Show step history for a session'
@@ -53,6 +54,13 @@ _agit() {
                     _arguments \
                         '--json[Render fsck checks as structured JSON.]' \
                         '--reindex[Explicitly rebuild only index.db after a successful read-only scan.]' \
+                        '--help[Display this help and exit.]'
+                    ;;
+                gc)
+                    _arguments \
+                        '--json[Render gc results as structured JSON.]' \
+                        '--grace-hours[Only prune unreachable objects/tmp files older than <N> hours. Defaults to 2.]:N' \
+                        '--prune-before[Delete session refs whose head-step timestamp is older than UTC midnight on the given date before sweeping.]:YYYY-MM-DD' \
                         '--help[Display this help and exit.]'
                     ;;
                 status)

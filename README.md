@@ -120,6 +120,16 @@ Verify object, ref, index, and mutable-area integrity.
 agit fsck
 ```
 
+### `agit gc`
+Prune unreachable store data and stale temporary files.
+
+**Synopsis:** `agit gc [OPTIONS]`
+
+```sh
+# prune unreachable store data with the default grace period
+agit gc
+```
+
 ### `agit status`
 Show current repository state and agit store statistics.
 
@@ -227,7 +237,7 @@ agit completion bash
 
 Planned but not shipped today:
 
-- garbage collection and packfiles for long-lived stores
+- packfiles for long-lived stores
 - historical content search and investigation-focused views
 - remote sync plus portable export/import bundles
 - observer-based integrations and additional agent targets such as Pi and
