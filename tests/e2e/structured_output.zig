@@ -80,6 +80,27 @@ test "structured_output/doctor json emits stable checks" {
     try std.testing.expect(hasCheckCode(checks, "object_index_ok"));
 }
 
+test "structured_output/fsck json emits stable checks" {
+    var sandbox = try harness.Sandbox.init(std.testing.allocator);
+    defer sandbox.deinit();
+
+    try sandbox.writeRepoFile(".agit/.keep", "");
+    try seedClaudeSession(&sandbox);
+
+    var result = try sandbox.run(&.{ "fsck", "--json" }, null);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(u8, 0), result.exit_code);
+    try expectEnvelope(result.stdout, "fsck");
+
+    var parsed = try parseJson(result.stdout);
+    defer parsed.deinit();
+    try std.testing.expect(parsed.value.object.get("data").?.object.get("healthy").?.bool);
+    const checks = parsed.value.object.get("data").?.object.get("checks").?.array.items;
+    try std.testing.expect(hasCheckCode(checks, "object_integrity_ok"));
+    try std.testing.expect(hasCheckCode(checks, "refs_ok"));
+    try std.testing.expect(hasCheckCode(checks, "index_ok"));
+}
+
 fn seedClaudeSession(sandbox: *harness.Sandbox) !void {
     const user_payload = try std.fmt.allocPrint(std.testing.allocator,
         \\{{"session_id":"abc123def456","transcript_path":"transcript.jsonl","cwd":"{s}","hook_event_name":"UserPromptSubmit","prompt":"Write a function to calculate factorial"}}

@@ -50,3 +50,4 @@ Doctor checks extend the same shape with a `status` field whose values are
 - `agit log --json`
 - `agit show --json <hash>`
 - `agit doctor --json`
+- `agit fsck --json`

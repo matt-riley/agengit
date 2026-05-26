@@ -13,8 +13,9 @@ change before a long-term stable format is declared.
 ## Today
 
 Shipping today: local `.agit/` capture stores, hook installation for Claude
-Code/OpenAI Codex CLI/Google Gemini CLI, health and recovery tooling, generated
-shell completions, and structured JSON for the commands that advertise it.
+Code/OpenAI Codex CLI/Google Gemini CLI, health/recovery tooling including
+read-only `agit fsck`, generated shell completions, and structured JSON for
+the commands that advertise it.
 
 Supported hook integrations today:
 
@@ -107,6 +108,16 @@ Check store health and agent hook configuration.
 ```sh
 # check store and agent health
 agit doctor
+```
+
+### `agit fsck`
+Verify object, ref, index, and mutable-area integrity.
+
+**Synopsis:** `agit fsck [OPTIONS]`
+
+```sh
+# run a read-only integrity scan
+agit fsck
 ```
 
 ### `agit status`
@@ -206,7 +217,6 @@ agit completion bash
 
 Planned but not shipped today:
 
-- store integrity verification via `agit fsck`
 - privacy/redaction controls before broader export/search features
 - garbage collection and packfiles for long-lived stores
 - historical content search and investigation-focused views

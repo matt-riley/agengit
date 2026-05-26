@@ -17,6 +17,14 @@ pub fn buildRefPath(gpa: std.mem.Allocator, origin: []const u8, session_id: []co
     return std.fmt.allocPrint(gpa, "refs/sessions/{x}/{x}", .{ origin, session_id });
 }
 
+pub fn decodePathComponentAlloc(gpa: std.mem.Allocator, hex: []const u8) ![]u8 {
+    if (hex.len == 0 or (hex.len % 2) != 0) return error.InvalidRefPath;
+    const out = try gpa.alloc(u8, hex.len / 2);
+    errdefer gpa.free(out);
+    _ = try std.fmt.hexToBytes(out, hex);
+    return out;
+}
+
 /// Write `new_hash` to `path` (relative to `root`) atomically.
 /// Does not acquire a lock — caller must already hold one.
 pub fn writeRefToPath(

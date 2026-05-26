@@ -28,4 +28,8 @@ test {
     _ = @import("doctor/locks.zig");
     _ = @import("doctor/config_tmp_files.zig");
     _ = @import("doctor/last_hook_error.zig");
+
+    _ = @import("fsck/healthy_store.zig");
+    _ = @import("fsck/object_hash_mismatch.zig");
+    _ = @import("fsck/reindex_repairs_index.zig");
 }

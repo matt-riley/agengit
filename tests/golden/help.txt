@@ -10,6 +10,7 @@ Commands:
   init          Set up agit in the current repository
   uninstall     Remove agit hooks from agent configurations
   doctor        Check agent hook configurations and store health
+  fsck          Verify store integrity without mutating data
   status        Show current repository state
   sessions      List recorded agent sessions
   log           Show step history for a session

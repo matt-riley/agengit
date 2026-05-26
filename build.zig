@@ -82,6 +82,7 @@ pub fn build(b: *std.Build) void {
             .sanitize_c = sanitize_c,
             .imports = &.{
                 .{ .name = "cli_docgen", .module = docgen_module },
+                .{ .name = "zqlite", .module = zqlite_dep.module("zqlite") },
             },
         }),
     });

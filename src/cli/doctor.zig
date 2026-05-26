@@ -58,7 +58,7 @@ pub fn run(
     if (reconcile.drifted > 0 or reconcile.index_ahead > 0) {
         has_failures = true;
         try stdout.interface.print(
-            "  ✗ ref/index drift: {d} repairable, {d} index-ahead session{s}\n",
+            "  ✗ ref/index drift: {d} repairable, {d} index-ahead session{s}; run `agit fsck` for read-only verification or `agit reindex` to rebuild the query index\n",
             .{
                 reconcile.drifted,
                 reconcile.index_ahead,
@@ -181,7 +181,7 @@ fn runJson(
                 reconcile.drifted,
                 reconcile.index_ahead,
             }),
-            .hint = "Run `agit reindex` to rebuild the query index.",
+            .hint = "Run `agit fsck` for read-only verification or `agit reindex` to rebuild the query index.",
         });
     } else {
         try checks.append(gpa, .{
@@ -426,14 +426,14 @@ fn checkObjectIndex(
     const audit = try store.auditObjectIndex(io, gpa);
     if (!audit.indexed_complete and audit.disk_count > 0) {
         try stdout.interface.print(
-            "  ✗ object index: cache is not backfilled ({d} object{s} on disk); run `agit reindex`\n",
+            "  ✗ object index: cache is not backfilled ({d} object{s} on disk); run `agit fsck` for read-only verification or `agit reindex`\n",
             .{ audit.disk_count, if (audit.disk_count == 1) "" else "s" },
         );
         return false;
     }
     if (audit.missing_rows > 0 or audit.indexed_count != audit.disk_count) {
         try stdout.interface.print(
-            "  ✗ object index: disk={d} indexed={d} missing_rows={d}; run `agit reindex`\n",
+            "  ✗ object index: disk={d} indexed={d} missing_rows={d}; run `agit fsck` for read-only verification or `agit reindex`\n",
             .{ audit.disk_count, audit.indexed_count, audit.missing_rows },
         );
         return false;
@@ -454,7 +454,7 @@ fn collectObjectIndexCheck(
             .code = "object_index_drift",
             .status = .@"error",
             .message = try std.fmt.allocPrint(aa, "Object cache is not backfilled for {d} on-disk object(s).", .{audit.disk_count}),
-            .hint = "Run `agit reindex` to rebuild the objects cache.",
+            .hint = "Run `agit fsck` for read-only verification or `agit reindex` to rebuild the objects cache.",
             .path = ".agit/objects",
         };
     }
@@ -467,7 +467,7 @@ fn collectObjectIndexCheck(
                 audit.indexed_count,
                 audit.missing_rows,
             }),
-            .hint = "Run `agit reindex` to rebuild the objects cache.",
+            .hint = "Run `agit fsck` for read-only verification or `agit reindex` to rebuild the objects cache.",
             .path = ".agit/objects",
         };
     }
