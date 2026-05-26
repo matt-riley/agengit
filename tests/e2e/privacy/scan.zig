@@ -5,6 +5,8 @@ test "privacy/scan finds secrets without echoing them and show redacts on demand
     var sandbox = try harness.Sandbox.init(std.testing.allocator);
     defer sandbox.deinit();
 
+    try sandbox.writeRepoFile(".agit/.keep", "");
+
     const user_payload = try std.fmt.allocPrint(std.testing.allocator,
         \\{{"session_id":"scan-sess","transcript_path":"transcript.jsonl","cwd":"{s}","hook_event_name":"UserPromptSubmit","prompt":"Authorization: Bearer secret-token-123456"}}
     , .{sandbox.cwd});
