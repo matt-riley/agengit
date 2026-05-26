@@ -158,17 +158,51 @@ pub fn build(b: *std.Build) void {
     const fuzz_hooks_step = b.step("fuzz-hooks", "Run bounded hook payload fuzz harnesses");
     fuzz_hooks_step.dependOn(&run_fuzz_hooks.step);
 
+    const check_docs = b.addExecutable(.{
+        .name = "check-docs",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/check_docs.zig"),
+            .target = target,
+            .optimize = optimize,
+            .sanitize_c = sanitize_c,
+        }),
+    });
+    const run_check_docs = b.addRunArtifact(check_docs);
+    const check_docs_step = b.step("check-docs", "Check markdown links");
+    check_docs_step.dependOn(&run_check_docs.step);
+
+    const check_config = b.addExecutable(.{
+        .name = "check-config",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/check_config.zig"),
+            .target = target,
+            .optimize = optimize,
+            .sanitize_c = sanitize_c,
+        }),
+    });
+    const run_check_config = b.addRunArtifact(check_config);
+    const check_config_step = b.step("check-config", "Validate release metadata config");
+    check_config_step.dependOn(&run_check_config.step);
+
+    const fmt_paths = &.{ "src", "tests", "bench", "tools", "build.zig", "build.zig.zon" };
+
     const fmt_step = b.step("fmt", "Format source files");
     const fmt = b.addFmt(.{
-        .paths = &.{ "src", "tests", "bench", "build.zig" },
+        .paths = fmt_paths,
         .check = false,
     });
     fmt_step.dependOn(&fmt.step);
 
     const check_step = b.step("check-fmt", "Check formatting");
     const check_fmt = b.addFmt(.{
-        .paths = &.{ "src", "tests", "bench", "build.zig" },
+        .paths = fmt_paths,
         .check = true,
     });
     check_step.dependOn(&check_fmt.step);
+
+    const verify_step = b.step("check", "Run format, docs, config, and unit checks");
+    verify_step.dependOn(check_step);
+    verify_step.dependOn(check_docs_step);
+    verify_step.dependOn(check_config_step);
+    verify_step.dependOn(test_step);
 }

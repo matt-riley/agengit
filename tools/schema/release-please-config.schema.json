@@ -1,0 +1,168 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "release-please manifest config schema (agengit vendored subset)",
+  "description": "Subset of the upstream release-please config schema used by agengit's local validation.",
+  "type": "object",
+  "required": ["packages"],
+  "additionalProperties": false,
+  "definitions": {
+    "ChangelogSection": {
+      "type": "object",
+      "required": ["type", "section"],
+      "properties": {
+        "type": { "type": "string" },
+        "section": { "type": "string" },
+        "hidden": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "ExtraFile": {
+      "anyOf": [
+        { "type": "string" },
+        {
+          "type": "object",
+          "required": ["type", "path"],
+          "properties": {
+            "type": { "enum": ["generic", "pom"] },
+            "path": { "type": "string" },
+            "glob": { "type": "boolean" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["type", "path", "jsonpath"],
+          "properties": {
+            "type": { "enum": ["json", "toml", "yaml"] },
+            "path": { "type": "string" },
+            "glob": { "type": "boolean" },
+            "jsonpath": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["type", "path", "xpath"],
+          "properties": {
+            "type": { "enum": ["xml"] },
+            "path": { "type": "string" },
+            "glob": { "type": "boolean" },
+            "xpath": { "type": "string" }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "ReleaserConfigOptions": {
+      "type": "object",
+      "properties": {
+        "release-type": { "type": "string" },
+        "bump-minor-pre-major": { "type": "boolean" },
+        "bump-patch-for-minor-pre-major": { "type": "boolean" },
+        "prerelease-type": { "type": "string" },
+        "versioning": { "type": "string" },
+        "changelog-sections": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/ChangelogSection" }
+        },
+        "release-as": { "type": "string" },
+        "skip-github-release": { "type": "boolean" },
+        "skip-changelog": { "type": "boolean" },
+        "draft": { "type": "boolean" },
+        "force-tag-creation": { "type": "boolean" },
+        "prerelease": { "type": "boolean" },
+        "draft-pull-request": { "type": "boolean" },
+        "extra-label": { "type": "string" },
+        "include-component-in-tag": { "type": "boolean" },
+        "include-v-in-tag": { "type": "boolean" },
+        "include-v-in-release-name": { "type": "boolean" },
+        "changelog-type": { "enum": ["default", "github"] },
+        "changelog-host": { "type": "string" },
+        "changelog-path": { "type": "string" },
+        "pull-request-title-pattern": { "type": "string" },
+        "pull-request-header": { "type": "string" },
+        "pull-request-footer": { "type": "string" },
+        "separate-pull-requests": { "type": "boolean" },
+        "always-update": { "type": "boolean" },
+        "tag-separator": { "type": "string" },
+        "date-format": { "type": "string" },
+        "extra-files": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/ExtraFile" }
+        },
+        "exclude-paths": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "version-file": { "type": "string" },
+        "snapshot-label": { "type": "string" },
+        "skip-snapshot": { "type": "boolean" },
+        "initial-version": { "type": "string" },
+        "component-no-space": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    }
+  },
+  "properties": {
+    "$schema": { "type": "string" },
+    "packages": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/definitions/ReleaserConfigOptions" }
+    },
+    "bootstrap-sha": { "type": "string" },
+    "last-release-sha": { "type": "string" },
+    "always-link-local": { "type": "boolean" },
+    "plugins": { "type": "array" },
+    "signoff": { "type": "string" },
+    "group-pull-request-title-pattern": { "type": "string" },
+    "release-search-depth": { "type": "number" },
+    "commit-search-depth": { "type": "number" },
+    "commit-batch-size": { "type": "number" },
+    "sequential-calls": { "type": "boolean" },
+    "label": { "type": "string" },
+    "release-label": { "type": "string" },
+    "release-type": { "type": "string" },
+    "bump-minor-pre-major": { "type": "boolean" },
+    "bump-patch-for-minor-pre-major": { "type": "boolean" },
+    "prerelease-type": { "type": "string" },
+    "versioning": { "type": "string" },
+    "changelog-sections": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/ChangelogSection" }
+    },
+    "release-as": { "type": "string" },
+    "skip-github-release": { "type": "boolean" },
+    "skip-changelog": { "type": "boolean" },
+    "draft": { "type": "boolean" },
+    "force-tag-creation": { "type": "boolean" },
+    "prerelease": { "type": "boolean" },
+    "draft-pull-request": { "type": "boolean" },
+    "extra-label": { "type": "string" },
+    "include-component-in-tag": { "type": "boolean" },
+    "include-v-in-tag": { "type": "boolean" },
+    "include-v-in-release-name": { "type": "boolean" },
+    "changelog-type": { "enum": ["default", "github"] },
+    "changelog-host": { "type": "string" },
+    "changelog-path": { "type": "string" },
+    "pull-request-title-pattern": { "type": "string" },
+    "pull-request-header": { "type": "string" },
+    "pull-request-footer": { "type": "string" },
+    "separate-pull-requests": { "type": "boolean" },
+    "always-update": { "type": "boolean" },
+    "tag-separator": { "type": "string" },
+    "date-format": { "type": "string" },
+    "extra-files": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/ExtraFile" }
+    },
+    "exclude-paths": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "version-file": { "type": "string" },
+    "snapshot-label": { "type": "string" },
+    "skip-snapshot": { "type": "boolean" },
+    "initial-version": { "type": "string" },
+    "component-no-space": { "type": "boolean" }
+  }
+}
