@@ -2,20 +2,9 @@ const std = @import("std");
 const store_mod = @import("../store/store.zig");
 const status = @import("status.zig");
 const help_mod = @import("help.zig");
+const specs = @import("specs.zig");
 
-pub const usage = help_mod.UsageSpec{
-    .name = "blame",
-    .synopsis = "[OPTIONS] <FILE>",
-    .description = "Show per-line step attribution for a file path.",
-    .options = &.{
-        .{ .long = "no-limits", .description = "Disable the blame file-size cap for this invocation when blame output is available." },
-        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
-    },
-    .examples = &.{
-        .{ .description = "show blame for a file", .command = "src/main.zig" },
-    },
-    .notes = "Blame recording is not yet available. When blame rendering lands, AGIT_MAX_FILE_BYTES will set the default large-file cap and --no-limits will disable it for one run.",
-};
+pub const usage = specs.blame_usage;
 
 // Phase 6 implementation: show per-line step attribution for a file path.
 pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator) !void {

@@ -1,6 +1,7 @@
 const std = @import("std");
 const harness = @import("support/harness.zig");
 const golden = @import("support/golden.zig");
+const docgen = @import("cli_docgen");
 
 test "golden/help" {
     var sandbox = try harness.Sandbox.init(std.testing.allocator);
@@ -132,4 +133,76 @@ test "golden/help/reindex" {
     try std.testing.expectEqual(@as(u8, 0), result.exit_code);
 
     try golden.assertGolden(&sandbox, "tests/golden/help/reindex.txt", result.stdout);
+}
+
+test "golden/help/version" {
+    var sandbox = try harness.Sandbox.init(std.testing.allocator);
+    defer sandbox.deinit();
+
+    var result = try sandbox.run(&.{ "version", "--help" }, null);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(u8, 0), result.exit_code);
+
+    try golden.assertGolden(&sandbox, "tests/golden/help/version.txt", result.stdout);
+}
+
+test "readme command synopses match command help" {
+    const gpa = std.testing.allocator;
+    var sandbox = try harness.Sandbox.init(gpa);
+    defer sandbox.deinit();
+
+    const readme_text = try readRepoReadmeAlloc(gpa, sandbox.agit_bin);
+    defer gpa.free(readme_text);
+
+    var readme_synopses = try docgen.collectReadmeSynopses(gpa, readme_text);
+    defer deinitSynopses(gpa, &readme_synopses);
+
+    try std.testing.expectEqual(docgen.public_commands.len, readme_synopses.count());
+
+    for (docgen.public_commands) |command| {
+        var result = try sandbox.run(&.{ command.name, "--help" }, null);
+        defer result.deinit(gpa);
+        try std.testing.expectEqual(@as(u8, 0), result.exit_code);
+
+        const usage_line = try extractUsageLine(result.stdout);
+        const readme_synopsis = readme_synopses.get(command.name) orelse return error.MissingSynopsis;
+        try std.testing.expectEqualStrings(readme_synopsis, usage_line);
+    }
+}
+
+fn extractUsageLine(help_text: []const u8) ![]const u8 {
+    var lines = std.mem.splitScalar(u8, help_text, '\n');
+    while (lines.next()) |raw_line| {
+        const line = std.mem.trimEnd(u8, raw_line, "\r");
+        if (!std.mem.eql(u8, line, "USAGE:")) continue;
+        while (lines.next()) |raw_usage| {
+            const usage = std.mem.trim(u8, raw_usage, " \t\r");
+            if (usage.len == 0) continue;
+            return usage;
+        }
+        break;
+    }
+    return error.MissingUsageLine;
+}
+
+fn deinitSynopses(gpa: std.mem.Allocator, synopses: *docgen.SynopsisMap) void {
+    var iter = synopses.iterator();
+    while (iter.next()) |entry| {
+        gpa.free(entry.key_ptr.*);
+        gpa.free(entry.value_ptr.*);
+    }
+    synopses.deinit();
+}
+
+fn readRepoReadmeAlloc(gpa: std.mem.Allocator, agit_bin: []const u8) ![]u8 {
+    const repo_root = deriveRepoRoot(agit_bin) orelse return error.FileNotFound;
+    const readme_path = try std.fmt.allocPrint(gpa, "{s}/README.md", .{repo_root});
+    defer gpa.free(readme_path);
+    return std.Io.Dir.cwd().readFileAlloc(std.testing.io, readme_path, gpa, .unlimited);
+}
+
+fn deriveRepoRoot(agit_bin: []const u8) ?[]const u8 {
+    const bin_dir = std.fs.path.dirname(agit_bin) orelse return null;
+    const zig_out_dir = std.fs.path.dirname(bin_dir) orelse return null;
+    return std.fs.path.dirname(zig_out_dir);
 }

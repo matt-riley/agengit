@@ -3,18 +3,9 @@ const exe_path_mod = @import("../util/exe_path.zig");
 const home_mod = @import("../util/home.zig");
 const atomic_json_mod = @import("../util/atomic_json.zig");
 const help_mod = @import("help.zig");
+const specs = @import("specs.zig");
 
-pub const usage = help_mod.UsageSpec{
-    .name = "uninstall",
-    .synopsis = "[OPTIONS]",
-    .description = "Remove agit hooks from agent configurations.",
-    .options = &.{
-        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
-    },
-    .examples = &.{
-        .{ .description = "remove all hooks", .command = "" },
-    },
-};
+pub const usage = specs.uninstall_usage;
 
 pub fn run(
     io: std.Io,

@@ -2,18 +2,9 @@ const std = @import("std");
 const store_mod = @import("../store/store.zig");
 const status = @import("status.zig");
 const help_mod = @import("help.zig");
+const specs = @import("specs.zig");
 
-pub const usage = help_mod.UsageSpec{
-    .name = "cat",
-    .synopsis = "[OPTIONS] <HASH>",
-    .description = "Print a raw object by its BLAKE3 hash.",
-    .options = &.{
-        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
-    },
-    .examples = &.{
-        .{ .description = "print object content", .command = "abc123def" },
-    },
-};
+pub const usage = specs.cat_usage;
 
 // Phase 6 implementation: print a raw CAS object by its BLAKE3 hash.
 pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator) !void {

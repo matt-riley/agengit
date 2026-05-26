@@ -1,21 +1,9 @@
 const std = @import("std");
 const help_mod = @import("help.zig");
 const registry = @import("registry.zig");
+const specs = @import("specs.zig");
 
-pub const usage = help_mod.UsageSpec{
-    .name = "completion",
-    .synopsis = "[OPTIONS] <SHELL>",
-    .description = "Generate shell completion scripts for bash, zsh, fish, or nushell.",
-    .options = &.{
-        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
-    },
-    .examples = &.{
-        .{ .description = "bash completion script", .command = "bash" },
-        .{ .description = "zsh completion script", .command = "zsh" },
-        .{ .description = "fish completion script", .command = "fish" },
-        .{ .description = "nushell completion script", .command = "nushell" },
-    },
-};
+pub const usage = specs.completion_usage;
 
 pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator) !void {
     _ = gpa;

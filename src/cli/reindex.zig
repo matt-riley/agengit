@@ -3,20 +3,9 @@ const store_mod = @import("../store/store.zig");
 const object = @import("../store/object.zig");
 const hash_mod = @import("../store/hash.zig");
 const help_mod = @import("help.zig");
+const specs = @import("specs.zig");
 
-pub const usage = help_mod.UsageSpec{
-    .name = "reindex",
-    .synopsis = "[OPTIONS]",
-    .description = "Rebuild the SQLite index from object/ref truth.",
-    .options = &.{
-        .{ .long = "from", .value_name = "HASH", .description = "Incrementally replay steps newer than <HASH> that are reachable from session refs." },
-        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
-    },
-    .examples = &.{
-        .{ .description = "rebuild entire index", .command = "" },
-        .{ .description = "incrementally update from a hash", .command = "--from abc123def" },
-    },
-};
+pub const usage = specs.reindex_usage;
 
 const Options = struct {
     from: ?hash_mod.Hash = null,

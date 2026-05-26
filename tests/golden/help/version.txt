@@ -1,0 +1,14 @@
+USAGE:
+    agit version [OPTIONS]
+
+DESCRIPTION:
+    Print agit version information.
+
+OPTIONS:
+    -h, --help
+        Display this help and exit.
+
+EXAMPLES:
+    # print the current version
+    agit version
+

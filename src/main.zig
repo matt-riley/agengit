@@ -165,6 +165,8 @@ test {
     _ = @import("hook/runner.zig");
     _ = @import("hook/adapters/registry.zig");
     _ = @import("cli/help.zig");
+    _ = @import("cli/specs.zig");
+    _ = @import("cli/docgen.zig");
     _ = @import("cli/output.zig");
     _ = @import("cli/registry.zig");
     _ = @import("cli/claude_hook.zig");

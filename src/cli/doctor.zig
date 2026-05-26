@@ -5,24 +5,9 @@ const home_mod = @import("../util/home.zig");
 const file_lock_mod = @import("../util/file_lock.zig");
 const help_mod = @import("help.zig");
 const output_mod = @import("output.zig");
+const specs = @import("specs.zig");
 
-pub const usage = help_mod.UsageSpec{
-    .name = "doctor",
-    .synopsis = "[OPTIONS]",
-    .description = "Check store health and agent hook configuration.",
-    .options = &.{
-        .{ .long = "json", .description = "Render doctor checks as structured JSON." },
-        .{ .long = "locks", .description = "List currently held lock files with age and executable path." },
-        .{ .long = "stats", .description = "Print finalize retry/object-write counters." },
-        .{ .long = "last-hook-error", .description = "Pretty-print the newest hook-error log entry." },
-        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
-    },
-    .examples = &.{
-        .{ .description = "check store and agent health", .command = "" },
-        .{ .description = "show lock files in use", .command = "--locks" },
-        .{ .description = "show finalize statistics", .command = "--stats" },
-    },
-};
+pub const usage = specs.doctor_usage;
 
 const DoctorOptions = struct {
     json: bool = false,
