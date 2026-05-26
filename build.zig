@@ -22,6 +22,12 @@ pub fn build(b: *std.Build) void {
             .{ .name = "zqlite", .module = zqlite_dep.module("zqlite") },
         },
     });
+    const docgen_module = b.createModule(.{
+        .root_source_file = b.path("src/cli/docgen.zig"),
+        .target = target,
+        .optimize = optimize,
+        .sanitize_c = sanitize_c,
+    });
 
     const root_module = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
@@ -74,6 +80,9 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
             .sanitize_c = sanitize_c,
+            .imports = &.{
+                .{ .name = "cli_docgen", .module = docgen_module },
+            },
         }),
     });
 
@@ -186,6 +195,27 @@ pub fn build(b: *std.Build) void {
     const check_docs_step = b.step("check-docs", "Check markdown links");
     check_docs_step.dependOn(&run_check_docs.step);
 
+    const docgen = b.addExecutable(.{
+        .name = "docgen",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/docgen.zig"),
+            .target = target,
+            .optimize = optimize,
+            .sanitize_c = sanitize_c,
+            .imports = &.{
+                .{ .name = "cli_docgen", .module = docgen_module },
+            },
+        }),
+    });
+    const run_docgen = b.addRunArtifact(docgen);
+    const docgen_step = b.step("docgen", "Regenerate generated README sections");
+    docgen_step.dependOn(&run_docgen.step);
+
+    const run_check_docgen = b.addRunArtifact(docgen);
+    run_check_docgen.addArg("--check");
+    const check_docgen_step = b.step("check-docgen", "Fail if README command docs are stale");
+    check_docgen_step.dependOn(&run_check_docgen.step);
+
     const check_config = b.addExecutable(.{
         .name = "check-config",
         .root_module = b.createModule(.{
@@ -217,6 +247,7 @@ pub fn build(b: *std.Build) void {
 
     const verify_step = b.step("check", "Run format, docs, config, and unit checks");
     verify_step.dependOn(check_step);
+    verify_step.dependOn(check_docgen_step);
     verify_step.dependOn(check_docs_step);
     verify_step.dependOn(check_config_step);
     verify_step.dependOn(test_step);

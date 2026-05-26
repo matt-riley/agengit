@@ -1,18 +1,9 @@
 const std = @import("std");
 const help_mod = @import("help.zig");
+const specs = @import("specs.zig");
 const version_mod = @import("../version.zig");
 
-pub const usage = help_mod.UsageSpec{
-    .name = "version",
-    .synopsis = "[OPTIONS]",
-    .description = "Print agit version information.",
-    .options = &.{
-        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
-    },
-    .examples = &.{
-        .{ .description = "print the current version", .command = "" },
-    },
-};
+pub const usage = specs.version_usage;
 
 pub fn run(io: std.Io, iter: *std.process.Args.Iterator) !void {
     var stdout_buf: [1024]u8 = undefined;

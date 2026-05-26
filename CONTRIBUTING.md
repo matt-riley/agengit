@@ -13,6 +13,13 @@ zig build check
 That covers formatting, markdown link validation, release metadata validation,
 and unit tests.
 
+When you change command help, examples, or public `UsageSpec` metadata, also
+regenerate the README command section:
+
+```sh
+zig build docgen
+```
+
 When you change CLI behavior, hook flows, recorder behavior, or repository
 fixtures, also run:
 

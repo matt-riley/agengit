@@ -2,19 +2,9 @@ const std = @import("std");
 const status = @import("status.zig");
 const help_mod = @import("help.zig");
 const output_mod = @import("output.zig");
+const specs = @import("specs.zig");
 
-pub const usage = help_mod.UsageSpec{
-    .name = "show",
-    .synopsis = "[OPTIONS] <HASH>",
-    .description = "Show details of a recorded step object by its BLAKE3 hash.",
-    .options = &.{
-        .{ .long = "json", .description = "Render the step details as structured JSON." },
-        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
-    },
-    .examples = &.{
-        .{ .description = "show details of a step", .command = "abc123def" },
-    },
-};
+pub const usage = specs.show_usage;
 
 const ShowOptions = struct {
     format: output_mod.Format = .human,

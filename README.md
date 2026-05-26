@@ -10,6 +10,12 @@ Current CLI version: `1.13.0`. <!-- x-release-please-version -->
 The project is usable but still evolving. Command output and on-disk details may
 change before a long-term stable format is declared.
 
+## Today
+
+Shipping today: local `.agit/` capture stores, hook installation for Claude
+Code/OpenAI Codex CLI/Google Gemini CLI, health and recovery tooling, generated
+shell completions, and structured JSON for the commands that advertise it.
+
 Supported hook integrations today:
 
 | Agent | Installed hooks |
@@ -67,36 +73,146 @@ agit init
 `agit init` discovers supported agent CLIs on `PATH` and installs hook commands
 into their user config files, creating `*.agit.bak` backups first.
 
-If a target config file exists but is malformed JSON, `agit init` will not
-overwrite it unless you run `agit init --force`.
+If a target config file exists but contains malformed or non-object JSON,
+`agit init` refuses to overwrite it unless you rerun with `agit init --force`.
 
-## Core commands
+## Commands
+
+<!-- BEGIN COMMANDS -->
+### `agit init`
+Set up agit hooks for installed agent CLIs.
+
+**Synopsis:** `agit init [OPTIONS]`
 
 ```sh
-agit doctor                 # store + hook health checks
-agit doctor --json          # machine-readable health checks
-agit doctor --locks         # include lock-file details
-agit doctor --stats         # print finalize/object-write counters
-agit doctor --last-hook-error  # pretty-print latest hook failure entry
-agit status                 # summarize captured state
-agit status --json          # structured repository summary
-agit sessions               # list sessions
-agit sessions --json        # structured session list
-agit log                    # latest session timeline
-agit log --json             # structured latest session timeline
-agit log <session-id>       # specific session timeline
-agit log claude/<session-id>
-agit show <step-hash>       # detailed step view
-agit show --json <step-hash>  # structured step view
-agit cat <hash>             # raw object payload
-agit reindex                # rebuild index from object store
-agit reindex --from <hash>  # incremental replay
-agit completion zsh         # generated shell completions (bash/zsh/fish/nushell)
-agit uninstall              # remove agit-managed hooks
+# install hooks for available agents
+agit init
 ```
 
-`agit blame` is present but currently reports that blame recording is not yet
-available.
+### `agit uninstall`
+Remove agit hooks from agent configurations.
+
+**Synopsis:** `agit uninstall [OPTIONS]`
+
+```sh
+# remove all hooks
+agit uninstall
+```
+
+### `agit doctor`
+Check store health and agent hook configuration.
+
+**Synopsis:** `agit doctor [OPTIONS]`
+
+```sh
+# check store and agent health
+agit doctor
+```
+
+### `agit status`
+Show current repository state and agit store statistics.
+
+**Synopsis:** `agit status [OPTIONS]`
+
+```sh
+# show repository status
+agit status
+```
+
+### `agit sessions`
+List recorded agent sessions from the index.
+
+**Synopsis:** `agit sessions [OPTIONS]`
+
+```sh
+# list all sessions
+agit sessions
+```
+
+### `agit log`
+Show step history for a session.
+
+**Synopsis:** `agit log [OPTIONS] [SESSION_ID]`
+
+```sh
+# show most recent session steps
+agit log
+```
+
+### `agit show`
+Show details of a recorded step object by its BLAKE3 hash.
+
+**Synopsis:** `agit show [OPTIONS] <HASH>`
+
+```sh
+# show details of a step
+agit show abc123def
+```
+
+### `agit blame`
+Show per-line step attribution for a file path.
+
+**Synopsis:** `agit blame [OPTIONS] <FILE>`
+
+```sh
+# show blame for a file
+agit blame src/main.zig
+```
+
+**Notes:** Blame recording is not yet available. When blame rendering lands, AGIT_MAX_FILE_BYTES will set the default large-file cap and --no-limits will disable it for one run.
+
+### `agit cat`
+Print a raw object by its BLAKE3 hash.
+
+**Synopsis:** `agit cat [OPTIONS] <HASH>`
+
+```sh
+# print object content
+agit cat abc123def
+```
+
+### `agit reindex`
+Rebuild the SQLite index from object/ref truth.
+
+**Synopsis:** `agit reindex [OPTIONS]`
+
+```sh
+# rebuild entire index
+agit reindex
+```
+
+### `agit version`
+Print agit version information.
+
+**Synopsis:** `agit version [OPTIONS]`
+
+```sh
+# print the current version
+agit version
+```
+
+### `agit completion`
+Generate shell completion scripts for bash, zsh, fish, or nushell.
+
+**Synopsis:** `agit completion [OPTIONS] <SHELL>`
+
+```sh
+# bash completion script
+agit completion bash
+```
+<!-- END COMMANDS -->
+
+## Roadmap
+
+Planned but not shipped today:
+
+- store integrity verification via `agit fsck`
+- privacy/redaction controls before broader export/search features
+- garbage collection and packfiles for long-lived stores
+- historical content search and investigation-focused views
+- remote sync plus portable export/import bundles
+- observer-based integrations and additional agent targets such as Pi and
+  GitHub Copilot CLI
 
 Structured CLI output uses the `cli-json-v1` envelope documented in
 [`docs/format/cli-json-v1.md`](docs/format/cli-json-v1.md).
@@ -155,7 +271,9 @@ Hook payload reads are capped at 16 MiB by default. Override with
 ```sh
 zig build
 zig build run -- version
+zig build docgen
 zig build check
+zig build check-docgen
 zig build test
 zig build test-e2e
 zig build test-property
@@ -173,6 +291,10 @@ Run `zig build check` before pushing. It covers formatting, markdown link
 validation, release metadata validation, and unit tests. Keep
 `zig build test-e2e` as the follow-up command when you touch behavior that needs
 end-to-end coverage.
+
+If you change command help, examples, or public usage specs, run
+`zig build docgen` before pushing so the generated README command section stays
+in sync.
 
 Durability fsync is enabled by default. Use `AGIT_FSYNC=0` only in tests or
 microbenchmarks where you intentionally skip directory fsync.

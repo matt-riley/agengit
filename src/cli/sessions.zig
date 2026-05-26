@@ -3,19 +3,9 @@ const store_mod = @import("../store/store.zig");
 const status = @import("status.zig");
 const help_mod = @import("help.zig");
 const output_mod = @import("output.zig");
+const specs = @import("specs.zig");
 
-pub const usage = help_mod.UsageSpec{
-    .name = "sessions",
-    .synopsis = "[OPTIONS]",
-    .description = "List recorded agent sessions from the index.",
-    .options = &.{
-        .{ .long = "json", .description = "Render the session list as structured JSON." },
-        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
-    },
-    .examples = &.{
-        .{ .description = "list all sessions", .command = "" },
-    },
-};
+pub const usage = specs.sessions_usage;
 
 const SessionsOptions = struct {
     format: output_mod.Format = .human,

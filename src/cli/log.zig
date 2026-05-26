@@ -3,20 +3,9 @@ const store_mod = @import("../store/store.zig");
 const status = @import("status.zig");
 const help_mod = @import("help.zig");
 const output_mod = @import("output.zig");
+const specs = @import("specs.zig");
 
-pub const usage = help_mod.UsageSpec{
-    .name = "log",
-    .synopsis = "[OPTIONS] [SESSION_ID]",
-    .description = "Show step history for a session.",
-    .options = &.{
-        .{ .long = "json", .description = "Render the session log as structured JSON." },
-        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
-    },
-    .examples = &.{
-        .{ .description = "show most recent session steps", .command = "" },
-        .{ .description = "show steps for a specific session", .command = "session-abc123" },
-    },
-};
+pub const usage = specs.log_usage;
 
 const LogOptions = struct {
     format: output_mod.Format = .human,

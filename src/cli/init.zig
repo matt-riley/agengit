@@ -4,24 +4,9 @@ const home_mod = @import("../util/home.zig");
 const atomic_json_mod = @import("../util/atomic_json.zig");
 const help_mod = @import("help.zig");
 const init_plan_mod = @import("init_plan.zig");
+const specs = @import("specs.zig");
 
-pub const usage = help_mod.UsageSpec{
-    .name = "init",
-    .synopsis = "[OPTIONS]",
-    .description = "Set up agit hooks for installed agent CLIs.",
-    .options = &.{
-        .{ .long = "agent", .value_name = "name", .description = "Install only the specified agent (claude, codex, gemini). Can be repeated.", .repeatable = true, .value_choices = &.{ "claude", "codex", "gemini" } },
-        .{ .long = "dry-run", .description = "Show what would be installed without making changes." },
-        .{ .long = "force", .description = "Back up and replace malformed/non-object existing JSON config." },
-        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
-    },
-    .examples = &.{
-        .{ .description = "install hooks for available agents", .command = "" },
-        .{ .description = "preview installation without writing", .command = "--dry-run" },
-        .{ .description = "install only Codex hooks", .command = "--agent codex" },
-        .{ .description = "reinstall even if config exists", .command = "--force" },
-    },
-};
+pub const usage = specs.init_usage;
 
 pub fn run(
     io: std.Io,
