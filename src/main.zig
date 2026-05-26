@@ -15,9 +15,11 @@ const cli = struct {
     const fsck = @import("cli/fsck.zig");
     const gc = @import("cli/gc.zig");
     const status = @import("cli/status.zig");
+    const timeline = @import("cli/timeline.zig");
     const sessions = @import("cli/sessions.zig");
     const log_cmd = @import("cli/log.zig");
     const show = @import("cli/show.zig");
+    const diff = @import("cli/diff.zig");
     const grep = @import("cli/grep.zig");
     const blame = @import("cli/blame.zig");
     const cat = @import("cli/cat.zig");
@@ -40,9 +42,11 @@ const SubCommand = enum {
     fsck,
     gc,
     status,
+    timeline,
     sessions,
     log,
     show,
+    diff,
     grep,
     blame,
     cat,
@@ -126,10 +130,12 @@ pub fn main(init: std.process.Init) !void {
         .doctor => try cli.doctor.run(init.io, init.gpa, init.minimal.environ, &iter),
         .fsck => try cli.fsck.run(init.io, init.gpa, &iter),
         .gc => try cli.gc.run(init.io, init.gpa, &iter),
-        .status => try cli.status.run(init.io, init.gpa, &iter),
+        .status => try cli.status.run(init.io, init.gpa, init.minimal.environ, &iter),
+        .timeline => try cli.timeline.run(init.io, init.gpa, &iter),
         .sessions => try cli.sessions.run(init.io, init.gpa, &iter),
         .log => try cli.log_cmd.run(init.io, init.gpa, &iter),
         .show => try cli.show.run(init.io, init.gpa, &iter),
+        .diff => try cli.diff.run(init.io, init.gpa, &iter),
         .grep => try cli.grep.run(init.io, init.gpa, &iter),
         .blame => try cli.blame.run(init.io, init.gpa, &iter),
         .cat => try cli.cat.run(init.io, init.gpa, &iter),
@@ -169,6 +175,7 @@ test {
     _ = @import("store/store.zig");
     _ = @import("store/ignore.zig");
     _ = @import("store/diff.zig");
+    _ = @import("store/inspect.zig");
     _ = @import("store/blame.zig");
     _ = @import("store/snapshot.zig");
     _ = @import("store/config.zig");
@@ -195,9 +202,11 @@ test {
     _ = @import("cli/fsck.zig");
     _ = @import("cli/gc.zig");
     _ = @import("cli/status.zig");
+    _ = @import("cli/timeline.zig");
     _ = @import("cli/sessions.zig");
     _ = @import("cli/log.zig");
     _ = @import("cli/show.zig");
+    _ = @import("cli/diff.zig");
     _ = @import("cli/grep.zig");
     _ = @import("cli/blame.zig");
     _ = @import("cli/cat.zig");

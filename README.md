@@ -13,9 +13,10 @@ change before a long-term stable format is declared.
 ## Today
 
 Shipping today: local `.agit/` capture stores, hook installation for Claude
-Code/OpenAI Codex CLI/Google Gemini CLI, health/recovery tooling including
-read-only `agit fsck`, generated shell completions, and structured JSON for
-the commands that advertise it.
+Code/OpenAI Codex CLI/Google Gemini CLI, investigation views including
+`agit timeline`, `agit show --files/--stat`, and `agit diff`, health/recovery
+tooling including read-only `agit fsck`, generated shell completions, and
+structured JSON for the commands that advertise it.
 
 Supported hook integrations today:
 
@@ -131,13 +132,23 @@ agit gc
 ```
 
 ### `agit status`
-Show current repository state and agit store statistics.
+Show the current investigation dashboard for this repository.
 
 **Synopsis:** `agit status [OPTIONS]`
 
 ```sh
 # show repository status
 agit status
+```
+
+### `agit timeline`
+Show recent recorded steps across sessions in reverse chronological order.
+
+**Synopsis:** `agit timeline [OPTIONS]`
+
+```sh
+# show the most recent recorded steps
+agit timeline
 ```
 
 ### `agit sessions`
@@ -168,6 +179,16 @@ Show details of a recorded step object by its BLAKE3 hash.
 ```sh
 # show details of a step
 agit show abc123def
+```
+
+### `agit diff`
+Render a text diff between a step tree and its parent tree.
+
+**Synopsis:** `agit diff [OPTIONS] <HASH> [-- <PATH>]`
+
+```sh
+# diff a recorded step against its parent
+agit diff abc123def
 ```
 
 ### `agit grep`
@@ -247,7 +268,7 @@ agit completion bash
 
 Planned but not shipped today:
 
-- historical content search and investigation-focused views
+- historical content search
 - remote sync plus portable export/import bundles
 - observer-based integrations and additional agent targets such as Pi and
   GitHub Copilot CLI

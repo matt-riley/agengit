@@ -25,6 +25,17 @@ test "golden/help/status" {
     try golden.assertGolden(&sandbox, "tests/golden/help/status.txt", result.stdout);
 }
 
+test "golden/help/timeline" {
+    var sandbox = try harness.Sandbox.init(std.testing.allocator);
+    defer sandbox.deinit();
+
+    var result = try sandbox.run(&.{ "timeline", "--help" }, null);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(u8, 0), result.exit_code);
+
+    try golden.assertGolden(&sandbox, "tests/golden/help/timeline.txt", result.stdout);
+}
+
 test "golden/help/sessions" {
     var sandbox = try harness.Sandbox.init(std.testing.allocator);
     defer sandbox.deinit();
@@ -56,6 +67,17 @@ test "golden/help/show" {
     try std.testing.expectEqual(@as(u8, 0), result.exit_code);
 
     try golden.assertGolden(&sandbox, "tests/golden/help/show.txt", result.stdout);
+}
+
+test "golden/help/diff" {
+    var sandbox = try harness.Sandbox.init(std.testing.allocator);
+    defer sandbox.deinit();
+
+    var result = try sandbox.run(&.{ "diff", "--help" }, null);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(u8, 0), result.exit_code);
+
+    try golden.assertGolden(&sandbox, "tests/golden/help/diff.txt", result.stdout);
 }
 
 test "golden/help/grep" {

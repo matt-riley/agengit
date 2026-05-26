@@ -6,10 +6,12 @@ def "nu-complete agit command" [] {
         { value: 'doctor', description: 'Check agent hook configurations and store health' }
         { value: 'fsck', description: 'Verify store integrity without mutating data' }
         { value: 'gc', description: 'Prune unreachable store data and stale temporaries' }
-        { value: 'status', description: 'Show current repository state' }
+        { value: 'status', description: 'Show the investigation dashboard' }
+        { value: 'timeline', description: 'Show recent recorded steps' }
         { value: 'sessions', description: 'List recorded agent sessions' }
         { value: 'log', description: 'Show step history for a session' }
         { value: 'show', description: 'Show details of a step' }
+        { value: 'diff', description: 'Show a text diff for a step' }
         { value: 'grep', description: 'Search recorded messages and tool activity' }
         { value: 'blame', description: 'Show per-line step attribution for a file' }
         { value: 'cat', description: 'Print a raw object by hash' }
@@ -64,6 +66,17 @@ extern "agit status" [
     --help(-h)
 ]
 
+extern "agit timeline" [
+    --origin: string
+    --session: string
+    --since: string
+    --until: string
+    --limit: string
+    --redacted
+    --full
+    --help(-h)
+]
+
 extern "agit sessions" [
     --json
     --help(-h)
@@ -76,6 +89,14 @@ extern "agit log" [
 
 extern "agit show" [
     --json
+    --files
+    --stat
+    --redacted
+    --full
+    --help(-h)
+]
+
+extern "agit diff" [
     --redacted
     --full
     --help(-h)
