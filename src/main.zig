@@ -172,6 +172,7 @@ test {
     _ = @import("store/blame.zig");
     _ = @import("store/snapshot.zig");
     _ = @import("store/config.zig");
+    _ = @import("store/pack.zig");
     _ = @import("recorder.zig");
     _ = @import("hook.zig");
     _ = @import("hook/Adapter.zig");

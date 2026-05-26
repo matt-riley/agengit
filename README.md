@@ -247,7 +247,6 @@ agit completion bash
 
 Planned but not shipped today:
 
-- packfiles for long-lived stores
 - historical content search and investigation-focused views
 - remote sync plus portable export/import bundles
 - observer-based integrations and additional agent targets such as Pi and
@@ -263,7 +262,7 @@ Structured CLI output uses the `cli-json-v1` envelope documented in
 ```text
 .agit/
 |-- config.json        # repository-local privacy/capture policy
-|-- objects/          # BLAKE3-addressed blobs, trees, steps
+|-- objects/          # loose BLAKE3-addressed blobs, trees, steps, and pack/
 |-- refs/
 |   `-- sessions/     # latest step pointer per session
 |-- log/
@@ -273,7 +272,9 @@ Structured CLI output uses the `cli-json-v1` envelope documented in
 ```
 
 Do not commit `.agit/`. Canonical history is in `objects/`; `index.db` is a
-query accelerator and can be rebuilt with `agit reindex`.
+query accelerator and can be rebuilt with `agit reindex`. `agit gc` may repack
+reachable loose objects into `.agit/objects/pack/` to reduce storage for
+long-running repositories.
 
 If `agit doctor` reports that the object index cache is not backfilled after an
 upgrade, run `agit reindex` once to repopulate it from `.agit/objects/`.

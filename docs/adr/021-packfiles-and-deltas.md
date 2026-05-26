@@ -1,6 +1,6 @@
 # ADR 021: Packfiles and delta compression
 
-**Status:** Proposed
+**Status:** Implemented
 **Date:** 2026-05-25
 
 ## Context
@@ -18,47 +18,50 @@ sessions where the same few files are edited repeatedly. Git solves this using
 
 Introduce a "pack" format for storing objects:
 
-1. **Object Indirection:** The `Store` read path will first check for a loose
-   object in `.agit/objects/`, then check the `index.db` to see if the object
-   is stored within a packfile in `.agit/objects/pack/`.
-2. **Delta Encoding:** Within a packfile, objects can be stored either as
-   "base" objects (full content) or "delta" objects (a reference to a base
-   plus a patch).
-3. **Pack Generation:** Packs are generated during `agit gc` (ADR 020). Loose
-   objects are combined into a packfile, and delta compression is applied
-   using a simple algorithm (e.g., similar to Git's `vcdiff`).
+1. **Object Indirection:** The `Store` read path checks for a loose object in
+   `.agit/objects/` first, then falls back to packfiles in
+   `.agit/objects/pack/`. SQLite keeps packed-object metadata as a query
+   accelerator, but the `.pack` files remain self-describing so `agit reindex`
+   can rebuild metadata from disk truth.
+2. **Delta Encoding:** Packfiles may store either full objects or one-level blob
+   deltas. Delta candidates are chosen from adjacent revisions of the same path
+   in session history so the packed representation stays safe and predictable.
+3. **Pack Generation:** Packs are generated during `agit gc` (ADR 020). Reachable
+   loose objects are grouped into a deterministic packfile, then the loose
+   copies are removed and the index is rebuilt from the resulting loose+packed
+   store state.
 4. **Transparency:** The `Store.writeBlob` and `Store.readBlob` APIs remain
-   unchanged. Writing always creates a loose object; reading handles the
-   lookup and reconstruction.
+   unchanged. Writes still create loose objects; reads, reindex, fsck, and gc
+   all understand packed objects transparently.
 
 ## Plan
 
-1. Define the `.pack` (data) and `.idx` (offset index) file formats.
-2. Update `src/store/index.zig` to track which packfile and offset contains
-   an object.
-3. Implement delta reconstruction in `src/store/object.zig`.
-4. Implement the packing engine in `src/store/pack.zig`. This includes
-   sliding-window delta compression.
-5. Update `agit gc` to trigger a repacking pass that converts loose objects
-   into packs.
+1. Define a self-describing `.pack` format under `.agit/objects/pack/` with per-entry
+   hashes, encoding metadata, CRC32 checks, and enough structure for `agit reindex`
+   to scan it without trusting SQLite.
+2. Update `src/store/index.zig` to track packed-object metadata while keeping the
+   `objects` table authoritative for object existence checks and prefix lookup.
+3. Implement delta reconstruction and pack scanning in `src/store/pack.zig`.
+4. Update `agit gc`, `agit reindex`, and integrity scanning so packed stores stay
+   readable, rebuildable, and verifiable after loose objects are removed.
 
 ## Testing
 
 - Unit test: verify that a delta object + its base reconstructs the original
   bytes perfectly.
-- Integration test: write two versions of a 1MB file with a 1-line change,
-  run a packing pass, and assert that the resulting packfile is significantly
-  smaller than 2MB.
-- Benchmark: measure the latency of reading a loose object vs. a packed
-  object vs. a deeply delta-compressed object.
+- Integration test: write two large versions of the same file with a 1-line
+  change, run a packing pass, and assert that the resulting packfile is smaller
+  than the two loose blobs combined.
+- Reindex test: rebuild the object index from packfiles alone and assert that
+  packed-object metadata is restored.
 
 ## Risks and tradeoffs
 
 - **Complexity:** Packfiles and deltas are significantly more complex than
   loose objects.
-- **Read Latency:** Reconstructing a delta chain takes more CPU than
-  reading a single file. We will cap the maximum delta chain depth (e.g.,
-  50 versions).
+- **Read Latency:** Reconstructing even a shallow delta is slower than reading
+  a single loose file. The initial implementation caps chains at one delta hop
+  per object to keep reads and integrity checks simple.
 - **Corrupt Packs:** A single corrupted packfile can lose many objects.
   We will include CRC32 checks for every object entry in the pack.
 

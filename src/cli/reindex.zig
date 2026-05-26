@@ -1,7 +1,9 @@
 const std = @import("std");
 const store_mod = @import("../store/store.zig");
+const gc_mod = @import("../store/gc.zig");
 const object = @import("../store/object.zig");
 const hash_mod = @import("../store/hash.zig");
+const pack_mod = @import("../store/pack.zig");
 const help_mod = @import("help.zig");
 const specs = @import("specs.zig");
 
@@ -88,19 +90,6 @@ pub fn reindex(io: std.Io, gpa: std.mem.Allocator, store: *store_mod.Store) !Rei
     var stats = ReindexStats{ .sessions = 0, .steps = 0 };
     try store.index.setObjectsComplete(false);
 
-    // Walk every object in the store and parse those with type=="step".
-    var obj_dir = store.root.openDir(io, "objects", .{ .iterate = true }) catch |err| switch (err) {
-        error.FileNotFound => {
-            try store.index.setObjectsComplete(true);
-            return stats;
-        }, // empty store
-        else => return err,
-    };
-    defer obj_dir.close(io);
-
-    var walker = try obj_dir.walk(gpa);
-    defer walker.deinit();
-
     // Track which sessions we have already created to count them correctly.
     var seen_sessions = std.StringHashMap(void).init(gpa);
     defer {
@@ -109,66 +98,8 @@ pub fn reindex(io: std.Io, gpa: std.mem.Allocator, store: *store_mod.Store) !Rei
         seen_sessions.deinit();
     }
 
-    while (try walker.next(io)) |entry| {
-        if (entry.kind != .file) continue;
-        if (entry.path.len != 65) continue;
-
-        var hex_buf: [64]u8 = undefined;
-        @memcpy(hex_buf[0..2], entry.path[0..2]);
-        @memcpy(hex_buf[2..64], entry.path[3..65]);
-
-        const h = hash_mod.Hash.fromHex(&hex_buf) catch continue;
-        const h_hex = h.toHex();
-
-        const data = object.read(io, store.root, gpa, h) catch continue;
-        defer gpa.free(data);
-        try store.index.insertObject(&h_hex, object.detectKind(data), data.len);
-
-        // Cheap pre-check: the JSON must contain "\"type\":\"step\"".
-        if (std.mem.indexOf(u8, data, "\"type\":\"step\"") == null) continue;
-
-        const parsed = std.json.parseFromSlice(
-            object.Step,
-            gpa,
-            data,
-            .{ .allocate = .alloc_always },
-        ) catch continue;
-        defer parsed.deinit();
-
-        const step = parsed.value;
-        if (!std.mem.eql(u8, step.type, "step")) continue;
-
-        // Ensure the session row exists with a null HEAD for now;
-        // we will fix up the real HEAD after the full walk.
-        const sess_key = try std.fmt.allocPrint(gpa, "{s}\x00{s}", .{ step.origin, step.session_id });
-        if (!seen_sessions.contains(sess_key)) {
-            try store.index.upsertSession(step.origin, step.session_id, null);
-            try seen_sessions.put(sess_key, {});
-            stats.sessions += 1;
-        } else {
-            gpa.free(sess_key);
-        }
-
-        try store.index.insertStep(
-            &h_hex,
-            step.origin,
-            step.session_id,
-            step.turn_id,
-            step.parent,
-            step.tree,
-            step.timestamp,
-        );
-
-        // Rebuild messages and tool_calls from the embedded step data.
-        for (step.messages, 0..) |msg, i| {
-            try store.index.insertMessage(&h_hex, @intCast(i), msg.role, msg.content);
-        }
-        for (step.tool_calls, 0..) |tc, i| {
-            try store.index.insertToolCall(&h_hex, @intCast(i), tc.tool_name, tc.args, tc.result);
-        }
-
-        stats.steps += 1;
-    }
+    try reindexLooseObjects(io, gpa, store, &seen_sessions, &stats);
+    try reindexPackedObjects(io, gpa, store, &seen_sessions, &stats);
 
     // Fix up HEAD hashes from the actual ref files now that all steps are indexed.
     var sess_it = seen_sessions.keyIterator();
@@ -187,6 +118,127 @@ pub fn reindex(io: std.Io, gpa: std.mem.Allocator, store: *store_mod.Store) !Rei
 
     try store.index.setObjectsComplete(true);
     return stats;
+}
+
+fn reindexLooseObjects(
+    io: std.Io,
+    gpa: std.mem.Allocator,
+    store: *store_mod.Store,
+    seen_sessions: *std.StringHashMap(void),
+    stats: *ReindexStats,
+) !void {
+    var obj_dir = store.root.openDir(io, "objects", .{ .iterate = true }) catch |err| switch (err) {
+        error.FileNotFound, error.NotDir => return,
+        else => return err,
+    };
+    defer obj_dir.close(io);
+
+    var walker = try obj_dir.walk(gpa);
+    defer walker.deinit();
+
+    while (try walker.next(io)) |entry| {
+        if (entry.kind != .file) continue;
+        if (entry.path.len != 65 or entry.path[2] != '/') continue;
+
+        var hex_buf: [64]u8 = undefined;
+        @memcpy(hex_buf[0..2], entry.path[0..2]);
+        @memcpy(hex_buf[2..64], entry.path[3..65]);
+
+        const h = hash_mod.Hash.fromHex(&hex_buf) catch continue;
+        const h_hex = h.toHex();
+        const data = object.read(io, store.root, gpa, h) catch continue;
+        defer gpa.free(data);
+
+        try store.index.insertObject(&h_hex, object.detectKind(data), data.len);
+        try indexStepData(store, gpa, seen_sessions, stats, &h_hex, data);
+    }
+}
+
+fn reindexPackedObjects(
+    io: std.Io,
+    gpa: std.mem.Allocator,
+    store: *store_mod.Store,
+    seen_sessions: *std.StringHashMap(void),
+    stats: *ReindexStats,
+) !void {
+    const pack_files = try pack_mod.listPackFiles(io, store.root, gpa);
+    defer pack_mod.freePackFiles(gpa, pack_files);
+
+    for (pack_files) |pack_name| {
+        const entries = try pack_mod.readPackEntries(io, store.root, gpa, pack_name);
+        defer pack_mod.freeParsedEntries(gpa, entries);
+
+        for (entries) |entry| {
+            const h_hex = entry.meta.hash.toHex();
+            try store.index.insertObject(&h_hex, entry.meta.kind.asString(), entry.raw.len);
+            var base_hex_buf: [64]u8 = undefined;
+            const base_hash: ?[]const u8 = if (entry.meta.base_hash) |base| blk: {
+                base_hex_buf = base.toHex();
+                break :blk base_hex_buf[0..];
+            } else null;
+            try store.index.insertPackedObject(
+                &h_hex,
+                pack_name,
+                entry.meta.offset,
+                entry.meta.packed_len,
+                entry.meta.unpacked_len,
+                entry.meta.kind.asString(),
+                entry.meta.encoding.asString(),
+                base_hash,
+                entry.meta.depth,
+                entry.meta.crc32,
+            );
+            try indexStepData(store, gpa, seen_sessions, stats, &h_hex, entry.raw);
+        }
+    }
+}
+
+fn indexStepData(
+    store: *store_mod.Store,
+    gpa: std.mem.Allocator,
+    seen_sessions: *std.StringHashMap(void),
+    stats: *ReindexStats,
+    object_hex: []const u8,
+    data: []const u8,
+) !void {
+    if (std.mem.indexOf(u8, data, "\"type\":\"step\"") == null) return;
+
+    const parsed = std.json.parseFromSlice(
+        object.Step,
+        gpa,
+        data,
+        .{ .allocate = .alloc_always },
+    ) catch return;
+    defer parsed.deinit();
+
+    const step = parsed.value;
+    if (!std.mem.eql(u8, step.type, "step")) return;
+
+    const sess_key = try std.fmt.allocPrint(gpa, "{s}\x00{s}", .{ step.origin, step.session_id });
+    if (!seen_sessions.contains(sess_key)) {
+        try store.index.upsertSession(step.origin, step.session_id, null);
+        try seen_sessions.put(sess_key, {});
+        stats.sessions += 1;
+    } else {
+        gpa.free(sess_key);
+    }
+
+    try store.index.insertStep(
+        object_hex,
+        step.origin,
+        step.session_id,
+        step.turn_id,
+        step.parent,
+        step.tree,
+        step.timestamp,
+    );
+    for (step.messages, 0..) |msg, i| {
+        try store.index.insertMessage(object_hex, @intCast(i), msg.role, msg.content);
+    }
+    for (step.tool_calls, 0..) |tc, i| {
+        try store.index.insertToolCall(object_hex, @intCast(i), tc.tool_name, tc.args, tc.result);
+    }
+    stats.steps += 1;
 }
 
 pub fn reindexFrom(
@@ -450,4 +502,67 @@ test "reindex --from replays newer steps reachable from refs" {
     try std.testing.expectEqual(@as(usize, 1), stats.steps);
     try std.testing.expect(try store.index.hasStep(&h2_hex));
     try std.testing.expect(try store.index.hasObject(&h2_hex));
+}
+
+test "reindex rebuilds packed object metadata from packfiles" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+
+    var store = try store_mod.Store.open(io, tmp.dir, gpa);
+    defer store.deinit(io);
+
+    const blob1 = try store.writeBlob(io, "hello from the first packed blob");
+    const blob2 = try store.writeBlob(io, "hello from the second packed blob");
+    const tree1 = store_mod.Tree{ .entries = &.{
+        .{ .path = "src/file.txt", .blob = &blob1.toHex(), .mode = "file", .size = 32 },
+    } };
+    const tree2 = store_mod.Tree{ .entries = &.{
+        .{ .path = "src/file.txt", .blob = &blob2.toHex(), .mode = "file", .size = 33 },
+    } };
+    const tree1_hash = try store.writeTree(io, gpa, tree1);
+    const tree2_hash = try store.writeTree(io, gpa, tree2);
+
+    const step1 = object.Step{
+        .parent = null,
+        .tree = &tree1_hash.toHex(),
+        .session_id = "repack-session",
+        .origin = "github.com/u/r",
+        .turn_id = "t1",
+        .causes = &.{},
+        .timestamp = 1_000,
+    };
+    const step1_hash = try store.writeStep(io, gpa, step1);
+    try std.testing.expect(try store.casRef(io, gpa, step1.origin, step1.session_id, null, step1_hash, &step1, step1.messages, step1.tool_calls));
+
+    const step2 = object.Step{
+        .parent = &step1_hash.toHex(),
+        .tree = &tree2_hash.toHex(),
+        .session_id = "repack-session",
+        .origin = "github.com/u/r",
+        .turn_id = "t2",
+        .causes = &.{},
+        .timestamp = 2_000,
+    };
+    const step2_hash = try store.writeStep(io, gpa, step2);
+    try std.testing.expect(try store.casRef(io, gpa, step2.origin, step2.session_id, step1_hash, step2_hash, &step2, step2.messages, step2.tool_calls));
+
+    var gc_result = try gc_mod.run(io, gpa, &store, .{ .grace_period_ms = 0 });
+    defer gc_result.deinit(gpa);
+    try std.testing.expect(gc_result.reindex_needed);
+
+    try store.index.truncate();
+    const stats = try reindex(io, gpa, &store);
+    try std.testing.expectEqual(@as(usize, 1), stats.sessions);
+    try std.testing.expectEqual(@as(usize, 2), stats.steps);
+
+    const blob2_hex = blob2.toHex();
+    var packed_row = try store.index.lookupPackedObject(gpa, &blob2_hex);
+    try std.testing.expect(packed_row != null);
+    defer if (packed_row) |*row| row.deinit(gpa);
+
+    const pack_files = try pack_mod.listPackFiles(io, store.root, gpa);
+    defer pack_mod.freePackFiles(gpa, pack_files);
+    try std.testing.expect(pack_files.len > 0);
 }
