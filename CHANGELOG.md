@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.13.0](https://github.com/matt-riley/agengit/compare/v1.12.0...v1.13.0) (2026-05-25)
+
+
+### Features
+
+* **cli:** add consistent --help and repo-discovery hints (ADR 012) ([d1ab5f7](https://github.com/matt-riley/agengit/commit/d1ab5f76fb6ea45f498fa4220fbc02c7632983f2))
+* **cli:** add structured JSON output and generated completions ([438b3a3](https://github.com/matt-riley/agengit/commit/438b3a344c5cf4d58ebddecee6044e8896b6b183))
+* **cli:** implement ADR 029 guided setup and hook-install preview ([50fb16d](https://github.com/matt-riley/agengit/commit/50fb16d4e05585bab7e8a4ffad67605d8b7c2177))
+* **hooks:** implement ADR-024 event identity and cwd anchoring ([5b59c32](https://github.com/matt-riley/agengit/commit/5b59c32a70611ba9d3450d319ca2a463c031536e))
+
+
+### Bug Fixes
+
+* align sanitizer config for smoke doctor ([ff437ff](https://github.com/matt-riley/agengit/commit/ff437ff02501a0c5dbd852ba41a2e232734f0177))
+* **ci:** wire Zig sanitizer option ([7f86a5d](https://github.com/matt-riley/agengit/commit/7f86a5dbe37b710585cef36223a358e52b2d9f19))
+* parse --help before opening store in log command ([acc2318](https://github.com/matt-riley/agengit/commit/acc23185832fcef9b10cfabedbc367753ad29e8b))
+
 ## [1.12.0](https://github.com/matt-riley/agengit/compare/v1.11.1...v1.12.0) (2026-05-25)
 
 
