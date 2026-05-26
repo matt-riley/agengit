@@ -1,6 +1,6 @@
 # ADR 018: Build, format, and lint coverage
 
-**Status:** Proposed
+**Status:** Implemented
 **Date:** 2026-05-25
 
 ## Context

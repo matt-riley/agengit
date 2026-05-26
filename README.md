@@ -154,6 +154,7 @@ Hook payload reads are capped at 16 MiB by default. Override with
 ```sh
 zig build
 zig build run -- version
+zig build check
 zig build test
 zig build test-e2e
 zig build test-property
@@ -165,6 +166,11 @@ zig build fmt
 zig build check-fmt
 zig build -Dtarget=x86_64-linux-musl -Doptimize=ReleaseSafe
 ```
+
+Run `zig build check` before pushing. It covers formatting, markdown link
+validation, release metadata validation, and unit tests. Keep
+`zig build test-e2e` as the follow-up command when you touch behavior that needs
+end-to-end coverage.
 
 Durability fsync is enabled by default. Use `AGIT_FSYNC=0` only in tests or
 microbenchmarks where you intentionally skip directory fsync.

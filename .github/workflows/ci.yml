@@ -64,14 +64,11 @@ jobs:
         with:
           version: 0.16.0
 
-      - name: Build and test
-        run: zig build test
+      - name: Run local check suite
+        run: zig build check
 
       - name: Run end-to-end tests
         run: zig build test-e2e
-
-      - name: Check formatting
-        run: zig build check-fmt
 
   sanitizers:
     name: Sanitizers

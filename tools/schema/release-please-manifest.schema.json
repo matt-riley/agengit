@@ -1,0 +1,9 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "release-please manifest versions schema",
+  "description": "Vendored copy of the simple release-please manifest contract.",
+  "type": "object",
+  "additionalProperties": {
+    "type": "string"
+  }
+}
