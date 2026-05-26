@@ -1,6 +1,6 @@
 # ADR 017: Deduplicate hook command implementations
 
-**Status:** Proposed
+**Status:** Implemented
 **Date:** 2026-05-25
 
 ## Context
@@ -41,29 +41,42 @@ The driver owns:
 - recorder open/close + lock acquisition (ADR 009),
 - success and failure logging.
 
-## Plan
+## Implemented design
 
-1. Define `src/hook/Adapter.zig` with the trait-like struct:
-   ```zig
-   pub const Adapter = struct {
-     name: []const u8,
-     events: []const EventMapping,
-     parsePayload: *const fn (gpa, raw) anyerror!Payload,
-     buildStep:    *const fn (gpa, payload) anyerror!Step,
-   };
-   ```
-2. Add `src/hook/runner.zig` exposing `pub fn run(io, gpa, env, adapter) !void`.
-3. Reduce each `cli/*_hook.zig` to ~30 LOC that declares its `Adapter` and
-   calls the runner.
-4. Move shared payload utilities (snippet redaction, secret stripping)
-   into `src/hook/payload.zig`.
-5. Document the adapter contract so adding Pi/Copilot CLI is a
-   single-file change.
+The shipped contract lives in `src/hook/Adapter.zig`:
+
+```zig
+pub const Adapter = struct {
+  name: []const u8,
+  origin: []const u8,
+  events: []const EventMapping,
+  parseArgs: ?*const fn (iter, diagnostic) anyerror![]const u8 = null,
+  parsePayload: ?*const fn (arena, payload, route, diagnostic) anyerror!ParsedPayload,
+  buildStep: ?*const fn (arena, parsed, diagnostic) anyerror!BuildPlan,
+};
+```
+
+- `src/hook/runner.zig` owns the shared fail-open flow: CLI arg routing,
+  payload read + malformed/oversized reporting, recorder open/close,
+  normalization, `upsertSession`, workspace-fallback logging, recovery-turn
+  logging, and recorder dispatch.
+- `src/hook/payload.zig` now holds the shared tool-payload stringification and
+  malformed-tool preservation helpers.
+- Adapters live under `src/hook/adapters/`. Claude exports two adapter
+  constants from one file (`hook_adapter` and `tool_batch_adapter`) because the
+  integration still has two CLI entrypoints, while Codex and Gemini each export
+  one adapter.
+- `src/hook/adapters/registry.zig` is the static registration point used by the
+  conformance test. Adding a new adapter now means:
+  1. one new adapter file under `src/hook/adapters/`,
+  2. one thin CLI shim under `src/cli/`,
+  3. one new registry entry,
+  4. one fixture set / adapter test file update.
 
 ## Testing
 
 - Unit tests per adapter: feed a golden payload, assert the produced
-  Step matches a golden value.
+  build plan matches the expected recorder step(s).
 - The existing hook integration tests (ADR 014) cover the runner path
   end-to-end.
 - A trait-conformance test that asserts every registered adapter
@@ -87,4 +100,4 @@ The driver owns:
 - Adding Pi/Copilot CLI becomes a focused adapter file plus a fixture
   set, not a fourth copy of the same logic.
 - Documentation of the adapter contract sets the bar for any future
-  contribution: "look at codex_hook.zig and copy the shape."
+  contribution: "look at `src/hook/adapters/codex.zig` and copy the shape."
