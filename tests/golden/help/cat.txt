@@ -5,6 +5,10 @@ DESCRIPTION:
     Print a raw object by its BLAKE3 hash.
 
 OPTIONS:
+    --redacted
+        Redact obvious secrets in the rendered object output.
+    --full
+        Render full object output even when redaction is the repo default.
     -h, --help
         Display this help and exit.
 

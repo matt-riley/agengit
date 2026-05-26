@@ -19,6 +19,7 @@ const cli = struct {
     const show = @import("cli/show.zig");
     const blame = @import("cli/blame.zig");
     const cat = @import("cli/cat.zig");
+    const privacy = @import("cli/privacy.zig");
     const completion = @import("cli/completion.zig");
     const reindex = @import("cli/reindex.zig");
     const version = @import("cli/version.zig");
@@ -41,6 +42,7 @@ const SubCommand = enum {
     show,
     blame,
     cat,
+    privacy,
     reindex,
     version,
     completion,
@@ -125,6 +127,7 @@ pub fn main(init: std.process.Init) !void {
         .show => try cli.show.run(init.io, init.gpa, &iter),
         .blame => try cli.blame.run(init.io, init.gpa, &iter),
         .cat => try cli.cat.run(init.io, init.gpa, &iter),
+        .privacy => try cli.privacy.run(init.io, init.gpa, &iter),
         .reindex => try cli.reindex.run(init.io, init.gpa, &iter),
         .completion => try cli.completion.run(init.io, init.gpa, &iter),
         .@"claude-hook" => try cli.claude_hook.run(init.io, init.gpa, &iter),
@@ -161,6 +164,7 @@ test {
     _ = @import("store/diff.zig");
     _ = @import("store/blame.zig");
     _ = @import("store/snapshot.zig");
+    _ = @import("store/config.zig");
     _ = @import("recorder.zig");
     _ = @import("hook.zig");
     _ = @import("hook/Adapter.zig");
@@ -181,6 +185,9 @@ test {
     _ = @import("cli/uninstall.zig");
     _ = @import("cli/doctor.zig");
     _ = @import("cli/fsck.zig");
+    _ = @import("cli/privacy.zig");
     _ = @import("cli/version.zig");
     _ = @import("store/integrity.zig");
+    _ = @import("privacy/redact.zig");
+    _ = @import("privacy/scan.zig");
 }

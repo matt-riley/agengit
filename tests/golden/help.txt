@@ -17,6 +17,7 @@ Commands:
   show          Show details of a step
   blame         Show per-line step attribution for a file
   cat           Print a raw object by hash
+  privacy       Scan reachable content for sensitive data
   reindex       Rebuild the index from the object store
   version       Print version information
   completion    Generate shell completion scripts

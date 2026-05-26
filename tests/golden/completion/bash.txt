@@ -6,7 +6,7 @@ _agit_complete() {
     cmd="${COMP_WORDS[1]}"
 
     if [[ $COMP_CWORD -eq 1 ]]; then
-        COMPREPLY=($(compgen -W "-h --help -V --version init uninstall doctor fsck status sessions log show blame cat reindex version completion" -- "$cur"))
+        COMPREPLY=($(compgen -W "-h --help -V --version init uninstall doctor fsck status sessions log show blame cat privacy reindex version completion" -- "$cur"))
         return 0
     fi
 
@@ -37,13 +37,16 @@ _agit_complete() {
         COMPREPLY=($(compgen -W "--json -h --help " -- "$cur"))
         ;;
     show)
-        COMPREPLY=($(compgen -W "--json -h --help " -- "$cur"))
+        COMPREPLY=($(compgen -W "--json --redacted --full -h --help " -- "$cur"))
         ;;
     blame)
         COMPREPLY=($(compgen -W "--no-limits -h --help " -- "$cur"))
         ;;
     cat)
-        COMPREPLY=($(compgen -W "-h --help " -- "$cur"))
+        COMPREPLY=($(compgen -W "--redacted --full -h --help " -- "$cur"))
+        ;;
+    privacy)
+        COMPREPLY=($(compgen -W "--json -h --help " -- "$cur"))
         ;;
     reindex)
         COMPREPLY=($(compgen -W "--from -h --help " -- "$cur"))

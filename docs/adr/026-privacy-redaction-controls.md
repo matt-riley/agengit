@@ -1,6 +1,6 @@
 # ADR 026: Privacy and redaction controls for captured session data
 
-**Status:** Proposed
+**Status:** Implemented
 **Date:** 2026-05-25
 
 ## Context

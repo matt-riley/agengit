@@ -1,4 +1,5 @@
 const std = @import("std");
+const redact_mod = @import("privacy/redact.zig");
 const recorder_mod = @import("recorder.zig");
 
 /// Default maximum accepted hook payload size.
@@ -376,101 +377,7 @@ fn parsePayloadData(gpa: std.mem.Allocator, data: []u8) !ReadPayloadResult {
 
 fn redactSnippetAlloc(gpa: std.mem.Allocator, payload: []const u8) ![]u8 {
     const end = @min(payload.len, 256);
-    const snippet = try gpa.dupe(u8, payload[0..end]);
-    redactSecretsInPlace(snippet);
-    return snippet;
-}
-
-fn redactSecretsInPlace(text: []u8) void {
-    var i: usize = 0;
-    while (i < text.len) : (i += 1) {
-        if (text[i] != '"') continue;
-        const key_start = i + 1;
-        const key_end = findStringEnd(text, key_start) orelse break;
-        const key = text[key_start..key_end];
-        var cursor = key_end + 1;
-        cursor = skipWhitespace(text, cursor);
-        if (cursor >= text.len or text[cursor] != ':') {
-            i = key_end;
-            continue;
-        }
-        cursor = skipWhitespace(text, cursor + 1);
-        if (!isSensitiveKey(key)) {
-            i = key_end;
-            continue;
-        }
-        if (cursor >= text.len) break;
-
-        if (text[cursor] == '"') {
-            const value_start = cursor + 1;
-            const value_end = findStringEnd(text, value_start) orelse text.len;
-            @memset(text[value_start..value_end], '*');
-            i = value_end;
-            continue;
-        }
-
-        const value_end = findLooseValueEnd(text, cursor);
-        var j = cursor;
-        while (j < value_end) : (j += 1) {
-            if (std.ascii.isWhitespace(text[j])) continue;
-            text[j] = '*';
-        }
-        i = value_end;
-    }
-}
-
-fn findStringEnd(text: []const u8, start: usize) ?usize {
-    var i = start;
-    while (i < text.len) : (i += 1) {
-        if (text[i] == '"' and (i == start or text[i - 1] != '\\')) return i;
-    }
-    return null;
-}
-
-fn skipWhitespace(text: []const u8, start: usize) usize {
-    var i = start;
-    while (i < text.len and std.ascii.isWhitespace(text[i])) : (i += 1) {}
-    return i;
-}
-
-fn findLooseValueEnd(text: []const u8, start: usize) usize {
-    var i = start;
-    while (i < text.len) : (i += 1) {
-        if (text[i] == ',' or text[i] == '}' or text[i] == ']') return i;
-    }
-    return text.len;
-}
-
-fn isSensitiveKey(key: []const u8) bool {
-    const sensitive = [_][]const u8{
-        "token",
-        "key",
-        "secret",
-        "password",
-        "authorization",
-    };
-    for (sensitive) |needle| {
-        if (containsIgnoreCase(key, needle)) return true;
-    }
-    return false;
-}
-
-fn containsIgnoreCase(haystack: []const u8, needle: []const u8) bool {
-    if (needle.len == 0) return true;
-    if (haystack.len < needle.len) return false;
-    var i: usize = 0;
-    while (i + needle.len <= haystack.len) : (i += 1) {
-        var matched = true;
-        var j: usize = 0;
-        while (j < needle.len) : (j += 1) {
-            if (std.ascii.toLower(haystack[i + j]) != std.ascii.toLower(needle[j])) {
-                matched = false;
-                break;
-            }
-        }
-        if (matched) return true;
-    }
-    return false;
+    return redact_mod.redactAlloc(gpa, payload[0..end], .{});
 }
 
 test "readHookPayload rejects oversized input" {

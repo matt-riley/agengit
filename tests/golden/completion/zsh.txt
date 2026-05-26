@@ -13,6 +13,7 @@ _agit() {
         'show:Show details of a step'
         'blame:Show per-line step attribution for a file'
         'cat:Print a raw object by hash'
+        'privacy:Scan reachable content for sensitive data'
         'reindex:Rebuild the index from the object store'
         'version:Print version information'
         'completion:Generate shell completion scripts'
@@ -72,6 +73,8 @@ _agit() {
                 show)
                     _arguments \
                         '--json[Render the step details as structured JSON.]' \
+                        '--redacted[Redact obvious secrets in the rendered output.]' \
+                        '--full[Render full output even when redaction is the repo default.]' \
                         '--help[Display this help and exit.]'
                     ;;
                 blame)
@@ -81,6 +84,13 @@ _agit() {
                     ;;
                 cat)
                     _arguments \
+                        '--redacted[Redact obvious secrets in the rendered object output.]' \
+                        '--full[Render full object output even when redaction is the repo default.]' \
+                        '--help[Display this help and exit.]'
+                    ;;
+                privacy)
+                    _arguments \
+                        '--json[Render privacy scan findings as structured JSON.]' \
                         '--help[Display this help and exit.]'
                     ;;
                 reindex)

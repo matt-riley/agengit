@@ -1,0 +1,18 @@
+USAGE:
+    agit privacy scan [OPTIONS]
+
+DESCRIPTION:
+    Scan reachable captured content for sensitive data without printing secret values.
+
+OPTIONS:
+    --json
+        Render privacy scan findings as structured JSON.
+    -h, --help
+        Display this help and exit.
+
+EXAMPLES:
+    # scan captured content for sensitive data
+    agit privacy scan
+    # emit machine-readable privacy findings
+    agit privacy scan --json
+

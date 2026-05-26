@@ -182,6 +182,16 @@ Print a raw object by its BLAKE3 hash.
 agit cat abc123def
 ```
 
+### `agit privacy`
+Scan reachable captured content for sensitive data without printing secret values.
+
+**Synopsis:** `agit privacy scan [OPTIONS]`
+
+```sh
+# scan captured content for sensitive data
+agit privacy scan
+```
+
 ### `agit reindex`
 Rebuild the SQLite index from object/ref truth.
 
@@ -217,7 +227,6 @@ agit completion bash
 
 Planned but not shipped today:
 
-- privacy/redaction controls before broader export/search features
 - garbage collection and packfiles for long-lived stores
 - historical content search and investigation-focused views
 - remote sync plus portable export/import bundles
@@ -233,6 +242,7 @@ Structured CLI output uses the `cli-json-v1` envelope documented in
 
 ```text
 .agit/
+|-- config.json        # repository-local privacy/capture policy
 |-- objects/          # BLAKE3-addressed blobs, trees, steps
 |-- refs/
 |   `-- sessions/     # latest step pointer per session
@@ -257,6 +267,14 @@ when you need to inspect unusually large text files.
 
 Project-specific exclusions can be added via `.agitignore` using exact paths,
 directory-prefix rules (trailing slash), and single `*` glob patterns.
+
+Use `.agit/config.json` to tune capture levels for prompts, assistant messages,
+tool arguments/results, and snapshots; disable origins; add custom literal
+redactions; and make `show`/`cat` default to redacted output.
+
+Run `agit privacy scan` before sharing store content. It reports sensitive-data
+findings without printing the matched secret values and exits non-zero when
+findings are present.
 
 Secret filtering helps reduce risk but is not a hard guarantee. Treat `.agit/`
 as private data unless reviewed.

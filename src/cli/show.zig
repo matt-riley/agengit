@@ -1,4 +1,7 @@
 const std = @import("std");
+const config_mod = @import("../store/config.zig");
+const object_mod = @import("../store/object.zig");
+const redact_mod = @import("../privacy/redact.zig");
 const status = @import("status.zig");
 const help_mod = @import("help.zig");
 const output_mod = @import("output.zig");
@@ -6,9 +9,16 @@ const specs = @import("specs.zig");
 
 pub const usage = specs.show_usage;
 
+const RedactionMode = enum {
+    auto,
+    redacted,
+    full,
+};
+
 const ShowOptions = struct {
     format: output_mod.Format = .human,
     hash_prefix: ?[:0]const u8 = null,
+    redaction_mode: RedactionMode = .auto,
 };
 
 pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator) !void {
@@ -34,6 +44,9 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
 
     var store = try status.openStoreOrExit(io, gpa, &stdout, options.format, usage.name);
     defer store.deinit(io);
+    var loaded_config = config_mod.loadOrDefaultFromStore(io, store.root, gpa);
+    defer loaded_config.deinit();
+    const use_redaction = shouldUseRedaction(options.redaction_mode, loaded_config.value.privacy.display.redacted_by_default);
 
     const resolution = store.resolvePrefix(io, gpa, prefix) catch |err| {
         try status.writeDiagnostic(&stdout, options.format, usage.name, .{
@@ -107,16 +120,33 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
     defer parsed.deinit();
 
     switch (options.format) {
-        .human => try writeHuman(&stdout, hex[0..], parsed.value),
-        .json => try output_mod.writeEnvelope(&stdout, usage.name, .{
-            .hash = hex[0..],
-            .step = parsed.value,
-        }),
+        .human => try writeHuman(&stdout, gpa, hex[0..], parsed.value, use_redaction, loaded_config.value.privacy.custom_literals),
+        .json => {
+            if (!use_redaction) {
+                try output_mod.writeEnvelope(&stdout, usage.name, .{
+                    .hash = hex[0..],
+                    .step = parsed.value,
+                });
+            } else {
+                const step = try redactStep(gpa, parsed.value, loaded_config.value.privacy.custom_literals);
+                try output_mod.writeEnvelope(&stdout, usage.name, .{
+                    .hash = hex[0..],
+                    .step = step,
+                });
+            }
+        },
     }
     try stdout.flush();
 }
 
-fn writeHuman(stdout: *std.Io.File.Writer, hex: []const u8, step: anytype) !void {
+fn writeHuman(
+    stdout: *std.Io.File.Writer,
+    gpa: std.mem.Allocator,
+    hex: []const u8,
+    step: anytype,
+    use_redaction: bool,
+    custom_literals: []const []const u8,
+) !void {
     var ts_buf: [32]u8 = undefined;
     const ts = status.formatTimestamp(step.timestamp, &ts_buf);
 
@@ -131,9 +161,13 @@ fn writeHuman(stdout: *std.Io.File.Writer, hex: []const u8, step: anytype) !void
     if (step.messages.len > 0) {
         try stdout.interface.writeAll("\nmessages:\n");
         for (step.messages, 0..) |msg, i| {
-            const preview_len = @min(80, msg.content.len);
-            const preview = msg.content[0..preview_len];
-            const ellipsis: []const u8 = if (msg.content.len > 80) "…" else "";
+            const rendered = if (use_redaction) try redact_mod.redactAlloc(gpa, msg.content, .{
+                .custom_literals = custom_literals,
+            }) else msg.content;
+            defer if (use_redaction) gpa.free(rendered);
+            const preview_len = @min(80, rendered.len);
+            const preview = rendered[0..preview_len];
+            const ellipsis: []const u8 = if (rendered.len > 80) "…" else "";
             try stdout.interface.print("  [{d}] {s}: {s}{s}\n", .{ i, msg.role, preview, ellipsis });
         }
     }
@@ -151,6 +185,10 @@ fn parseOptions(iter: *std.process.Args.Iterator, stdout: *std.Io.File.Writer) !
     while (iter.next()) |arg| {
         if (std.mem.eql(u8, arg, "--json")) {
             options.format = .json;
+        } else if (std.mem.eql(u8, arg, "--redacted")) {
+            options.redaction_mode = .redacted;
+        } else if (std.mem.eql(u8, arg, "--full")) {
+            options.redaction_mode = .full;
         } else if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
             try help_mod.renderUsage(stdout, usage);
             try stdout.flush();
@@ -172,4 +210,60 @@ fn parseOptions(iter: *std.process.Args.Iterator, stdout: *std.Io.File.Writer) !
         }
     }
     return options;
+}
+
+fn shouldUseRedaction(mode: RedactionMode, redacted_by_default: bool) bool {
+    return switch (mode) {
+        .auto => redacted_by_default,
+        .redacted => true,
+        .full => false,
+    };
+}
+
+fn redactStep(
+    gpa: std.mem.Allocator,
+    step: object_mod.Step,
+    custom_literals: []const []const u8,
+) !object_mod.Step {
+    const messages = try gpa.alloc(object_mod.StepMessage, step.messages.len);
+    errdefer gpa.free(messages);
+    for (step.messages, 0..) |message, i| {
+        messages[i] = .{
+            .role = message.role,
+            .content = try redact_mod.redactAlloc(gpa, message.content, .{
+                .custom_literals = custom_literals,
+            }),
+        };
+    }
+
+    const tool_calls = try gpa.alloc(object_mod.StepToolCall, step.tool_calls.len);
+    errdefer {
+        for (messages) |message| gpa.free(@constCast(message.content));
+        gpa.free(messages);
+        gpa.free(tool_calls);
+    }
+    for (step.tool_calls, 0..) |tool_call, i| {
+        tool_calls[i] = .{
+            .tool_name = tool_call.tool_name,
+            .args = try redact_mod.redactAlloc(gpa, tool_call.args, .{
+                .custom_literals = custom_literals,
+            }),
+            .result = if (tool_call.result) |result| try redact_mod.redactAlloc(gpa, result, .{
+                .custom_literals = custom_literals,
+            }) else null,
+        };
+    }
+
+    return .{
+        .type = step.type,
+        .parent = step.parent,
+        .tree = step.tree,
+        .session_id = step.session_id,
+        .origin = step.origin,
+        .turn_id = step.turn_id,
+        .causes = step.causes,
+        .timestamp = step.timestamp,
+        .messages = messages,
+        .tool_calls = tool_calls,
+    };
 }

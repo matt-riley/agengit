@@ -1,8 +1,10 @@
 const std = @import("std");
 const hash_mod = @import("hash.zig");
+const config_mod = @import("config.zig");
 const index_mod = @import("index.zig");
 const object = @import("object.zig");
 const ignore_mod = @import("ignore.zig");
+const redact_mod = @import("../privacy/redact.zig");
 const buf_pool_mod = @import("../util/buf_pool.zig");
 const file_limits_mod = @import("../util/file_limits.zig");
 const fs_mod = @import("../util/fs.zig");
@@ -17,6 +19,8 @@ const initial_read_bytes: usize = 8 * 1024;
 pub const SnapshotConfig = struct {
     /// Files larger than this byte threshold are skipped.
     large_file_bytes: u64 = 16 * 1024 * 1024,
+    capture_level: config_mod.CaptureLevel = .full,
+    custom_literals: []const []const u8 = &.{},
 };
 
 /// Returns true when `data` looks like binary content.
@@ -44,6 +48,10 @@ pub fn snapshot(
     ignorer: *const Ignorer,
     config: SnapshotConfig,
 ) !Hash {
+    if (config.capture_level == .disabled) {
+        return writeEmptyTree(io, store_root, gpa, index);
+    }
+
     const max_file_bytes = file_limits_mod.effectiveMaxFileBytes(config.large_file_bytes);
 
     // Entries accumulate as we walk; paths are heap-allocated and owned here.
@@ -80,7 +88,10 @@ pub fn snapshot(
         defer pool.release(loaded.buf);
         const data = loaded.buf[0..loaded.size];
 
-        const blob_write = try object.writeDetailed(io, store_root, data);
+        const stored_data = try transformSnapshotData(gpa, entry.path, data, loaded.size, config);
+        defer gpa.free(stored_data);
+
+        const blob_write = try object.writeDetailed(io, store_root, stored_data);
         const blob_hash = blob_write.hash;
         const blob_hex = blob_hash.toHex();
         if (index) |idx| {
@@ -115,6 +126,41 @@ pub fn snapshot(
         try idx.insertObject(&tree_hex, "tree", tree_write.size);
     }
     return tree_write.hash;
+}
+
+fn writeEmptyTree(
+    io: std.Io,
+    store_root: std.Io.Dir,
+    gpa: std.mem.Allocator,
+    index: ?*index_mod.Index,
+) !Hash {
+    const tree = object.Tree{ .entries = &.{} };
+    const tree_write = try object.writeTreeDetailed(io, store_root, gpa, tree);
+    const tree_hex = tree_write.hash.toHex();
+    if (index) |idx| {
+        try idx.insertObject(&tree_hex, "tree", tree_write.size);
+    }
+    return tree_write.hash;
+}
+
+fn transformSnapshotData(
+    gpa: std.mem.Allocator,
+    path: []const u8,
+    data: []const u8,
+    original_size: u64,
+    config: SnapshotConfig,
+) ![]u8 {
+    return switch (config.capture_level) {
+        .full => try gpa.dupe(u8, data),
+        .redacted => try redact_mod.redactAlloc(gpa, data, .{
+            .custom_literals = config.custom_literals,
+        }),
+        .metadata_only => try std.fmt.allocPrint(gpa, "[[agit snapshot metadata-only path={s} bytes={d}]]\n", .{
+            path,
+            original_size,
+        }),
+        .disabled => unreachable,
+    };
 }
 
 const LoadedTextFile = struct {
@@ -318,4 +364,73 @@ test "snapshot: keeps files at the cap and skips files above it" {
     try std.testing.expectEqual(@as(usize, 1), parsed.value.entries.len);
     try std.testing.expectEqualStrings("exact.txt", parsed.value.entries[0].path);
     try std.testing.expectEqual(@as(u64, cap), parsed.value.entries[0].size);
+}
+
+test "snapshot: redacted capture stores redacted blob data" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+
+    try writeTestFile(io, tmp.dir, "secret.txt", "token=super-secret-value");
+    try tmp.dir.createDirPath(io, ".agit/objects");
+
+    const ignorer = Ignorer.initDefault(gpa);
+    const h = try snapshot(io, tmp.dir, gpa, tmp.dir, null, &ignorer, .{
+        .capture_level = .redacted,
+    });
+
+    var parsed = try object.readTree(io, tmp.dir, gpa, h);
+    defer parsed.deinit();
+
+    const blob_hash = try Hash.fromHex(parsed.value.entries[0].blob);
+    const blob = try object.read(io, tmp.dir, gpa, blob_hash);
+    defer gpa.free(blob);
+
+    try std.testing.expect(std.mem.indexOf(u8, blob, "super-secret-value") == null);
+    try std.testing.expect(std.mem.indexOf(u8, blob, "[REDACTED]") != null);
+}
+
+test "snapshot: metadata-only capture stores placeholder blobs" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+
+    try writeTestFile(io, tmp.dir, "src/main.zig", "const value = 42;");
+    try tmp.dir.createDirPath(io, ".agit/objects");
+
+    const ignorer = Ignorer.initDefault(gpa);
+    const h = try snapshot(io, tmp.dir, gpa, tmp.dir, null, &ignorer, .{
+        .capture_level = .metadata_only,
+    });
+
+    var parsed = try object.readTree(io, tmp.dir, gpa, h);
+    defer parsed.deinit();
+
+    const blob_hash = try Hash.fromHex(parsed.value.entries[0].blob);
+    const blob = try object.read(io, tmp.dir, gpa, blob_hash);
+    defer gpa.free(blob);
+
+    try std.testing.expect(std.mem.indexOf(u8, blob, "metadata-only") != null);
+    try std.testing.expect(std.mem.indexOf(u8, blob, "const value = 42;") == null);
+}
+
+test "snapshot: disabled capture writes an empty tree" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+
+    try writeTestFile(io, tmp.dir, "src/main.zig", "const value = 42;");
+    try tmp.dir.createDirPath(io, ".agit/objects");
+
+    const ignorer = Ignorer.initDefault(gpa);
+    const h = try snapshot(io, tmp.dir, gpa, tmp.dir, null, &ignorer, .{
+        .capture_level = .disabled,
+    });
+
+    var parsed = try object.readTree(io, tmp.dir, gpa, h);
+    defer parsed.deinit();
+    try std.testing.expectEqual(@as(usize, 0), parsed.value.entries.len);
 }
