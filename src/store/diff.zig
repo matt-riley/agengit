@@ -11,11 +11,12 @@ pub const Edit = struct {
 
 /// Compute the shortest edit script from `old` to `new` using Myers' algorithm.
 ///
-/// Returns a heap-allocated slice of `Edit` values; caller must free with
-/// `gpa.free(result)`.  Line strings are borrowed from the input slices and
-/// must remain valid for the lifetime of the result.
+/// Returns an allocator-owned slice of `Edit` values; caller must release it
+/// with the same allocator, or reset/deinit the arena when using an arena
+/// allocator. Line strings are borrowed from the input slices and must remain
+/// valid for the lifetime of the result.
 pub fn diff(
-    gpa: std.mem.Allocator,
+    allocator: std.mem.Allocator,
     old: []const []const u8,
     new: []const []const u8,
 ) ![]Edit {
@@ -25,12 +26,12 @@ pub fn diff(
     // Fast paths.
     if (n == 0 and m == 0) return &.{};
     if (n == 0) {
-        const edits = try gpa.alloc(Edit, @intCast(m));
+        const edits = try allocator.alloc(Edit, @intCast(m));
         for (new, 0..) |line, i| edits[i] = .{ .op = .insert, .line = line };
         return edits;
     }
     if (m == 0) {
-        const edits = try gpa.alloc(Edit, @intCast(n));
+        const edits = try allocator.alloc(Edit, @intCast(n));
         for (old, 0..) |line, i| edits[i] = .{ .op = .delete, .line = line };
         return edits;
     }
@@ -40,20 +41,21 @@ pub fn diff(
     const v_size: usize = @intCast(2 * max + 2);
 
     // V[k] = furthest x reached on diagonal k.
-    const v = try gpa.alloc(isize, v_size);
-    defer gpa.free(v);
+    const v = try allocator.alloc(isize, v_size);
+    defer allocator.free(v);
     @memset(v, 0);
 
-    // trace[d] = snapshot of V *before* processing depth d.
-    var trace = try std.ArrayList([]isize).initCapacity(gpa, @intCast(max + 1));
-    defer {
-        for (trace.items) |t| gpa.free(t);
-        trace.deinit(gpa);
-    }
+    // Store all trace snapshots in one allocation so callers can cheaply reuse
+    // an arena across files instead of paying per-depth allocation churn.
+    const trace = try allocator.alloc(isize, v_size * @as(usize, @intCast(max + 1)));
+    defer allocator.free(trace);
+    var trace_len: usize = 0;
 
     found: for (0..@as(usize, @intCast(max + 1))) |d_usize| {
         const d: isize = @intCast(d_usize);
-        try trace.append(gpa, try gpa.dupe(isize, v));
+        const trace_offset = trace_len * v_size;
+        @memcpy(trace[trace_offset .. trace_offset + v_size], v);
+        trace_len += 1;
 
         var k: isize = -d;
         while (k <= d) : (k += 2) {
@@ -81,14 +83,15 @@ pub fn diff(
 
     // Backtrack through the trace to reconstruct the edit script in reverse.
     var edits_rev: std.ArrayList(Edit) = .empty;
-    defer edits_rev.deinit(gpa);
+    defer edits_rev.deinit(allocator);
 
     var x: isize = n;
     var y: isize = m;
 
-    var d: isize = @intCast(trace.items.len - 1);
+    var d: isize = @intCast(trace_len - 1);
     while (d >= 1) : (d -= 1) {
-        const v_prev = trace.items[@intCast(d)]; // V state before step d
+        const trace_offset = @as(usize, @intCast(d)) * v_size;
+        const v_prev = trace[trace_offset .. trace_offset + v_size]; // V state before step d
         const k: isize = x - y;
         const ki: usize = @intCast(@as(isize, @intCast(offset)) + k);
 
@@ -109,16 +112,16 @@ pub fn diff(
         while (x > snake_x0) {
             x -= 1;
             y -= 1;
-            try edits_rev.append(gpa, .{ .op = .equal, .line = old[@intCast(x)] });
+            try edits_rev.append(allocator, .{ .op = .equal, .line = old[@intCast(x)] });
         }
 
         // Emit the single insert or delete.
         if (came_from_insert) {
             y -= 1;
-            try edits_rev.append(gpa, .{ .op = .insert, .line = new[@intCast(y)] });
+            try edits_rev.append(allocator, .{ .op = .insert, .line = new[@intCast(y)] });
         } else {
             x -= 1;
-            try edits_rev.append(gpa, .{ .op = .delete, .line = old[@intCast(x)] });
+            try edits_rev.append(allocator, .{ .op = .delete, .line = old[@intCast(x)] });
         }
     }
 
@@ -126,10 +129,10 @@ pub fn diff(
     while (x > 0) {
         x -= 1;
         y -= 1;
-        try edits_rev.append(gpa, .{ .op = .equal, .line = old[@intCast(x)] });
+        try edits_rev.append(allocator, .{ .op = .equal, .line = old[@intCast(x)] });
     }
 
-    const edits = try edits_rev.toOwnedSlice(gpa);
+    const edits = try edits_rev.toOwnedSlice(allocator);
     std.mem.reverse(Edit, edits);
     return edits;
 }
@@ -218,4 +221,16 @@ test "diff: completely different" {
     };
     try std.testing.expectEqual(@as(usize, 2), del_count);
     try std.testing.expectEqual(@as(usize, 3), ins_count);
+}
+
+test "diff: edit lines borrow the input slices" {
+    const gpa = std.testing.allocator;
+    const old = [_][]const u8{ "alpha", "beta" };
+    const new = [_][]const u8{ "alpha", "gamma" };
+    const edits = try diff(gpa, &old, &new);
+    defer gpa.free(edits);
+
+    try std.testing.expectEqual(@intFromPtr(old[0].ptr), @intFromPtr(edits[0].line.ptr));
+    try std.testing.expectEqual(@intFromPtr(old[1].ptr), @intFromPtr(edits[1].line.ptr));
+    try std.testing.expectEqual(@intFromPtr(new[1].ptr), @intFromPtr(edits[2].line.ptr));
 }

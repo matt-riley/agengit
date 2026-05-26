@@ -139,6 +139,21 @@ pub fn build(b: *std.Build) void {
     const bench_resolve_prefix_step = b.step("bench-resolve-prefix", "Run object-prefix resolution benchmark");
     bench_resolve_prefix_step.dependOn(&run_resolve_prefix_bench.step);
 
+    const store_bench = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("bench/store.zig"),
+            .target = target,
+            .optimize = optimize,
+            .sanitize_c = sanitize_c,
+            .imports = &.{
+                .{ .name = "test_support", .module = test_support_module },
+            },
+        }),
+    });
+    const run_store_bench = b.addRunArtifact(store_bench);
+    const bench_store_step = b.step("bench-store", "Run snapshot, diff, and blame microbenchmarks");
+    bench_store_step.dependOn(&run_store_bench.step);
+
     const fuzz_hooks = b.addExecutable(.{
         .name = "fuzz-hooks",
         .root_module = b.createModule(.{

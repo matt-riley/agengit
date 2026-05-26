@@ -3,15 +3,20 @@ const hash_mod = @import("hash.zig");
 const index_mod = @import("index.zig");
 const object = @import("object.zig");
 const ignore_mod = @import("ignore.zig");
+const buf_pool_mod = @import("../util/buf_pool.zig");
+const file_limits_mod = @import("../util/file_limits.zig");
 const fs_mod = @import("../util/fs.zig");
 
 pub const Hash = hash_mod.Hash;
 pub const Ignorer = ignore_mod.Ignorer;
+const BufPool = buf_pool_mod.BufPool;
+const binary_probe_bytes: usize = 8 * 1024;
+const initial_read_bytes: usize = 8 * 1024;
 
 /// Configuration for a workspace snapshot.
 pub const SnapshotConfig = struct {
     /// Files larger than this byte threshold are skipped.
-    large_file_bytes: u64 = 10 * 1024 * 1024,
+    large_file_bytes: u64 = 16 * 1024 * 1024,
 };
 
 /// Returns true when `data` looks like binary content.
@@ -39,6 +44,8 @@ pub fn snapshot(
     ignorer: *const Ignorer,
     config: SnapshotConfig,
 ) !Hash {
+    const max_file_bytes = file_limits_mod.effectiveMaxFileBytes(config.large_file_bytes);
+
     // Entries accumulate as we walk; paths are heap-allocated and owned here.
     var entries: std.ArrayList(object.TreeEntry) = .empty;
     defer {
@@ -48,6 +55,9 @@ pub fn snapshot(
         }
         entries.deinit(gpa);
     }
+
+    var pool = BufPool.init(gpa);
+    defer pool.deinit();
 
     var walkable = try repo_dir.openDir(io, ".", .{ .iterate = true });
     defer walkable.close(io);
@@ -66,13 +76,9 @@ pub fn snapshot(
 
         if (ignorer.shouldIgnoreFile(entry.basename)) continue;
 
-        const stat = entry.dir.statFile(io, entry.basename, .{}) catch continue;
-        if (stat.size > config.large_file_bytes) continue;
-
-        const data = entry.dir.readFileAlloc(io, entry.basename, gpa, .unlimited) catch continue;
-        defer gpa.free(data);
-
-        if (isBinary(data)) continue;
+        const loaded = loadTextFile(io, entry.dir, entry.basename, &pool, max_file_bytes) catch continue orelse continue;
+        defer pool.release(loaded.buf);
+        const data = loaded.buf[0..loaded.size];
 
         const blob_write = try object.writeDetailed(io, store_root, data);
         const blob_hash = blob_write.hash;
@@ -91,7 +97,7 @@ pub fn snapshot(
             .path = norm_path,
             .blob = try gpa.dupe(u8, &blob_hex),
             .mode = "file", // executable-bit tracking deferred to a future phase
-            .size = stat.size,
+            .size = loaded.size,
         });
     }
 
@@ -109,6 +115,69 @@ pub fn snapshot(
         try idx.insertObject(&tree_hex, "tree", tree_write.size);
     }
     return tree_write.hash;
+}
+
+const LoadedTextFile = struct {
+    buf: []u8,
+    size: u64,
+};
+
+fn loadTextFile(
+    io: std.Io,
+    dir: std.Io.Dir,
+    basename: []const u8,
+    pool: *BufPool,
+    max_file_bytes: u64,
+) !?LoadedTextFile {
+    var file = dir.openFile(io, basename, .{}) catch return null;
+    defer file.close(io);
+
+    const max_bytes: usize = std.math.cast(usize, max_file_bytes) orelse return null;
+    var buf = try pool.acquire(@min(initial_read_bytes, max_bytes));
+    errdefer pool.release(buf);
+
+    var reader_buf: [4096]u8 = undefined;
+    var reader = file.reader(io, &reader_buf);
+    var used: usize = 0;
+
+    while (true) {
+        if (used == buf.len and used < max_bytes) {
+            const next_hint = @min(max_bytes, buf.len * 2);
+            var bigger = try pool.acquire(next_hint);
+            @memcpy(bigger[0..used], buf[0..used]);
+            pool.release(buf);
+            buf = bigger;
+        }
+
+        const remaining_allowed = max_bytes - used;
+        if (remaining_allowed == 0) {
+            var overflow: [1]u8 = undefined;
+            const overflow_n = try reader.interface.readSliceShort(&overflow);
+            if (overflow_n > 0) {
+                pool.release(buf);
+                return null;
+            }
+            break;
+        }
+
+        const chunk_len = @min(buf.len - used, remaining_allowed);
+        const start = used;
+        const n = try reader.interface.readSliceShort(buf[used .. used + chunk_len]);
+        if (n == 0) break;
+        used += n;
+
+        const probed_before = @min(start, binary_probe_bytes);
+        const probed_after = @min(used, binary_probe_bytes);
+        if (probed_after > probed_before and isBinary(buf[0..probed_after])) {
+            pool.release(buf);
+            return null;
+        }
+    }
+
+    return .{
+        .buf = buf,
+        .size = used,
+    };
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────
@@ -217,4 +286,36 @@ test "snapshot: deterministic hash for identical content" {
     const h2 = try snapshot(io, tmp2.dir, gpa, tmp2.dir, null, &ignorer, .{});
 
     try std.testing.expect(h1.eql(h2));
+}
+
+test "snapshot: keeps files at the cap and skips files above it" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+
+    const cap: usize = 32;
+    const exact = try gpa.alloc(u8, cap);
+    defer gpa.free(exact);
+    @memset(exact, 'a');
+
+    const over = try gpa.alloc(u8, cap + 1);
+    defer gpa.free(over);
+    @memset(over, 'b');
+
+    try writeTestFile(io, tmp.dir, "exact.txt", exact);
+    try writeTestFile(io, tmp.dir, "over.txt", over);
+    try tmp.dir.createDirPath(io, ".agit/objects");
+
+    const ignorer = Ignorer.initDefault(gpa);
+    const h = try snapshot(io, tmp.dir, gpa, tmp.dir, null, &ignorer, .{
+        .large_file_bytes = cap,
+    });
+
+    var parsed = try object.readTree(io, tmp.dir, gpa, h);
+    defer parsed.deinit();
+
+    try std.testing.expectEqual(@as(usize, 1), parsed.value.entries.len);
+    try std.testing.expectEqualStrings("exact.txt", parsed.value.entries[0].path);
+    try std.testing.expectEqual(@as(u64, cap), parsed.value.entries[0].size);
 }

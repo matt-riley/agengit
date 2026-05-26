@@ -125,8 +125,9 @@ upgrade, run `agit reindex` once to repopulate it from `.agit/objects/`.
 ## Snapshot and privacy notes
 
 By default, snapshots skip `.git/`, `.agit/`, common dependency/build/cache
-directories, symlinks, binary files, files larger than 10 MiB, and common
-secret-like file patterns.
+directories, symlinks, binary files, files larger than 16 MiB, and common
+secret-like file patterns. Override the cap with `AGIT_MAX_FILE_BYTES=<bytes>`
+when you need to inspect unusually large text files.
 
 Project-specific exclusions can be added via `.agitignore` using exact paths,
 directory-prefix rules (trailing slash), and single `*` glob patterns.
@@ -160,6 +161,7 @@ zig build test-e2e
 zig build test-property
 zig build fuzz-hooks -- --time=60s
 zig build bench-durable
+zig build bench-store
 zig build bench-resolve-prefix
 ./scripts/smoke-doctor.sh
 zig build fmt
@@ -177,6 +179,9 @@ microbenchmarks where you intentionally skip directory fsync.
 
 Lock acquisition timeout defaults to 10 seconds. Override with
 `AGIT_LOCK_TIMEOUT_MS=<milliseconds>` for contention diagnostics.
+
+Large-file snapshot limits default to 16 MiB per file. Override with
+`AGIT_MAX_FILE_BYTES=<bytes>` when benchmarking or capturing larger text files.
 
 Regenerate e2e golden files intentionally:
 
