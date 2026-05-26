@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.15.0](https://github.com/matt-riley/agengit/compare/v1.14.0...v1.15.0) (2026-05-26)
+
+
+### Features
+
+* add investigation workflow views ([47107a5](https://github.com/matt-riley/agengit/commit/47107a5aafc0fd92113e34d95c09afe253639991))
+* **store:** add gc packfiles and blob deltas ([bcc7531](https://github.com/matt-riley/agengit/commit/bcc75318b0a666cff252e0dc926ae300dc8265f3))
+
+
+### Bug Fixes
+
+* **store:** serialize fresh index bootstrap ([0f0c47b](https://github.com/matt-riley/agengit/commit/0f0c47b272b5e9063dd9b780efb1179a51efb8a7))
+
 ## [1.14.0](https://github.com/matt-riley/agengit/compare/v1.13.0...v1.14.0) (2026-05-26)
 
 
