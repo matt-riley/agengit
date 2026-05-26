@@ -32,3 +32,4 @@ Never commit `.agit/`, `zig-out/`, `.zig-cache/`, or local agent config files. H
 <!-- Append new repository-specific rules below this line. Higher-numbered rules override older ones. -->
 
 1. [PROCESS] Always target only top-level `.agit/tmp/*.json` files when an agengit test intends to corrupt a staging file — because recursive walks also see session turn-state files under `.agit/tmp/turns/` and can accidentally exercise recovery-turn behavior instead of corrupt-staging handling.
+2. [PROCESS] When a command must inspect or rebuild store state without mutating refs/objects by default, do not route it through the default `Store.open` path unchanged — because `Store.open` auto-creates store dirs and reconciles index state on open unless you opt out explicitly.

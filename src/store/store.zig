@@ -40,8 +40,16 @@ pub const Store = struct {
     root: std.Io.Dir, // the .agit/ dir; closed by deinit
     index: Index,
 
+    pub const OpenOptions = struct {
+        reconcile: bool = true,
+    };
+
     /// Open (or create) the store rooted at `repo_dir/.agit/`.
     pub fn open(io: std.Io, repo_dir: std.Io.Dir, gpa: std.mem.Allocator) !Store {
+        return openWithOptions(io, repo_dir, gpa, .{});
+    }
+
+    pub fn openWithOptions(io: std.Io, repo_dir: std.Io.Dir, gpa: std.mem.Allocator, options: OpenOptions) !Store {
         // Ensure .agit/ and its subdirectories exist.
         try repo_dir.createDirPath(io, ".agit/objects");
         try repo_dir.createDirPath(io, ".agit/refs/sessions");
@@ -65,7 +73,9 @@ pub const Store = struct {
         errdefer store.deinit(io);
 
         try store.ensureObjectIndexState(io, gpa);
-        _ = try store.reconcile(io, gpa, .repair);
+        if (options.reconcile) {
+            _ = try store.reconcile(io, gpa, .repair);
+        }
         return store;
     }
 
@@ -79,6 +89,12 @@ pub const Store = struct {
     /// Returns `error.StoreNotFound` if none is found, otherwise opens the store.
     /// Does NOT create `.agit/` or any subdirectories.
     pub fn findAndOpen(io: std.Io, start_dir: std.Io.Dir, gpa: std.mem.Allocator) !Store {
+        var repo_dir = try Store.findRoot(io, start_dir);
+        defer repo_dir.close(io);
+        return Store.open(io, repo_dir, gpa);
+    }
+
+    pub fn findRoot(io: std.Io, start_dir: std.Io.Dir) !std.Io.Dir {
         var path_buf: [std.fs.max_path_bytes]u8 = undefined;
         var parent_buf: [std.fs.max_path_bytes]u8 = undefined;
 
@@ -96,8 +112,7 @@ pub const Store = struct {
                 break :blk true;
             };
             if (has_agit) {
-                defer current.close(io);
-                return Store.open(io, current, gpa);
+                return current;
             }
 
             const parent = current.openDir(io, "..", .{}) catch |e| {

@@ -12,6 +12,7 @@ const cli = struct {
     const init_cmd = @import("cli/init.zig");
     const uninstall = @import("cli/uninstall.zig");
     const doctor = @import("cli/doctor.zig");
+    const fsck = @import("cli/fsck.zig");
     const status = @import("cli/status.zig");
     const sessions = @import("cli/sessions.zig");
     const log_cmd = @import("cli/log.zig");
@@ -33,6 +34,7 @@ const SubCommand = enum {
     init,
     uninstall,
     doctor,
+    fsck,
     status,
     sessions,
     log,
@@ -116,6 +118,7 @@ pub fn main(init: std.process.Init) !void {
         .init => try cli.init_cmd.run(init.io, init.gpa, init.minimal.environ, &iter),
         .uninstall => try cli.uninstall.run(init.io, init.gpa, init.minimal.environ, &iter),
         .doctor => try cli.doctor.run(init.io, init.gpa, init.minimal.environ, &iter),
+        .fsck => try cli.fsck.run(init.io, init.gpa, &iter),
         .status => try cli.status.run(init.io, init.gpa, &iter),
         .sessions => try cli.sessions.run(init.io, init.gpa, &iter),
         .log => try cli.log_cmd.run(init.io, init.gpa, &iter),
@@ -177,5 +180,7 @@ test {
     _ = @import("cli/init.zig");
     _ = @import("cli/uninstall.zig");
     _ = @import("cli/doctor.zig");
+    _ = @import("cli/fsck.zig");
     _ = @import("cli/version.zig");
+    _ = @import("store/integrity.zig");
 }

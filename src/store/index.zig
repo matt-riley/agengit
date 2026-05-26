@@ -5,6 +5,7 @@ const zqlite = @import("zqlite");
 pub const Index = struct {
     db: zqlite.Conn,
 
+    pub const current_schema_version: i64 = 5;
     pub const objects_complete_meta_key = "index.objects.complete";
 
     pub const ObjectPrefixMatches = struct {
@@ -22,6 +23,19 @@ pub const Index = struct {
         try db.execNoArgs("pragma journal_mode=wal");
         try db.execNoArgs("pragma foreign_keys=on");
 
+        return .{ .db = db };
+    }
+
+    pub fn openReadOnly(gpa: std.mem.Allocator, db_path: []const u8) !Index {
+        const uri_text = try std.fmt.allocPrint(gpa, "file:{s}?mode=ro", .{db_path});
+        defer gpa.free(uri_text);
+        const uri = try gpa.dupeZ(u8, uri_text);
+        defer gpa.free(uri);
+
+        const flags = zqlite.OpenFlags.ReadOnly | zqlite.OpenFlags.Uri | zqlite.OpenFlags.EXResCode;
+        const db = try zqlite.open(uri, flags);
+        errdefer db.close();
+        try db.busyTimeout(5_000);
         return .{ .db = db };
     }
 
@@ -62,7 +76,7 @@ pub const Index = struct {
         if (current_version < 4) {
             try self.applyMigration4();
         }
-        if (current_version < 5) {
+        if (current_version < current_schema_version) {
             try self.applyMigration5();
         }
     }

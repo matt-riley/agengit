@@ -1,0 +1,22 @@
+USAGE:
+    agit fsck [OPTIONS]
+
+DESCRIPTION:
+    Verify object, ref, index, and mutable-area integrity.
+
+OPTIONS:
+    --json
+        Render fsck checks as structured JSON.
+    --reindex
+        Explicitly rebuild only index.db after a successful read-only scan.
+    -h, --help
+        Display this help and exit.
+
+EXAMPLES:
+    # run a read-only integrity scan
+    agit fsck
+    # emit machine-readable findings
+    agit fsck --json
+    # rebuild index.db after a clean scan
+    agit fsck --reindex
+

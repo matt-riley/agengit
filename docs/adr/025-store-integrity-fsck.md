@@ -1,6 +1,6 @@
 # ADR 025: Store integrity verification with `agit fsck`
 
-**Status:** Proposed
+**Status:** Implemented
 **Date:** 2026-05-25
 
 ## Context

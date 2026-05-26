@@ -49,6 +49,22 @@ pub const doctor_usage = help_mod.UsageSpec{
     },
 };
 
+pub const fsck_usage = help_mod.UsageSpec{
+    .name = "fsck",
+    .synopsis = "[OPTIONS]",
+    .description = "Verify object, ref, index, and mutable-area integrity.",
+    .options = &.{
+        .{ .long = "json", .description = "Render fsck checks as structured JSON." },
+        .{ .long = "reindex", .description = "Explicitly rebuild only index.db after a successful read-only scan." },
+        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
+    },
+    .examples = &.{
+        .{ .description = "run a read-only integrity scan", .command = "" },
+        .{ .description = "emit machine-readable findings", .command = "--json" },
+        .{ .description = "rebuild index.db after a clean scan", .command = "--reindex" },
+    },
+};
+
 pub const status_usage = help_mod.UsageSpec{
     .name = "status",
     .synopsis = "[OPTIONS]",
@@ -173,6 +189,7 @@ pub const public_commands = [_]help_mod.CommandSpec{
     .{ .name = "init", .summary = "Set up agit in the current repository", .usage = &init_usage },
     .{ .name = "uninstall", .summary = "Remove agit hooks from agent configurations", .usage = &uninstall_usage },
     .{ .name = "doctor", .summary = "Check agent hook configurations and store health", .usage = &doctor_usage },
+    .{ .name = "fsck", .summary = "Verify store integrity without mutating data", .usage = &fsck_usage },
     .{ .name = "status", .summary = "Show current repository state", .usage = &status_usage },
     .{ .name = "sessions", .summary = "List recorded agent sessions", .usage = &sessions_usage },
     .{ .name = "log", .summary = "Show step history for a session", .usage = &log_usage },
