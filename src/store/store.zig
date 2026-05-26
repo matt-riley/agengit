@@ -67,6 +67,12 @@ pub const Store = struct {
         var db_path_buf: [std.fs.max_path_bytes + 12]u8 = undefined;
         const db_path = try std.fmt.bufPrintZ(&db_path_buf, "{s}/index.db", .{path_buf[0..n]});
 
+        // Fresh stores can be opened by several hooks at once. Serialize index
+        // creation and first-open maintenance so fail-open hooks do not race on
+        // migrations or bootstrap metadata writes.
+        var init_lock = try file_lock.LockFile.acquire(io, root, "index-init.lock", .{});
+        defer init_lock.release(io);
+
         const idx = try Index.open(db_path);
         errdefer idx.close();
 
