@@ -1,6 +1,6 @@
 # ADR 030: Investigation workflow views
 
-**Status:** Proposed
+**Status:** Implemented
 **Date:** 2026-05-25
 
 ## Context

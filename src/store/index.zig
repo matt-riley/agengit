@@ -706,6 +706,52 @@ pub const Index = struct {
         return list.toOwnedSlice(gpa);
     }
 
+    pub fn listRecentSteps(
+        self: Index,
+        gpa: std.mem.Allocator,
+        options: TimelineOptions,
+    ) ![]const TimelineRow {
+        var list: std.ArrayList(TimelineRow) = .empty;
+        errdefer {
+            for (list.items) |row| freeTimelineRow(gpa, row);
+            list.deinit(gpa);
+        }
+
+        var rs = try self.db.rows(
+            \\select hash, session_origin, session_id, turn_id, timestamp
+            \\from steps
+            \\where (? is null or session_origin = ?)
+            \\  and (? is null or session_id = ?)
+            \\  and (? is null or timestamp >= ?)
+            \\  and (? is null or timestamp < ?)
+            \\order by timestamp desc, hash desc
+            \\limit ?
+        , .{
+            options.origin,
+            options.origin,
+            options.session_id,
+            options.session_id,
+            options.since_ms,
+            options.since_ms,
+            options.until_ms_exclusive,
+            options.until_ms_exclusive,
+            @as(i64, @intCast(options.limit)),
+        });
+        defer rs.deinit();
+
+        while (rs.next()) |row| {
+            try list.append(gpa, .{
+                .hash = try gpa.dupe(u8, row.get([]const u8, 0)),
+                .origin = try gpa.dupe(u8, row.get([]const u8, 1)),
+                .session_id = try gpa.dupe(u8, row.get([]const u8, 2)),
+                .turn_id = try gpa.dupe(u8, row.get([]const u8, 3)),
+                .timestamp = row.get(i64, 4),
+            });
+        }
+        if (rs.err) |err| return err;
+        return list.toOwnedSlice(gpa);
+    }
+
     pub fn searchEntries(
         self: Index,
         gpa: std.mem.Allocator,
@@ -776,6 +822,23 @@ pub const Index = struct {
         };
     }
 
+    pub fn mostRecentStep(self: Index, gpa: std.mem.Allocator) !?TimelineRow {
+        const row = try self.db.row(
+            \\select hash, session_origin, session_id, turn_id, timestamp
+            \\from steps
+            \\order by timestamp desc, hash desc
+            \\limit 1
+        , .{}) orelse return null;
+        defer row.deinit();
+        return .{
+            .hash = try gpa.dupe(u8, row.get([]const u8, 0)),
+            .origin = try gpa.dupe(u8, row.get([]const u8, 1)),
+            .session_id = try gpa.dupe(u8, row.get([]const u8, 2)),
+            .turn_id = try gpa.dupe(u8, row.get([]const u8, 3)),
+            .timestamp = row.get(i64, 4),
+        };
+    }
+
     /// Find a step by hash prefix. Returns null if not found; error if ambiguous.
     pub fn findStepByPrefix(self: Index, gpa: std.mem.Allocator, prefix: []const u8) !?[]const u8 {
         const pattern = try std.fmt.allocPrint(gpa, "{s}%", .{prefix});
@@ -803,6 +866,22 @@ pub const StepRow = struct {
     turn_id: []const u8,
     parent_hash: ?[]const u8,
     tree_hash: []const u8,
+    timestamp: i64,
+};
+
+pub const TimelineOptions = struct {
+    origin: ?[]const u8 = null,
+    session_id: ?[]const u8 = null,
+    since_ms: ?i64 = null,
+    until_ms_exclusive: ?i64 = null,
+    limit: usize,
+};
+
+pub const TimelineRow = struct {
+    hash: []const u8,
+    origin: []const u8,
+    session_id: []const u8,
+    turn_id: []const u8,
     timestamp: i64,
 };
 
@@ -840,6 +919,13 @@ pub fn freeStepRow(gpa: std.mem.Allocator, r: StepRow) void {
     gpa.free(r.tree_hash);
 }
 
+pub fn freeTimelineRow(gpa: std.mem.Allocator, row: TimelineRow) void {
+    gpa.free(row.hash);
+    gpa.free(row.origin);
+    gpa.free(row.session_id);
+    gpa.free(row.turn_id);
+}
+
 pub fn freeSessionRows(gpa: std.mem.Allocator, rows: []const SessionRow) void {
     for (rows) |r| freeSessionRow(gpa, r);
     gpa.free(rows);
@@ -847,6 +933,11 @@ pub fn freeSessionRows(gpa: std.mem.Allocator, rows: []const SessionRow) void {
 
 pub fn freeStepRows(gpa: std.mem.Allocator, rows: []const StepRow) void {
     for (rows) |r| freeStepRow(gpa, r);
+    gpa.free(rows);
+}
+
+pub fn freeTimelineRows(gpa: std.mem.Allocator, rows: []const TimelineRow) void {
+    for (rows) |row| freeTimelineRow(gpa, row);
     gpa.free(rows);
 }
 

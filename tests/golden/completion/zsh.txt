@@ -8,10 +8,12 @@ _agit() {
         'doctor:Check agent hook configurations and store health'
         'fsck:Verify store integrity without mutating data'
         'gc:Prune unreachable store data and stale temporaries'
-        'status:Show current repository state'
+        'status:Show the investigation dashboard'
+        'timeline:Show recent recorded steps'
         'sessions:List recorded agent sessions'
         'log:Show step history for a session'
         'show:Show details of a step'
+        'diff:Show a text diff for a step'
         'grep:Search recorded messages and tool activity'
         'blame:Show per-line step attribution for a file'
         'cat:Print a raw object by hash'
@@ -69,6 +71,17 @@ _agit() {
                         '--json[Render the status as structured JSON.]' \
                         '--help[Display this help and exit.]'
                     ;;
+                timeline)
+                    _arguments \
+                        '--origin[Only show steps recorded by the given origin.]:name' \
+                        '--session[Only show one session id, or pass origin/session-id to disambiguate.]:id' \
+                        '--since[Only include steps on or after UTC midnight for the given date.]:YYYY-MM-DD' \
+                        '--until[Only include steps before UTC midnight after the given date.]:YYYY-MM-DD' \
+                        '--limit[Show at most <N> steps. Defaults to 20.]:N' \
+                        '--redacted[Redact obvious secrets in previews.]' \
+                        '--full[Render full previews even when redaction is the repo default.]' \
+                        '--help[Display this help and exit.]'
+                    ;;
                 sessions)
                     _arguments \
                         '--json[Render the session list as structured JSON.]' \
@@ -82,8 +95,16 @@ _agit() {
                 show)
                     _arguments \
                         '--json[Render the step details as structured JSON.]' \
+                        '--files[List captured files from the step tree.]' \
+                        '--stat[Summarize file changes between this step and its parent.]' \
                         '--redacted[Redact obvious secrets in the rendered output.]' \
                         '--full[Render full output even when redaction is the repo default.]' \
+                        '--help[Display this help and exit.]'
+                    ;;
+                diff)
+                    _arguments \
+                        '--redacted[Redact obvious secrets in diff output.]' \
+                        '--full[Render full diff output even when redaction is the repo default.]' \
                         '--help[Display this help and exit.]'
                     ;;
                 grep)

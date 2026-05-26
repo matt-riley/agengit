@@ -17,8 +17,11 @@ test "structured_output/status sessions log and show json" {
 
     var status_json = try parseJson(status_result.stdout);
     defer status_json.deinit();
+    try std.testing.expect(status_json.value.object.get("data").?.object.get("store_path") != null);
     try std.testing.expectEqual(@as(i64, 1), status_json.value.object.get("data").?.object.get("sessions").?.integer);
     try std.testing.expectEqual(@as(i64, 1), status_json.value.object.get("data").?.object.get("steps").?.integer);
+    try std.testing.expectEqual(@as(i64, 0), status_json.value.object.get("data").?.object.get("warnings").?.object.get("total").?.integer);
+    try std.testing.expect(status_json.value.object.get("data").?.object.get("next_step") != null);
 
     var sessions_result = try sandbox.run(&.{ "sessions", "--json" }, null);
     defer sessions_result.deinit(std.testing.allocator);
@@ -66,6 +69,45 @@ test "structured_output/status sessions log and show json" {
     const matches = grep_json.value.object.get("data").?.object.get("matches").?.array.items;
     try std.testing.expect(matches.len >= 1);
     try std.testing.expectEqualStrings("claude", matches[0].object.get("origin").?.string);
+}
+
+test "structured_output/show files and stat json include investigation metadata" {
+    var sandbox = try harness.Sandbox.init(std.testing.allocator);
+    defer sandbox.deinit();
+
+    try sandbox.writeRepoFile(".agit/.keep", "");
+    try sandbox.writeRepoFile("notes.txt", "alpha\nbeta\n");
+    try sandbox.writeRepoFile("keep.txt", "same\n");
+    try sandbox.writeRepoFile("deleted.txt", "remove me\n");
+    try recordTurn(&sandbox, "json-investigation", "turn-1", "initial step", "assistant one");
+
+    try sandbox.writeRepoFile("notes.txt", "alpha\ngamma\n");
+    try sandbox.writeRepoFile("new.txt", "hello\n");
+    try deleteRepoFile(&sandbox, "deleted.txt");
+    try recordTurn(&sandbox, "json-investigation", "turn-2", "second step", "assistant two");
+
+    var log_result = try sandbox.run(&.{ "log", "--json", "codex/json-investigation" }, null);
+    defer log_result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(u8, 0), log_result.exit_code);
+    const step_hash = try extractStepHashByTurn(log_result.stdout, "turn-2");
+    defer std.testing.allocator.free(step_hash);
+
+    var show_result = try sandbox.run(&.{ "show", "--json", "--files", "--stat", step_hash }, null);
+    defer show_result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(u8, 0), show_result.exit_code);
+    try expectEnvelope(show_result.stdout, "show");
+
+    var parsed = try parseJson(show_result.stdout);
+    defer parsed.deinit();
+    const data = parsed.value.object.get("data").?.object;
+    const files = data.get("files").?.array.items;
+    try std.testing.expectEqual(@as(usize, 3), files.len);
+    const stat = data.get("stat").?.object;
+    const counts = stat.get("counts").?.object;
+    try std.testing.expectEqual(@as(i64, 1), counts.get("added").?.integer);
+    try std.testing.expectEqual(@as(i64, 1), counts.get("modified").?.integer);
+    try std.testing.expectEqual(@as(i64, 1), counts.get("deleted").?.integer);
+    try std.testing.expectEqual(@as(i64, 1), counts.get("unchanged").?.integer);
 }
 
 test "structured_output/doctor json emits stable checks" {
@@ -157,6 +199,49 @@ fn seedClaudeSession(sandbox: *harness.Sandbox) !void {
     var stop_res = try sandbox.run(&.{ "claude-hook", "assistant" }, stop_payload);
     defer stop_res.deinit(std.testing.allocator);
     try std.testing.expectEqual(@as(u8, 0), stop_res.exit_code);
+}
+
+fn recordTurn(
+    sandbox: *harness.Sandbox,
+    session_id: []const u8,
+    turn_id: []const u8,
+    prompt: []const u8,
+    assistant: []const u8,
+) !void {
+    const user_payload = try std.fmt.allocPrint(std.testing.allocator,
+        \\{{"session_id":"{s}","turn_id":"{s}","cwd":"{s}","hook_event_name":"UserPromptSubmit","prompt":"{s}"}}
+    , .{ session_id, turn_id, sandbox.cwd, prompt });
+    defer std.testing.allocator.free(user_payload);
+    const stop_payload = try std.fmt.allocPrint(std.testing.allocator,
+        \\{{"session_id":"{s}","turn_id":"{s}","cwd":"{s}","hook_event_name":"Stop","last_assistant_message":"{s}"}}
+    , .{ session_id, turn_id, sandbox.cwd, assistant });
+    defer std.testing.allocator.free(stop_payload);
+
+    var user_res = try sandbox.run(&.{"codex-hook"}, user_payload);
+    defer user_res.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(u8, 0), user_res.exit_code);
+
+    var stop_res = try sandbox.run(&.{"codex-hook"}, stop_payload);
+    defer stop_res.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(u8, 0), stop_res.exit_code);
+}
+
+fn deleteRepoFile(sandbox: *harness.Sandbox, rel_path: []const u8) !void {
+    const abs_path = try std.fmt.allocPrint(std.testing.allocator, "{s}/{s}", .{ sandbox.cwd, rel_path });
+    defer std.testing.allocator.free(abs_path);
+    try std.Io.Dir.cwd().deleteFile(std.testing.io, abs_path);
+}
+
+fn extractStepHashByTurn(data: []const u8, turn_id: []const u8) ![]u8 {
+    var parsed = try parseJson(data);
+    defer parsed.deinit();
+    const steps = parsed.value.object.get("data").?.object.get("steps").?.array.items;
+    for (steps) |step| {
+        if (std.mem.eql(u8, step.object.get("turn_id").?.string, turn_id)) {
+            return try std.testing.allocator.dupe(u8, step.object.get("hash").?.string);
+        }
+    }
+    return error.StepNotFound;
 }
 
 fn parseJson(data: []const u8) !std.json.Parsed(std.json.Value) {

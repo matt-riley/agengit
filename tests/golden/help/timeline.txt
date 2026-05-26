@@ -1,0 +1,32 @@
+USAGE:
+    agit timeline [OPTIONS]
+
+DESCRIPTION:
+    Show recent recorded steps across sessions in reverse chronological order.
+
+OPTIONS:
+    --origin <name>
+        Only show steps recorded by the given origin.
+    --session <id>
+        Only show one session id, or pass origin/session-id to disambiguate.
+    --since <YYYY-MM-DD>
+        Only include steps on or after UTC midnight for the given date.
+    --until <YYYY-MM-DD>
+        Only include steps before UTC midnight after the given date.
+    --limit <N>
+        Show at most <N> steps. Defaults to 20.
+    --redacted
+        Redact obvious secrets in previews.
+    --full
+        Render full previews even when redaction is the repo default.
+    -h, --help
+        Display this help and exit.
+
+EXAMPLES:
+    # show the most recent recorded steps
+    agit timeline
+    # filter to one origin and date window
+    agit timeline --origin codex --since 2026-05-01 --until 2026-05-31
+    # show one session timeline
+    agit timeline --session claude/session-abc123
+

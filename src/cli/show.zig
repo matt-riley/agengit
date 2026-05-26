@@ -1,7 +1,9 @@
 const std = @import("std");
 const config_mod = @import("../store/config.zig");
+const inspect_mod = @import("../store/inspect.zig");
 const object_mod = @import("../store/object.zig");
 const redact_mod = @import("../privacy/redact.zig");
+const store_mod = @import("../store/store.zig");
 const status = @import("status.zig");
 const help_mod = @import("help.zig");
 const output_mod = @import("output.zig");
@@ -18,7 +20,24 @@ const RedactionMode = enum {
 const ShowOptions = struct {
     format: output_mod.Format = .human,
     hash_prefix: ?[:0]const u8 = null,
+    show_files: bool = false,
+    show_stat: bool = false,
     redaction_mode: RedactionMode = .auto,
+};
+
+const StatPath = struct {
+    kind: inspect_mod.ChangeKind,
+    path: []const u8,
+};
+
+const StatSummary = struct {
+    counts: inspect_mod.ChangeCounts,
+    changed_paths: []StatPath,
+
+    fn deinit(self: *StatSummary, gpa: std.mem.Allocator) void {
+        gpa.free(self.changed_paths);
+        self.* = undefined;
+    }
 };
 
 pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator) !void {
@@ -119,19 +138,83 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
     };
     defer parsed.deinit();
 
+    var current_tree: ?std.json.Parsed(store_mod.Tree) = null;
+    defer if (current_tree) |*parsed_tree| parsed_tree.deinit();
+
+    var stat_summary: ?StatSummary = null;
+    defer if (stat_summary) |*summary| summary.deinit(gpa);
+
+    if (options.show_files or options.show_stat) {
+        current_tree = readTreeFromHex(io, gpa, &store, parsed.value.tree, usage.name, &stdout);
+    }
+    if (options.show_stat) {
+        var parent_tree: ?std.json.Parsed(store_mod.Tree) = null;
+        defer if (parent_tree) |*parsed_tree| parsed_tree.deinit();
+        const old_entries = if (parsed.value.parent) |parent_hash_hex| blk: {
+            const parent_hash = store_mod.Hash.fromHex(parent_hash_hex) catch {
+                try status.writeDiagnostic(&stdout, options.format, usage.name, .{
+                    .code = "invalid_parent_hash",
+                    .message = "Step parent hash is invalid.",
+                    .hash = parent_hash_hex,
+                });
+                try stdout.flush();
+                std.process.exit(1);
+            };
+            var parent_step = store.readStep(io, gpa, parent_hash) catch |err| {
+                try status.writeDiagnostic(&stdout, options.format, usage.name, .{
+                    .code = "parent_step_read_failed",
+                    .message = "Failed to read parent step.",
+                    .hint = @errorName(err),
+                    .hash = parent_hash_hex,
+                });
+                try stdout.flush();
+                std.process.exit(1);
+            };
+            defer parent_step.deinit();
+            parent_tree = readTreeFromHex(io, gpa, &store, parent_step.value.tree, usage.name, &stdout);
+            break :blk parent_tree.?.value.entries;
+        } else &.{};
+
+        var comparison = inspect_mod.compareTreeEntries(gpa, old_entries, current_tree.?.value.entries) catch |err| {
+            try status.writeDiagnostic(&stdout, options.format, usage.name, .{
+                .code = "tree_compare_failed",
+                .message = "Failed to compare step trees.",
+                .hint = @errorName(err),
+                .hash = hex[0..],
+            });
+            try stdout.flush();
+            std.process.exit(1);
+        };
+        defer comparison.deinit(gpa);
+        stat_summary = try buildStatSummary(gpa, comparison);
+    }
+
     switch (options.format) {
-        .human => try writeHuman(&stdout, gpa, hex[0..], parsed.value, use_redaction, loaded_config.value.privacy.custom_literals),
+        .human => try writeHuman(
+            &stdout,
+            gpa,
+            hex[0..],
+            parsed.value,
+            use_redaction,
+            loaded_config.value.privacy.custom_literals,
+            if (current_tree) |tree| tree.value.entries else null,
+            stat_summary,
+        ),
         .json => {
             if (!use_redaction) {
                 try output_mod.writeEnvelope(&stdout, usage.name, .{
                     .hash = hex[0..],
                     .step = parsed.value,
+                    .files = if (current_tree) |tree| tree.value.entries else null,
+                    .stat = stat_summary,
                 });
             } else {
                 const step = try redactStep(gpa, parsed.value, loaded_config.value.privacy.custom_literals);
                 try output_mod.writeEnvelope(&stdout, usage.name, .{
                     .hash = hex[0..],
                     .step = step,
+                    .files = if (current_tree) |tree| tree.value.entries else null,
+                    .stat = stat_summary,
                 });
             }
         },
@@ -146,6 +229,8 @@ fn writeHuman(
     step: anytype,
     use_redaction: bool,
     custom_literals: []const []const u8,
+    files: ?[]const store_mod.TreeEntry,
+    stat_summary: ?StatSummary,
 ) !void {
     var ts_buf: [32]u8 = undefined;
     const ts = status.formatTimestamp(step.timestamp, &ts_buf);
@@ -178,6 +263,33 @@ fn writeHuman(
             try stdout.interface.print("  [{d}] {s}\n", .{ i, tc.tool_name });
         }
     }
+
+    if (files) |entries| {
+        try stdout.interface.writeAll("\nfiles:\n");
+        if (entries.len == 0) {
+            try stdout.interface.writeAll("  (none)\n");
+        } else {
+            for (entries) |entry| {
+                try stdout.interface.print("  {s} ({d} B)\n", .{ entry.path, entry.size });
+            }
+        }
+    }
+
+    if (stat_summary) |summary| {
+        try stdout.interface.writeAll("\nstat:\n");
+        try stdout.interface.print("  added     {d}\n", .{summary.counts.added});
+        try stdout.interface.print("  modified  {d}\n", .{summary.counts.modified});
+        try stdout.interface.print("  deleted   {d}\n", .{summary.counts.deleted});
+        try stdout.interface.print("  unchanged {d}\n", .{summary.counts.unchanged});
+        if (summary.changed_paths.len == 0) {
+            try stdout.interface.writeAll("  changes   (none)\n");
+        } else {
+            try stdout.interface.writeAll("  changes:\n");
+            for (summary.changed_paths) |path| {
+                try stdout.interface.print("    {s:<8} {s}\n", .{ @tagName(path.kind), path.path });
+            }
+        }
+    }
 }
 
 fn parseOptions(iter: *std.process.Args.Iterator, stdout: *std.Io.File.Writer) !ShowOptions {
@@ -185,6 +297,10 @@ fn parseOptions(iter: *std.process.Args.Iterator, stdout: *std.Io.File.Writer) !
     while (iter.next()) |arg| {
         if (std.mem.eql(u8, arg, "--json")) {
             options.format = .json;
+        } else if (std.mem.eql(u8, arg, "--files")) {
+            options.show_files = true;
+        } else if (std.mem.eql(u8, arg, "--stat")) {
+            options.show_stat = true;
         } else if (std.mem.eql(u8, arg, "--redacted")) {
             options.redaction_mode = .redacted;
         } else if (std.mem.eql(u8, arg, "--full")) {
@@ -217,6 +333,51 @@ fn shouldUseRedaction(mode: RedactionMode, redacted_by_default: bool) bool {
         .auto => redacted_by_default,
         .redacted => true,
         .full => false,
+    };
+}
+
+fn readTreeFromHex(
+    io: std.Io,
+    gpa: std.mem.Allocator,
+    store: *store_mod.Store,
+    tree_hash_hex: []const u8,
+    command_name: []const u8,
+    stdout: *std.Io.File.Writer,
+) std.json.Parsed(store_mod.Tree) {
+    const tree_hash = store_mod.Hash.fromHex(tree_hash_hex) catch {
+        status.writeDiagnostic(stdout, .human, command_name, .{
+            .code = "invalid_tree_hash",
+            .message = "Step tree hash is invalid.",
+            .hash = tree_hash_hex,
+        }) catch {};
+        stdout.flush() catch {};
+        std.process.exit(1);
+    };
+    return store.readTree(io, gpa, tree_hash) catch |err| {
+        status.writeDiagnostic(stdout, .human, command_name, .{
+            .code = "tree_read_failed",
+            .message = "Failed to read step tree.",
+            .hint = @errorName(err),
+            .hash = tree_hash_hex,
+        }) catch {};
+        stdout.flush() catch {};
+        std.process.exit(1);
+    };
+}
+
+fn buildStatSummary(gpa: std.mem.Allocator, comparison: inspect_mod.TreeComparison) !StatSummary {
+    var changed_paths: std.ArrayList(StatPath) = .empty;
+    errdefer changed_paths.deinit(gpa);
+    for (comparison.entries) |entry| {
+        if (entry.kind == .unchanged) continue;
+        try changed_paths.append(gpa, .{
+            .kind = entry.kind,
+            .path = entry.path,
+        });
+    }
+    return .{
+        .counts = comparison.counts,
+        .changed_paths = try changed_paths.toOwnedSlice(gpa),
     };
 }
 

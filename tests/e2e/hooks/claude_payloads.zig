@@ -34,8 +34,8 @@ test "hooks/claude_payloads" {
 
     var status = try sandbox.run(&.{"status"}, null);
     defer status.deinit(std.testing.allocator);
-    try std.testing.expect(std.mem.indexOf(u8, status.stdout, "Sessions: 1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, status.stdout, "Steps:    1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, status.stdout, "Sessions:        1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, status.stdout, "Steps:           1") != null);
 
     try expectNoHookErrors(&sandbox);
 }

@@ -2,7 +2,7 @@ USAGE:
     agit status [OPTIONS]
 
 DESCRIPTION:
-    Show current repository state and agit store statistics.
+    Show the current investigation dashboard for this repository.
 
 OPTIONS:
     --json

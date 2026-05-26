@@ -56,8 +56,8 @@ test "hooks/repeated_turns_same_session_record_distinct_steps" {
 
     var status = try sandbox.run(&.{"status"}, null);
     defer status.deinit(std.testing.allocator);
-    try std.testing.expect(std.mem.indexOf(u8, status.stdout, "Sessions: 1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, status.stdout, "Steps:    2") != null);
+    try std.testing.expect(std.mem.indexOf(u8, status.stdout, "Sessions:        1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, status.stdout, "Steps:           2") != null);
 
     const scoped_session = try std.fmt.allocPrint(std.testing.allocator, "codex/{s}", .{session_id});
     defer std.testing.allocator.free(scoped_session);
@@ -90,6 +90,6 @@ test "hooks/payload_cwd_wins_when_process_cwd_differs" {
 
     var status = try sandbox.run(&.{"status"}, null);
     defer status.deinit(std.testing.allocator);
-    try std.testing.expect(std.mem.indexOf(u8, status.stdout, "Sessions: 1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, status.stdout, "Steps:    1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, status.stdout, "Sessions:        1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, status.stdout, "Steps:           1") != null);
 }

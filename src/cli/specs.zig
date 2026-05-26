@@ -85,13 +85,34 @@ pub const gc_usage = help_mod.UsageSpec{
 pub const status_usage = help_mod.UsageSpec{
     .name = "status",
     .synopsis = "[OPTIONS]",
-    .description = "Show current repository state and agit store statistics.",
+    .description = "Show the current investigation dashboard for this repository.",
     .options = &.{
         .{ .long = "json", .description = "Render the status as structured JSON." },
         .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
     },
     .examples = &.{
         .{ .description = "show repository status", .command = "" },
+    },
+};
+
+pub const timeline_usage = help_mod.UsageSpec{
+    .name = "timeline",
+    .synopsis = "[OPTIONS]",
+    .description = "Show recent recorded steps across sessions in reverse chronological order.",
+    .options = &.{
+        .{ .long = "origin", .value_name = "name", .description = "Only show steps recorded by the given origin." },
+        .{ .long = "session", .value_name = "id", .description = "Only show one session id, or pass origin/session-id to disambiguate." },
+        .{ .long = "since", .value_name = "YYYY-MM-DD", .description = "Only include steps on or after UTC midnight for the given date." },
+        .{ .long = "until", .value_name = "YYYY-MM-DD", .description = "Only include steps before UTC midnight after the given date." },
+        .{ .long = "limit", .value_name = "N", .description = "Show at most <N> steps. Defaults to 20." },
+        .{ .long = "redacted", .description = "Redact obvious secrets in previews." },
+        .{ .long = "full", .description = "Render full previews even when redaction is the repo default." },
+        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
+    },
+    .examples = &.{
+        .{ .description = "show the most recent recorded steps", .command = "" },
+        .{ .description = "filter to one origin and date window", .command = "--origin codex --since 2026-05-01 --until 2026-05-31" },
+        .{ .description = "show one session timeline", .command = "--session claude/session-abc123" },
     },
 };
 
@@ -128,12 +149,31 @@ pub const show_usage = help_mod.UsageSpec{
     .description = "Show details of a recorded step object by its BLAKE3 hash.",
     .options = &.{
         .{ .long = "json", .description = "Render the step details as structured JSON." },
+        .{ .long = "files", .description = "List captured files from the step tree." },
+        .{ .long = "stat", .description = "Summarize file changes between this step and its parent." },
         .{ .long = "redacted", .description = "Redact obvious secrets in the rendered output." },
         .{ .long = "full", .description = "Render full output even when redaction is the repo default." },
         .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
     },
     .examples = &.{
         .{ .description = "show details of a step", .command = "abc123def" },
+        .{ .description = "show captured files for a step", .command = "--files abc123def" },
+        .{ .description = "show file-change counts for a step", .command = "--stat abc123def" },
+    },
+};
+
+pub const diff_usage = help_mod.UsageSpec{
+    .name = "diff",
+    .synopsis = "[OPTIONS] <HASH> [-- <PATH>]",
+    .description = "Render a text diff between a step tree and its parent tree.",
+    .options = &.{
+        .{ .long = "redacted", .description = "Redact obvious secrets in diff output." },
+        .{ .long = "full", .description = "Render full diff output even when redaction is the repo default." },
+        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
+    },
+    .examples = &.{
+        .{ .description = "diff a recorded step against its parent", .command = "abc123def" },
+        .{ .description = "diff one captured path only", .command = "abc123def -- src/main.zig" },
     },
 };
 
@@ -249,10 +289,12 @@ pub const public_commands = [_]help_mod.CommandSpec{
     .{ .name = "doctor", .summary = "Check agent hook configurations and store health", .usage = &doctor_usage },
     .{ .name = "fsck", .summary = "Verify store integrity without mutating data", .usage = &fsck_usage },
     .{ .name = "gc", .summary = "Prune unreachable store data and stale temporaries", .usage = &gc_usage },
-    .{ .name = "status", .summary = "Show current repository state", .usage = &status_usage },
+    .{ .name = "status", .summary = "Show the investigation dashboard", .usage = &status_usage },
+    .{ .name = "timeline", .summary = "Show recent recorded steps", .usage = &timeline_usage },
     .{ .name = "sessions", .summary = "List recorded agent sessions", .usage = &sessions_usage },
     .{ .name = "log", .summary = "Show step history for a session", .usage = &log_usage },
     .{ .name = "show", .summary = "Show details of a step", .usage = &show_usage },
+    .{ .name = "diff", .summary = "Show a text diff for a step", .usage = &diff_usage },
     .{ .name = "grep", .summary = "Search recorded messages and tool activity", .usage = &grep_usage },
     .{ .name = "blame", .summary = "Show per-line step attribution for a file", .usage = &blame_usage },
     .{ .name = "cat", .summary = "Print a raw object by hash", .usage = &cat_usage },

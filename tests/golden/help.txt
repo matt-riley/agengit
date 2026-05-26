@@ -12,10 +12,12 @@ Commands:
   doctor        Check agent hook configurations and store health
   fsck          Verify store integrity without mutating data
   gc            Prune unreachable store data and stale temporaries
-  status        Show current repository state
+  status        Show the investigation dashboard
+  timeline      Show recent recorded steps
   sessions      List recorded agent sessions
   log           Show step history for a session
   show          Show details of a step
+  diff          Show a text diff for a step
   grep          Search recorded messages and tool activity
   blame         Show per-line step attribution for a file
   cat           Print a raw object by hash

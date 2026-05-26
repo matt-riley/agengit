@@ -1,0 +1,20 @@
+USAGE:
+    agit diff [OPTIONS] <HASH> [-- <PATH>]
+
+DESCRIPTION:
+    Render a text diff between a step tree and its parent tree.
+
+OPTIONS:
+    --redacted
+        Redact obvious secrets in diff output.
+    --full
+        Render full diff output even when redaction is the repo default.
+    -h, --help
+        Display this help and exit.
+
+EXAMPLES:
+    # diff a recorded step against its parent
+    agit diff abc123def
+    # diff one captured path only
+    agit diff abc123def -- src/main.zig
+
