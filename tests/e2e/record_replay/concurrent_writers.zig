@@ -60,13 +60,8 @@ test "record_replay/concurrent_writers" {
         }
     }
 
-    var status = try sandbox.run(&.{"status"}, null);
-    defer status.deinit(gpa);
-    const sessions = try parseCount(status.stdout, "Sessions:");
-    const steps = try parseCount(status.stdout, "Steps:");
-    try std.testing.expect(sessions > 0);
-    try std.testing.expect(sessions <= 8);
-    try std.testing.expectEqual(sessions, steps);
+    const counts = try waitForRecordedCounts(&sandbox);
+    const steps = counts.steps;
 
     var doctor = try sandbox.run(&.{ "doctor", "--stats" }, null);
     defer doctor.deinit(gpa);
@@ -90,6 +85,52 @@ fn readOptional(sandbox: *harness.Sandbox, rel_path: []const u8) !?[]u8 {
         error.FileNotFound => null,
         else => err,
     };
+}
+
+const StatusCounts = struct {
+    sessions: usize,
+    steps: usize,
+};
+
+fn waitForRecordedCounts(sandbox: *harness.Sandbox) !StatusCounts {
+    const io = sandbox.io;
+    const gpa = std.testing.allocator;
+    const clock = std.Io.Clock.awake;
+    const deadline = std.Io.Timestamp.now(io, clock).addDuration(std.Io.Duration.fromSeconds(5));
+
+    while (true) {
+        var status = try sandbox.run(&.{"status"}, null);
+        defer status.deinit(gpa);
+
+        if (status.exit_code == 0) {
+            const sessions = parseCount(status.stdout, "Sessions:") catch null;
+            const steps = parseCount(status.stdout, "Steps:") catch null;
+            if (sessions != null and steps != null and sessions.? > 0 and sessions.? <= 8 and sessions.? == steps.?) {
+                return .{
+                    .sessions = sessions.?,
+                    .steps = steps.?,
+                };
+            }
+        }
+
+        const now = std.Io.Timestamp.now(io, clock);
+        if (now.durationTo(deadline).nanoseconds <= 0) {
+            const err_log = try readOptional(sandbox, ".agit/log/hook-error.log");
+            defer if (err_log) |buf| gpa.free(buf);
+            std.debug.print(
+                "concurrent_writers status did not settle within timeout\nexit_code={d}\nstdout={s}\nstderr={s}\nhook_error_log={s}\n",
+                .{
+                    status.exit_code,
+                    status.stdout,
+                    status.stderr,
+                    if (err_log) |buf| buf else "",
+                },
+            );
+            return error.TestUnexpectedResult;
+        }
+
+        std.Io.sleep(io, std.Io.Duration.fromMilliseconds(50), clock) catch {};
+    }
 }
 
 fn parseCount(output: []const u8, prefix: []const u8) !usize {
