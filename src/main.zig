@@ -160,6 +160,10 @@ test {
     _ = @import("store/snapshot.zig");
     _ = @import("recorder.zig");
     _ = @import("hook.zig");
+    _ = @import("hook/Adapter.zig");
+    _ = @import("hook/payload.zig");
+    _ = @import("hook/runner.zig");
+    _ = @import("hook/adapters/registry.zig");
     _ = @import("cli/help.zig");
     _ = @import("cli/output.zig");
     _ = @import("cli/registry.zig");
