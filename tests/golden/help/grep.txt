@@ -1,0 +1,36 @@
+USAGE:
+    agit grep [OPTIONS] <QUERY>
+
+DESCRIPTION:
+    Search recorded messages and tool activity across all sessions.
+
+OPTIONS:
+    --json
+        Render grep matches as structured JSON.
+    --origin <name>
+        Only search matches recorded by the given origin.
+    --session <id>
+        Only search one session id, or pass origin/session-id to disambiguate.
+    --since <YYYY-MM-DD>
+        Only include matches on or after UTC midnight for the given date.
+    --until <YYYY-MM-DD>
+        Only include matches before UTC midnight after the given date.
+    --limit <N>
+        Return at most <N> matches. Defaults to 20.
+    --context <N>
+        Use <N> snippet tokens around each match. Defaults to 12.
+    --redacted
+        Redact obvious secrets in rendered snippets.
+    --full
+        Render full snippets even when redaction is the repo default.
+    -h, --help
+        Display this help and exit.
+
+EXAMPLES:
+    # search all recorded sessions for a term
+    agit grep factorial
+    # filter matches to one origin and date range
+    agit grep --origin claude --since 2026-05-01 --until 2026-05-31 factorial
+    # search a specific session
+    agit grep --session claude/session-abc123 token
+

@@ -18,6 +18,7 @@ const cli = struct {
     const sessions = @import("cli/sessions.zig");
     const log_cmd = @import("cli/log.zig");
     const show = @import("cli/show.zig");
+    const grep = @import("cli/grep.zig");
     const blame = @import("cli/blame.zig");
     const cat = @import("cli/cat.zig");
     const privacy = @import("cli/privacy.zig");
@@ -42,6 +43,7 @@ const SubCommand = enum {
     sessions,
     log,
     show,
+    grep,
     blame,
     cat,
     privacy,
@@ -128,6 +130,7 @@ pub fn main(init: std.process.Init) !void {
         .sessions => try cli.sessions.run(init.io, init.gpa, &iter),
         .log => try cli.log_cmd.run(init.io, init.gpa, &iter),
         .show => try cli.show.run(init.io, init.gpa, &iter),
+        .grep => try cli.grep.run(init.io, init.gpa, &iter),
         .blame => try cli.blame.run(init.io, init.gpa, &iter),
         .cat => try cli.cat.run(init.io, init.gpa, &iter),
         .privacy => try cli.privacy.run(init.io, init.gpa, &iter),
@@ -160,6 +163,7 @@ test {
     _ = @import("util/file_lock.zig");
     _ = @import("util/file_limits.zig");
     _ = @import("util/fs.zig");
+    _ = @import("util/date.zig");
     _ = @import("util/exe_path.zig");
     _ = @import("util/home.zig");
     _ = @import("store/store.zig");
@@ -189,6 +193,13 @@ test {
     _ = @import("cli/doctor.zig");
     _ = @import("cli/fsck.zig");
     _ = @import("cli/gc.zig");
+    _ = @import("cli/status.zig");
+    _ = @import("cli/sessions.zig");
+    _ = @import("cli/log.zig");
+    _ = @import("cli/show.zig");
+    _ = @import("cli/grep.zig");
+    _ = @import("cli/blame.zig");
+    _ = @import("cli/cat.zig");
     _ = @import("cli/privacy.zig");
     _ = @import("cli/version.zig");
     _ = @import("store/integrity.zig");

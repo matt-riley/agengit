@@ -58,6 +58,17 @@ test "golden/help/show" {
     try golden.assertGolden(&sandbox, "tests/golden/help/show.txt", result.stdout);
 }
 
+test "golden/help/grep" {
+    var sandbox = try harness.Sandbox.init(std.testing.allocator);
+    defer sandbox.deinit();
+
+    var result = try sandbox.run(&.{ "grep", "--help" }, null);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(u8, 0), result.exit_code);
+
+    try golden.assertGolden(&sandbox, "tests/golden/help/grep.txt", result.stdout);
+}
+
 test "golden/help/blame" {
     var sandbox = try harness.Sandbox.init(std.testing.allocator);
     defer sandbox.deinit();

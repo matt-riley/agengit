@@ -170,6 +170,16 @@ Show details of a recorded step object by its BLAKE3 hash.
 agit show abc123def
 ```
 
+### `agit grep`
+Search recorded messages and tool activity across all sessions.
+
+**Synopsis:** `agit grep [OPTIONS] <QUERY>`
+
+```sh
+# search all recorded sessions for a term
+agit grep factorial
+```
+
 ### `agit blame`
 Show per-line step attribution for a file path.
 
