@@ -152,6 +152,26 @@ Download missing objects and refs from a configured remote.
 agit pull
 ```
 
+### `agit export`
+Write a portable bundle containing selected session refs and reachable objects.
+
+**Synopsis:** `agit export [OPTIONS] <PATH>`
+
+```sh
+# export all recorded sessions into a bundle directory
+agit export dist/bundle
+```
+
+### `agit import`
+Import a portable bundle after validating hashes and ref conflicts.
+
+**Synopsis:** `agit import [OPTIONS] <PATH>`
+
+```sh
+# import a bundle directory
+agit import dist/bundle
+```
+
 ### `agit status`
 Show the current investigation dashboard for this repository.
 

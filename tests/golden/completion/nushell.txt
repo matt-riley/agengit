@@ -8,6 +8,8 @@ def "nu-complete agit command" [] {
         { value: 'gc', description: 'Prune unreachable store data and stale temporaries' }
         { value: 'push', description: 'Upload store history to a configured remote' }
         { value: 'pull', description: 'Download store history from a configured remote' }
+        { value: 'export', description: 'Write a portable bundle from selected sessions' }
+        { value: 'import', description: 'Import a portable bundle into the local store' }
         { value: 'status', description: 'Show the investigation dashboard' }
         { value: 'timeline', description: 'Show recent recorded steps' }
         { value: 'sessions', description: 'List recorded agent sessions' }
@@ -73,6 +75,22 @@ extern "agit push" [
 extern "agit pull" [
     --json
     --remote: string
+    --help(-h)
+]
+
+extern "agit export" [
+    --json
+    --origin: string
+    --session: string
+    --since: string
+    --until: string
+    --allow-sensitive
+    --help(-h)
+]
+
+extern "agit import" [
+    --json
+    --replace-ref: string
     --help(-h)
 ]
 

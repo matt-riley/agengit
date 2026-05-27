@@ -14,6 +14,8 @@ Commands:
   gc            Prune unreachable store data and stale temporaries
   push          Upload store history to a configured remote
   pull          Download store history from a configured remote
+  export        Write a portable bundle from selected sessions
+  import        Import a portable bundle into the local store
   status        Show the investigation dashboard
   timeline      Show recent recorded steps
   sessions      List recorded agent sessions

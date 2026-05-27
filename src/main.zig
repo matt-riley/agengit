@@ -16,6 +16,8 @@ const cli = struct {
     const gc = @import("cli/gc.zig");
     const push = @import("cli/push.zig");
     const pull = @import("cli/pull.zig");
+    const export_cmd = @import("cli/export.zig");
+    const import_cmd = @import("cli/import.zig");
     const status = @import("cli/status.zig");
     const timeline = @import("cli/timeline.zig");
     const sessions = @import("cli/sessions.zig");
@@ -45,6 +47,8 @@ const SubCommand = enum {
     gc,
     push,
     pull,
+    @"export",
+    import,
     status,
     timeline,
     sessions,
@@ -136,6 +140,8 @@ pub fn main(init: std.process.Init) !void {
         .gc => try cli.gc.run(init.io, init.gpa, &iter),
         .push => try cli.push.run(init.io, init.gpa, init.minimal.environ, &iter),
         .pull => try cli.pull.run(init.io, init.gpa, init.minimal.environ, &iter),
+        .@"export" => try cli.export_cmd.run(init.io, init.gpa, &iter),
+        .import => try cli.import_cmd.run(init.io, init.gpa, &iter),
         .status => try cli.status.run(init.io, init.gpa, init.minimal.environ, &iter),
         .timeline => try cli.timeline.run(init.io, init.gpa, &iter),
         .sessions => try cli.sessions.run(init.io, init.gpa, &iter),
@@ -209,6 +215,8 @@ test {
     _ = @import("cli/gc.zig");
     _ = @import("cli/push.zig");
     _ = @import("cli/pull.zig");
+    _ = @import("cli/export.zig");
+    _ = @import("cli/import.zig");
     _ = @import("cli/status.zig");
     _ = @import("cli/timeline.zig");
     _ = @import("cli/sessions.zig");
@@ -223,6 +231,7 @@ test {
     _ = @import("store/integrity.zig");
     _ = @import("store/gc.zig");
     _ = @import("store/remote.zig");
+    _ = @import("store/bundle.zig");
     _ = @import("privacy/redact.zig");
     _ = @import("privacy/scan.zig");
 }

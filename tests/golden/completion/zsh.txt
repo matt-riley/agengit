@@ -10,6 +10,8 @@ _agit() {
         'gc:Prune unreachable store data and stale temporaries'
         'push:Upload store history to a configured remote'
         'pull:Download store history from a configured remote'
+        'export:Write a portable bundle from selected sessions'
+        'import:Import a portable bundle into the local store'
         'status:Show the investigation dashboard'
         'timeline:Show recent recorded steps'
         'sessions:List recorded agent sessions'
@@ -79,6 +81,22 @@ _agit() {
                     _arguments \
                         '--json[Render pull results as structured JSON.]' \
                         '--remote[Choose a configured remote by name.]:name' \
+                        '--help[Display this help and exit.]'
+                    ;;
+                export)
+                    _arguments \
+                        '--json[Render export results as structured JSON.]' \
+                        '--origin[Only export sessions recorded by the given origin.]:name' \
+                        '--session[Only export one disambiguated session id.]:origin/session-id' \
+                        '--since[Only select sessions with at least one step on or after UTC midnight for the given date.]:YYYY-MM-DD' \
+                        '--until[Only select sessions with at least one step before UTC midnight after the given date.]:YYYY-MM-DD' \
+                        '--allow-sensitive[Allow plaintext export when privacy scan findings exist; writes a privacy report.]' \
+                        '--help[Display this help and exit.]'
+                    ;;
+                import)
+                    _arguments \
+                        '--json[Render import results as structured JSON.]' \
+                        '--replace-ref[Overwrite a named canonical session ref instead of namespacing conflicts. Can be repeated.]:origin/session-id' \
                         '--help[Display this help and exit.]'
                     ;;
                 status)
