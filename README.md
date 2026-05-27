@@ -15,8 +15,9 @@ change before a long-term stable format is declared.
 Shipping today: local `.agit/` capture stores, hook installation for Claude
 Code/OpenAI Codex CLI/Google Gemini CLI, investigation views including
 `agit timeline`, `agit show --files/--stat`, and `agit diff`, health/recovery
-tooling including read-only `agit fsck`, generated shell completions, and
-structured JSON for the commands that advertise it.
+tooling including read-only `agit fsck`, S3-compatible remote `agit push` /
+`agit pull`, generated shell completions, and structured JSON for the commands
+that advertise it.
 
 Supported hook integrations today:
 
@@ -129,6 +130,26 @@ Prune unreachable store data and stale temporary files.
 ```sh
 # prune unreachable store data with the default grace period
 agit gc
+```
+
+### `agit push`
+Upload reachable objects and session refs to a configured remote.
+
+**Synopsis:** `agit push [OPTIONS]`
+
+```sh
+# push to the only configured remote
+agit push
+```
+
+### `agit pull`
+Download missing objects and refs from a configured remote.
+
+**Synopsis:** `agit pull [OPTIONS]`
+
+```sh
+# pull from the only configured remote
+agit pull
 ```
 
 ### `agit status`
@@ -269,7 +290,7 @@ agit completion bash
 Planned but not shipped today:
 
 - historical content search
-- remote sync plus portable export/import bundles
+- portable export/import bundles
 - observer-based integrations and additional agent targets such as Pi and
   GitHub Copilot CLI
 
@@ -317,6 +338,46 @@ redactions; and make `show`/`cat` default to redacted output.
 Run `agit privacy scan` before sharing store content. It reports sensitive-data
 findings without printing the matched secret values and exits non-zero when
 findings are present.
+
+## Remote sync
+
+Use `.agit/config.json` to define one or more named S3-compatible remotes:
+
+```json
+{
+  "version": 1,
+  "remotes": [
+    {
+      "name": "backup",
+      "endpoint": "https://s3.example.com",
+      "bucket": "agit-backups",
+      "region": "us-east-1",
+      "prefix": "personal/agengit",
+      "access_key_env": "AGIT_REMOTE_ACCESS_KEY",
+      "secret_key_env": "AGIT_REMOTE_SECRET_KEY",
+      "session_token_env": "AGIT_REMOTE_SESSION_TOKEN",
+      "encryption_secret_env": "AGIT_REMOTE_ENCRYPTION_SECRET"
+    }
+  ]
+}
+```
+
+Then sync with:
+
+```sh
+agit push
+agit pull
+```
+
+`agit push` runs a local fsck preflight and refuses plaintext uploads when
+`agit privacy scan` finds sensitive content unless the remote config provides
+`encryption_secret_env` or you explicitly pass `--allow-sensitive`. When
+configured, remote objects are encrypted client-side before upload and verified
+against their plaintext BLAKE3 hash on pull.
+
+The remote backend is intentionally dumb-server style: objects are stored by
+hash and refs are stored as plain text. Ref updates are best-effort, so racing
+writers to the same remote ref can still conflict.
 
 Secret filtering helps reduce risk but is not a hard guarantee. Treat `.agit/`
 as private data unless reviewed.

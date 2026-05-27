@@ -8,6 +8,8 @@ _agit() {
         'doctor:Check agent hook configurations and store health'
         'fsck:Verify store integrity without mutating data'
         'gc:Prune unreachable store data and stale temporaries'
+        'push:Upload store history to a configured remote'
+        'pull:Download store history from a configured remote'
         'status:Show the investigation dashboard'
         'timeline:Show recent recorded steps'
         'sessions:List recorded agent sessions'
@@ -64,6 +66,19 @@ _agit() {
                         '--json[Render gc results as structured JSON.]' \
                         '--grace-hours[Only prune unreachable objects/tmp files older than <N> hours. Defaults to 2.]:N' \
                         '--prune-before[Delete session refs whose head-step timestamp is older than UTC midnight on the given date before sweeping.]:YYYY-MM-DD' \
+                        '--help[Display this help and exit.]'
+                    ;;
+                push)
+                    _arguments \
+                        '--json[Render push results as structured JSON.]' \
+                        '--remote[Choose a configured remote by name.]:name' \
+                        '--allow-sensitive[Allow plaintext uploads even when privacy scan findings exist.]' \
+                        '--help[Display this help and exit.]'
+                    ;;
+                pull)
+                    _arguments \
+                        '--json[Render pull results as structured JSON.]' \
+                        '--remote[Choose a configured remote by name.]:name' \
                         '--help[Display this help and exit.]'
                     ;;
                 status)

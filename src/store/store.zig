@@ -484,6 +484,9 @@ pub const Store = struct {
         try self.index.db.transaction();
         errdefer self.index.db.rollback();
 
+        const tip_hex = tip_hash.toHex();
+        try self.index.upsertSession(origin, session_id, &tip_hex);
+
         var i = chain.items.len;
         while (i > 0) : (i -= 1) {
             const h = chain.items[i - 1];
@@ -515,8 +518,6 @@ pub const Store = struct {
             }
         }
 
-        const tip_hex = tip_hash.toHex();
-        try self.index.upsertSession(origin, session_id, &tip_hex);
         try self.updateSessionMetaLocked(gpa, origin, session_id, tip_hash);
         try self.index.db.commit();
         return true;

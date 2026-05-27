@@ -19,6 +19,23 @@ pub const DisplayConfig = struct {
     redacted_by_default: bool = false,
 };
 
+pub const RemoteBackend = enum {
+    s3,
+};
+
+pub const RemoteConfig = struct {
+    name: []const u8,
+    backend: RemoteBackend = .s3,
+    endpoint: []const u8,
+    bucket: []const u8,
+    region: []const u8 = "us-east-1",
+    prefix: []const u8 = "",
+    access_key_env: []const u8,
+    secret_key_env: []const u8,
+    session_token_env: ?[]const u8 = null,
+    encryption_secret_env: ?[]const u8 = null,
+};
+
 pub const PrivacyConfig = struct {
     enabled_origins: []const []const u8 = &.{},
     capture: CaptureConfig = .{},
@@ -37,6 +54,7 @@ pub const PrivacyConfig = struct {
 pub const File = struct {
     version: u32 = 1,
     privacy: PrivacyConfig = .{},
+    remotes: []const RemoteConfig = &.{},
 };
 
 pub const Loaded = struct {
@@ -74,6 +92,23 @@ pub fn loadFromStore(io: std.Io, store_root: std.Io.Dir, gpa: std.mem.Allocator)
 
 pub fn loadOrDefaultFromStore(io: std.Io, store_root: std.Io.Dir, gpa: std.mem.Allocator) Loaded {
     return loadFromStore(io, store_root, gpa) catch Loaded.default();
+}
+
+pub fn selectRemote(file: File, name: ?[]const u8) !RemoteConfig {
+    if (file.remotes.len == 0) return error.RemoteNotConfigured;
+
+    if (name) |target_name| {
+        var match: ?RemoteConfig = null;
+        for (file.remotes) |remote| {
+            if (!std.mem.eql(u8, remote.name, target_name)) continue;
+            if (match != null) return error.DuplicateRemoteName;
+            match = remote;
+        }
+        return match orelse error.RemoteNotFound;
+    }
+
+    if (file.remotes.len == 1) return file.remotes[0];
+    return error.RemoteSelectionRequired;
 }
 
 test "loadFromStore defaults when config is absent" {
@@ -114,4 +149,80 @@ test "loadFromStore parses privacy config" {
     try std.testing.expect(loaded.value.privacy.capture.tool_results == .metadata_only);
     try std.testing.expect(loaded.value.privacy.display.redacted_by_default);
     try std.testing.expectEqual(@as(usize, 1), loaded.value.privacy.custom_literals.len);
+}
+
+test "loadFromStore parses remotes config" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.createDirPath(std.testing.io, ".agit");
+    var agit = try tmp.dir.openDir(std.testing.io, ".agit", .{});
+    defer agit.close(std.testing.io);
+    var file = try agit.createFile(std.testing.io, "config.json", .{ .truncate = true });
+    defer file.close(std.testing.io);
+    try file.writeStreamingAll(std.testing.io,
+        \\{
+        \\  "version": 1,
+        \\  "remotes": [
+        \\    {
+        \\      "name": "backup",
+        \\      "endpoint": "http://127.0.0.1:9000",
+        \\      "bucket": "agit-backups",
+        \\      "region": "us-east-1",
+        \\      "prefix": "prod",
+        \\      "access_key_env": "AGIT_REMOTE_ACCESS_KEY",
+        \\      "secret_key_env": "AGIT_REMOTE_SECRET_KEY",
+        \\      "session_token_env": "AGIT_REMOTE_SESSION_TOKEN",
+        \\      "encryption_secret_env": "AGIT_REMOTE_ENCRYPTION_SECRET"
+        \\    }
+        \\  ]
+        \\}
+    );
+
+    var loaded = try loadFromStore(std.testing.io, agit, std.testing.allocator);
+    defer loaded.deinit();
+    try std.testing.expectEqual(@as(usize, 1), loaded.value.remotes.len);
+    try std.testing.expectEqualStrings("backup", loaded.value.remotes[0].name);
+    try std.testing.expectEqualStrings("http://127.0.0.1:9000", loaded.value.remotes[0].endpoint);
+    try std.testing.expectEqualStrings("agit-backups", loaded.value.remotes[0].bucket);
+    try std.testing.expectEqualStrings("AGIT_REMOTE_ENCRYPTION_SECRET", loaded.value.remotes[0].encryption_secret_env.?);
+}
+
+test "selectRemote resolves explicit and implicit remotes" {
+    const file = File{
+        .remotes = &[_]RemoteConfig{
+            .{
+                .name = "backup",
+                .endpoint = "http://127.0.0.1:9000",
+                .bucket = "agit",
+                .access_key_env = "AK",
+                .secret_key_env = "SK",
+            },
+            .{
+                .name = "secondary",
+                .endpoint = "http://127.0.0.1:9001",
+                .bucket = "agit-2",
+                .access_key_env = "AK2",
+                .secret_key_env = "SK2",
+            },
+        },
+    };
+
+    try std.testing.expectError(error.RemoteSelectionRequired, selectRemote(file, null));
+    const selected = try selectRemote(file, "secondary");
+    try std.testing.expectEqualStrings("secondary", selected.name);
+    try std.testing.expectError(error.RemoteNotFound, selectRemote(file, "missing"));
+
+    const single = File{
+        .remotes = &[_]RemoteConfig{
+            .{
+                .name = "only",
+                .endpoint = "http://127.0.0.1:9000",
+                .bucket = "agit",
+                .access_key_env = "AK",
+                .secret_key_env = "SK",
+            },
+        },
+    };
+    try std.testing.expectEqualStrings("only", (try selectRemote(single, null)).name);
 }
