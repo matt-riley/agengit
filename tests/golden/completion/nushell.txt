@@ -2,6 +2,7 @@
 def "nu-complete agit command" [] {
     [
         { value: 'init', description: 'Set up agit in the current repository' }
+        { value: 'observe', description: 'Run an experimental observer source' }
         { value: 'uninstall', description: 'Remove agit hooks from agent configurations' }
         { value: 'doctor', description: 'Check agent hook configurations and store health' }
         { value: 'fsck', description: 'Verify store integrity without mutating data' }
@@ -37,6 +38,13 @@ extern "agit init" [
     --agent: string@"nu-complete agit init-agent"
     --dry-run
     --force
+    --help(-h)
+]
+
+extern "agit observe" [
+    --json
+    --once
+    --input: string
     --help(-h)
 ]
 

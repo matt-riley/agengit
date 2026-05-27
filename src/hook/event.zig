@@ -20,6 +20,16 @@ pub const NormalizeInput = struct {
     preferred_turn_id: ?[]const u8 = null,
 };
 
+pub const NormalizeResolvedInput = struct {
+    origin: []const u8,
+    session_id: []const u8,
+    workspace_cwd: []const u8,
+    event_name: []const u8,
+    kind: EventKind,
+    source_event_id: ?[]const u8 = null,
+    preferred_turn_id: ?[]const u8 = null,
+};
+
 pub const WorkspaceDir = struct {
     dir: std.Io.Dir,
     used_fallback: bool,
@@ -78,9 +88,26 @@ pub fn normalize(
     const event_name = try hook.requireString(root, "hook_event_name", diagnostic);
     try hook.requireEvent(event_name, input.expected_event_name, diagnostic);
 
+    return normalizeResolved(io, gpa, rec, .{
+        .origin = input.origin,
+        .session_id = session_id,
+        .workspace_cwd = workspace_cwd,
+        .event_name = event_name,
+        .kind = input.kind,
+        .source_event_id = input.source_event_id,
+        .preferred_turn_id = input.preferred_turn_id,
+    });
+}
+
+pub fn normalizeResolved(
+    io: std.Io,
+    gpa: std.mem.Allocator,
+    rec: *const Recorder,
+    input: NormalizeResolvedInput,
+) !NormalizedEvent {
     try rec.store.root.createDirPath(io, "tmp/turns");
 
-    const session_key = sessionKey(input.origin, session_id);
+    const session_key = sessionKey(input.origin, input.session_id);
     var lock_path_buf: [96]u8 = undefined;
     const lock_path = std.fmt.bufPrint(&lock_path_buf, "tmp/turns/{s}.lock", .{session_key}) catch unreachable;
     var lock = try file_lock_mod.LockFile.acquire(io, rec.store.root, lock_path, .{});
@@ -98,10 +125,10 @@ pub fn normalize(
 
     return .{
         .origin = input.origin,
-        .session_id = session_id,
+        .session_id = input.session_id,
         .turn_id = resolved.turn_id,
-        .workspace_cwd = workspace_cwd,
-        .event_name = event_name,
+        .workspace_cwd = input.workspace_cwd,
+        .event_name = input.event_name,
         .source_event_id = input.source_event_id,
         .recovered_turn = resolved.recovered,
         .lock = lock,

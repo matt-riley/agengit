@@ -157,6 +157,17 @@ test "golden/help/uninstall" {
     try golden.assertGolden(&sandbox, "tests/golden/help/uninstall.txt", result.stdout);
 }
 
+test "golden/help/observe" {
+    var sandbox = try harness.Sandbox.init(std.testing.allocator);
+    defer sandbox.deinit();
+
+    var result = try sandbox.run(&.{ "observe", "--help" }, null);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(u8, 0), result.exit_code);
+
+    try golden.assertGolden(&sandbox, "tests/golden/help/observe.txt", result.stdout);
+}
+
 test "golden/help/doctor" {
     var sandbox = try harness.Sandbox.init(std.testing.allocator);
     defer sandbox.deinit();

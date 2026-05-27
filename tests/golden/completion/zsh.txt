@@ -4,6 +4,7 @@ _agit() {
     local -a commands
     commands=(
         'init:Set up agit in the current repository'
+        'observe:Run an experimental observer source'
         'uninstall:Remove agit hooks from agent configurations'
         'doctor:Check agent hook configurations and store health'
         'fsck:Verify store integrity without mutating data'
@@ -43,6 +44,13 @@ _agit() {
                         '--agent[Install only the specified agent (claude, codex, gemini). Can be repeated.]:name:(claude codex gemini)' \
                         '--dry-run[Show what would be installed without making changes.]' \
                         '--force[Back up and replace malformed/non-object existing JSON config.]' \
+                        '--help[Display this help and exit.]'
+                    ;;
+                observe)
+                    _arguments \
+                        '--json[Render observe results as structured JSON.]' \
+                        '--once[Process one batch of available events and exit.]' \
+                        '--input[Source-specific input path (required for the fixture source).]:PATH' \
                         '--help[Display this help and exit.]'
                     ;;
                 uninstall)

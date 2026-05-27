@@ -1,6 +1,6 @@
 # ADR 028: Observer-based integrations for agents without lifecycle hooks
 
-**Status:** Proposed
+**Status:** Implemented
 **Date:** 2026-05-25
 
 ## Context
