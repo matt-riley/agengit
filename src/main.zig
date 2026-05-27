@@ -10,6 +10,7 @@ const version_mod = @import("version.zig");
 const cli = struct {
     const help = @import("cli/help.zig");
     const init_cmd = @import("cli/init.zig");
+    const observe = @import("cli/observe.zig");
     const uninstall = @import("cli/uninstall.zig");
     const doctor = @import("cli/doctor.zig");
     const fsck = @import("cli/fsck.zig");
@@ -41,6 +42,7 @@ pub const version = version_mod.value;
 
 const SubCommand = enum {
     init,
+    observe,
     uninstall,
     doctor,
     fsck,
@@ -134,6 +136,7 @@ pub fn main(init: std.process.Init) !void {
             try stdout.flush();
         },
         .init => try cli.init_cmd.run(init.io, init.gpa, init.minimal.environ, &iter),
+        .observe => try cli.observe.run(init.io, init.gpa, &iter),
         .uninstall => try cli.uninstall.run(init.io, init.gpa, init.minimal.environ, &iter),
         .doctor => try cli.doctor.run(init.io, init.gpa, init.minimal.environ, &iter),
         .fsck => try cli.fsck.run(init.io, init.gpa, &iter),
@@ -197,6 +200,7 @@ test {
     _ = @import("hook/Adapter.zig");
     _ = @import("hook/payload.zig");
     _ = @import("hook/runner.zig");
+    _ = @import("observer.zig");
     _ = @import("hook/adapters/registry.zig");
     _ = @import("cli/help.zig");
     _ = @import("cli/specs.zig");
@@ -209,6 +213,7 @@ test {
     _ = @import("cli/gemini_hook.zig");
     _ = @import("cli/reindex.zig");
     _ = @import("cli/init.zig");
+    _ = @import("cli/observe.zig");
     _ = @import("cli/uninstall.zig");
     _ = @import("cli/doctor.zig");
     _ = @import("cli/fsck.zig");

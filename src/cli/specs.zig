@@ -31,6 +31,23 @@ pub const uninstall_usage = help_mod.UsageSpec{
     },
 };
 
+pub const observe_usage = help_mod.UsageSpec{
+    .name = "observe",
+    .synopsis = "[OPTIONS] <SOURCE>",
+    .description = "Run an experimental observer source and record newly seen events.",
+    .options = &.{
+        .{ .long = "json", .description = "Render observe results as structured JSON." },
+        .{ .long = "once", .description = "Process one batch of available events and exit." },
+        .{ .long = "input", .value_name = "PATH", .description = "Source-specific input path (required for the fixture source)." },
+        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
+    },
+    .examples = &.{
+        .{ .description = "process a fixture-backed observer file once", .command = "--once fixture --input observer.json" },
+        .{ .description = "emit machine-readable observe stats", .command = "--json --once fixture --input observer.json" },
+    },
+    .notes = "Observer sources are explicit and experimental. Current sources run one pass and persist watermarks under .agit/observers/ for duplicate suppression on rerun.",
+};
+
 pub const doctor_usage = help_mod.UsageSpec{
     .name = "doctor",
     .synopsis = "[OPTIONS]",
@@ -353,6 +370,7 @@ pub const completion_usage = help_mod.UsageSpec{
 
 pub const public_commands = [_]help_mod.CommandSpec{
     .{ .name = "init", .summary = "Set up agit in the current repository", .usage = &init_usage },
+    .{ .name = "observe", .summary = "Run an experimental observer source", .usage = &observe_usage },
     .{ .name = "uninstall", .summary = "Remove agit hooks from agent configurations", .usage = &uninstall_usage },
     .{ .name = "doctor", .summary = "Check agent hook configurations and store health", .usage = &doctor_usage },
     .{ .name = "fsck", .summary = "Verify store integrity without mutating data", .usage = &fsck_usage },

@@ -92,6 +92,18 @@ Set up agit hooks for installed agent CLIs.
 agit init
 ```
 
+### `agit observe`
+Run an experimental observer source and record newly seen events.
+
+**Synopsis:** `agit observe [OPTIONS] <SOURCE>`
+
+```sh
+# process a fixture-backed observer file once
+agit observe --once fixture --input observer.json
+```
+
+**Notes:** Observer sources are explicit and experimental. Current sources run one pass and persist watermarks under .agit/observers/ for duplicate suppression on rerun.
+
 ### `agit uninstall`
 Remove agit hooks from agent configurations.
 
@@ -311,8 +323,12 @@ Planned but not shipped today:
 
 - historical content search
 - portable export/import bundles
-- observer-based integrations and additional agent targets such as Pi and
+- additional observer-backed agent targets such as Pi and
   GitHub Copilot CLI
+
+Experimental today: `agit observe --once fixture --input observer.json` exercises
+the observer framework and persists replay checkpoints under
+`.agit/observers/`.
 
 Structured CLI output uses the `cli-json-v1` envelope documented in
 [`docs/format/cli-json-v1.md`](docs/format/cli-json-v1.md).

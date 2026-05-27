@@ -8,6 +8,7 @@ Options:
 
 Commands:
   init          Set up agit in the current repository
+  observe       Run an experimental observer source
   uninstall     Remove agit hooks from agent configurations
   doctor        Check agent hook configurations and store health
   fsck          Verify store integrity without mutating data
