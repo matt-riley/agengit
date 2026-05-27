@@ -1,0 +1,30 @@
+USAGE:
+    agit export [OPTIONS] <PATH>
+
+DESCRIPTION:
+    Write a portable bundle containing selected session refs and reachable objects.
+
+OPTIONS:
+    --json
+        Render export results as structured JSON.
+    --origin <name>
+        Only export sessions recorded by the given origin.
+    --session <origin/session-id>
+        Only export one disambiguated session id.
+    --since <YYYY-MM-DD>
+        Only select sessions with at least one step on or after UTC midnight for the given date.
+    --until <YYYY-MM-DD>
+        Only select sessions with at least one step before UTC midnight after the given date.
+    --allow-sensitive
+        Allow plaintext export when privacy scan findings exist; writes a privacy report.
+    -h, --help
+        Display this help and exit.
+
+EXAMPLES:
+    # export all recorded sessions into a bundle directory
+    agit export dist/bundle
+    # export one session
+    agit export --session claude/session-123 dist/bundle
+    # export a date-windowed bundle
+    agit export --since 2026-05-01 --until 2026-05-31 dist/bundle
+

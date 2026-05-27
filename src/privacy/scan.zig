@@ -44,6 +44,28 @@ pub fn scanStore(
     store: *store_mod.Store,
     privacy: config_mod.PrivacyConfig,
 ) !Result {
+    const sessions = try store.index.listSessions(gpa);
+    defer store_mod.freeSessionRows(gpa, sessions);
+    return scanSessionRows(io, gpa, store, privacy, sessions);
+}
+
+pub fn scanSessions(
+    io: std.Io,
+    gpa: std.mem.Allocator,
+    store: *store_mod.Store,
+    privacy: config_mod.PrivacyConfig,
+    sessions: []const store_mod.SessionRow,
+) !Result {
+    return scanSessionRows(io, gpa, store, privacy, sessions);
+}
+
+fn scanSessionRows(
+    io: std.Io,
+    gpa: std.mem.Allocator,
+    store: *store_mod.Store,
+    privacy: config_mod.PrivacyConfig,
+    sessions: []const store_mod.SessionRow,
+) !Result {
     var arena = std.heap.ArenaAllocator.init(gpa);
     errdefer arena.deinit();
     const aa = arena.allocator();
@@ -54,9 +76,6 @@ pub fn scanStore(
     var seen_steps = std.StringHashMap(void).init(aa);
     var seen_trees = std.StringHashMap(void).init(aa);
     var seen_blobs = std.StringHashMap(void).init(aa);
-
-    const sessions = try store.index.listSessions(gpa);
-    defer store_mod.freeSessionRows(gpa, sessions);
 
     for (sessions) |session| {
         if (session.head_hash == null) continue;

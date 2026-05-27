@@ -1,6 +1,6 @@
 # ADR 027: Portable export and import bundles
 
-**Status:** Proposed
+**Status:** Implemented
 **Date:** 2026-05-25
 
 ## Context

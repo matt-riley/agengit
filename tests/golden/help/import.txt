@@ -1,0 +1,20 @@
+USAGE:
+    agit import [OPTIONS] <PATH>
+
+DESCRIPTION:
+    Import a portable bundle after validating hashes and ref conflicts.
+
+OPTIONS:
+    --json
+        Render import results as structured JSON.
+    --replace-ref <origin/session-id>
+        Overwrite a named canonical session ref instead of namespacing conflicts. Can be repeated.
+    -h, --help
+        Display this help and exit.
+
+EXAMPLES:
+    # import a bundle directory
+    agit import dist/bundle
+    # replace one conflicting ref during import
+    agit import --replace-ref claude/session-123 dist/bundle
+

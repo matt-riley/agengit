@@ -115,6 +115,41 @@ pub const pull_usage = help_mod.UsageSpec{
     },
 };
 
+pub const export_usage = help_mod.UsageSpec{
+    .name = "export",
+    .synopsis = "[OPTIONS] <PATH>",
+    .description = "Write a portable bundle containing selected session refs and reachable objects.",
+    .options = &.{
+        .{ .long = "json", .description = "Render export results as structured JSON." },
+        .{ .long = "origin", .value_name = "name", .description = "Only export sessions recorded by the given origin." },
+        .{ .long = "session", .value_name = "origin/session-id", .description = "Only export one disambiguated session id." },
+        .{ .long = "since", .value_name = "YYYY-MM-DD", .description = "Only select sessions with at least one step on or after UTC midnight for the given date." },
+        .{ .long = "until", .value_name = "YYYY-MM-DD", .description = "Only select sessions with at least one step before UTC midnight after the given date." },
+        .{ .long = "allow-sensitive", .description = "Allow plaintext export when privacy scan findings exist; writes a privacy report." },
+        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
+    },
+    .examples = &.{
+        .{ .description = "export all recorded sessions into a bundle directory", .command = "dist/bundle" },
+        .{ .description = "export one session", .command = "--session claude/session-123 dist/bundle" },
+        .{ .description = "export a date-windowed bundle", .command = "--since 2026-05-01 --until 2026-05-31 dist/bundle" },
+    },
+};
+
+pub const import_usage = help_mod.UsageSpec{
+    .name = "import",
+    .synopsis = "[OPTIONS] <PATH>",
+    .description = "Import a portable bundle after validating hashes and ref conflicts.",
+    .options = &.{
+        .{ .long = "json", .description = "Render import results as structured JSON." },
+        .{ .long = "replace-ref", .value_name = "origin/session-id", .description = "Overwrite a named canonical session ref instead of namespacing conflicts. Can be repeated." },
+        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
+    },
+    .examples = &.{
+        .{ .description = "import a bundle directory", .command = "dist/bundle" },
+        .{ .description = "replace one conflicting ref during import", .command = "--replace-ref claude/session-123 dist/bundle" },
+    },
+};
+
 pub const status_usage = help_mod.UsageSpec{
     .name = "status",
     .synopsis = "[OPTIONS]",
@@ -324,6 +359,8 @@ pub const public_commands = [_]help_mod.CommandSpec{
     .{ .name = "gc", .summary = "Prune unreachable store data and stale temporaries", .usage = &gc_usage },
     .{ .name = "push", .summary = "Upload store history to a configured remote", .usage = &push_usage },
     .{ .name = "pull", .summary = "Download store history from a configured remote", .usage = &pull_usage },
+    .{ .name = "export", .summary = "Write a portable bundle from selected sessions", .usage = &export_usage },
+    .{ .name = "import", .summary = "Import a portable bundle into the local store", .usage = &import_usage },
     .{ .name = "status", .summary = "Show the investigation dashboard", .usage = &status_usage },
     .{ .name = "timeline", .summary = "Show recent recorded steps", .usage = &timeline_usage },
     .{ .name = "sessions", .summary = "List recorded agent sessions", .usage = &sessions_usage },
