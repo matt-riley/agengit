@@ -119,7 +119,9 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    READY_FILE.write_text(str(server.server_port), encoding="utf-8")
+    tmp_ready_file = READY_FILE.with_name(f"{READY_FILE.name}.tmp")
+    tmp_ready_file.write_text(str(server.server_port), encoding="utf-8")
+    os.replace(tmp_ready_file, READY_FILE)
     try:
         server.serve_forever()
     finally:
