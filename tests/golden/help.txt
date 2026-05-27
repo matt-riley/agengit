@@ -12,6 +12,8 @@ Commands:
   doctor        Check agent hook configurations and store health
   fsck          Verify store integrity without mutating data
   gc            Prune unreachable store data and stale temporaries
+  push          Upload store history to a configured remote
+  pull          Download store history from a configured remote
   status        Show the investigation dashboard
   timeline      Show recent recorded steps
   sessions      List recorded agent sessions

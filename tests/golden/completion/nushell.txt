@@ -6,6 +6,8 @@ def "nu-complete agit command" [] {
         { value: 'doctor', description: 'Check agent hook configurations and store health' }
         { value: 'fsck', description: 'Verify store integrity without mutating data' }
         { value: 'gc', description: 'Prune unreachable store data and stale temporaries' }
+        { value: 'push', description: 'Upload store history to a configured remote' }
+        { value: 'pull', description: 'Download store history from a configured remote' }
         { value: 'status', description: 'Show the investigation dashboard' }
         { value: 'timeline', description: 'Show recent recorded steps' }
         { value: 'sessions', description: 'List recorded agent sessions' }
@@ -58,6 +60,19 @@ extern "agit gc" [
     --json
     --grace-hours: string
     --prune-before: string
+    --help(-h)
+]
+
+extern "agit push" [
+    --json
+    --remote: string
+    --allow-sensitive
+    --help(-h)
+]
+
+extern "agit pull" [
+    --json
+    --remote: string
     --help(-h)
 ]
 

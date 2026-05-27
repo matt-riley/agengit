@@ -82,6 +82,39 @@ pub const gc_usage = help_mod.UsageSpec{
     },
 };
 
+pub const push_usage = help_mod.UsageSpec{
+    .name = "push",
+    .synopsis = "[OPTIONS]",
+    .description = "Upload reachable objects and session refs to a configured remote.",
+    .options = &.{
+        .{ .long = "json", .description = "Render push results as structured JSON." },
+        .{ .long = "remote", .value_name = "name", .description = "Choose a configured remote by name." },
+        .{ .long = "allow-sensitive", .description = "Allow plaintext uploads even when privacy scan findings exist." },
+        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
+    },
+    .examples = &.{
+        .{ .description = "push to the only configured remote", .command = "" },
+        .{ .description = "push to a named remote", .command = "--remote backup" },
+        .{ .description = "emit machine-readable push stats", .command = "--json" },
+    },
+};
+
+pub const pull_usage = help_mod.UsageSpec{
+    .name = "pull",
+    .synopsis = "[OPTIONS]",
+    .description = "Download missing objects and refs from a configured remote.",
+    .options = &.{
+        .{ .long = "json", .description = "Render pull results as structured JSON." },
+        .{ .long = "remote", .value_name = "name", .description = "Choose a configured remote by name." },
+        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
+    },
+    .examples = &.{
+        .{ .description = "pull from the only configured remote", .command = "" },
+        .{ .description = "pull from a named remote", .command = "--remote backup" },
+        .{ .description = "emit machine-readable pull stats", .command = "--json" },
+    },
+};
+
 pub const status_usage = help_mod.UsageSpec{
     .name = "status",
     .synopsis = "[OPTIONS]",
@@ -289,6 +322,8 @@ pub const public_commands = [_]help_mod.CommandSpec{
     .{ .name = "doctor", .summary = "Check agent hook configurations and store health", .usage = &doctor_usage },
     .{ .name = "fsck", .summary = "Verify store integrity without mutating data", .usage = &fsck_usage },
     .{ .name = "gc", .summary = "Prune unreachable store data and stale temporaries", .usage = &gc_usage },
+    .{ .name = "push", .summary = "Upload store history to a configured remote", .usage = &push_usage },
+    .{ .name = "pull", .summary = "Download store history from a configured remote", .usage = &pull_usage },
     .{ .name = "status", .summary = "Show the investigation dashboard", .usage = &status_usage },
     .{ .name = "timeline", .summary = "Show recent recorded steps", .usage = &timeline_usage },
     .{ .name = "sessions", .summary = "List recorded agent sessions", .usage = &sessions_usage },

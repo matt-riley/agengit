@@ -37,4 +37,5 @@ test {
     _ = @import("gc/prune_and_cleanup.zig");
     _ = @import("grep/search.zig");
     _ = @import("investigation/views.zig");
+    _ = @import("remote_sync.zig");
 }
