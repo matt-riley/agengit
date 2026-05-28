@@ -17,6 +17,8 @@ const Options = struct {
     allow_sensitive: bool = false,
 };
 
+const min_encryption_secret_bytes: usize = 16;
+
 pub fn run(
     io: std.Io,
     gpa: std.mem.Allocator,
@@ -56,7 +58,7 @@ pub fn run(
 
     var privacy_report = try privacy_scan_mod.scanStore(io, gpa, &store, loaded.value.privacy);
     defer privacy_report.deinit();
-    const encrypted = if (remote.encryption_secret_env) |name| environ.getPosix(name) != null else false;
+    const encrypted = if (remote.encryption_secret_env) |name| hasUsableEncryptionSecret(environ, name) else false;
     if (!options.allow_sensitive and !encrypted and !privacy_report.clean()) {
         try status_cmd.writeDiagnostic(&stdout, options.format, usage.name, .{
             .code = "privacy_blocked",
@@ -204,6 +206,11 @@ fn ensureFsckHealthy(
     });
     try stdout.flush();
     std.process.exit(1);
+}
+
+fn hasUsableEncryptionSecret(environ: std.process.Environ, name: []const u8) bool {
+    const value = environ.getPosix(name) orelse return false;
+    return std.mem.trim(u8, value, " \t\r\n").len >= min_encryption_secret_bytes;
 }
 
 const store_mod = @import("../store/store.zig");

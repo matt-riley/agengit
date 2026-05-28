@@ -96,7 +96,16 @@ pub fn run(
     var agent_summary = try collectConfiguredAgents(io, gpa, environ);
     defer agent_summary.deinit(gpa);
 
-    var loaded_config = config_mod.loadOrDefaultFromStore(io, store.root, gpa);
+    var loaded_config = config_mod.loadOrDefaultFromStore(io, store.root, gpa) catch |err| {
+        try writeDiagnostic(&stdout, options.format, usage.name, .{
+            .code = "invalid_config",
+            .message = "Failed to load .agit/config.json.",
+            .hint = @errorName(err),
+            .path = ".agit/config.json",
+        });
+        try stdout.flush();
+        std.process.exit(1);
+    };
     defer loaded_config.deinit();
 
     const next_step = chooseNextStep(steps_count, warnings, agent_summary);
