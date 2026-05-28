@@ -227,11 +227,36 @@ fn currentHostNameInto(out: *[std.posix.HOST_NAME_MAX]u8) []const u8 {
 
 fn isProcessAlive(pid: OsPid) bool {
     if (builtin.os.tag == .windows) {
-        // TODO: use OpenProcess + GetExitCodeProcess when std bindings are available.
-        return pid != 0;
+        return isProcessAliveWindows(pid);
     } else {
         return isProcessAlivePosix(pid);
     }
+}
+
+// Windows process-liveness via OpenProcess + GetExitCodeProcess.
+// PROCESS_QUERY_LIMITED_INFORMATION (0x1000) does not require SE_DEBUG_PRIVILEGE
+// and is sufficient to call GetExitCodeProcess.
+extern "kernel32" fn OpenProcess(
+    dwDesiredAccess: std.os.windows.DWORD,
+    bInheritHandle: std.os.windows.BOOL,
+    dwProcessId: std.os.windows.DWORD,
+) callconv(.winapi) ?std.os.windows.HANDLE;
+
+extern "kernel32" fn GetExitCodeProcess(
+    hProcess: std.os.windows.HANDLE,
+    lpExitCode: *std.os.windows.DWORD,
+) callconv(.winapi) std.os.windows.BOOL;
+
+const PROCESS_QUERY_LIMITED_INFORMATION: std.os.windows.DWORD = 0x1000;
+const STILL_ACTIVE: std.os.windows.DWORD = 259;
+
+fn isProcessAliveWindows(pid: u32) bool {
+    if (pid == 0) return false;
+    const handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) orelse return false;
+    defer std.os.windows.CloseHandle(handle);
+    var exit_code: std.os.windows.DWORD = 0;
+    if (GetExitCodeProcess(handle, &exit_code) == 0) return false;
+    return exit_code == STILL_ACTIVE;
 }
 
 fn isProcessAlivePosix(pid: std.posix.pid_t) bool {
