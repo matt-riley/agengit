@@ -34,6 +34,19 @@ with a remote backend:
   blocked when the privacy scan finds sensitive content unless the operator
   explicitly overrides with `--allow-sensitive`.
 
+  The envelope is versioned by an 8-byte magic. New encrypted writes use
+  `AGITRM02`: the master key is derived from the secret with **Argon2id**
+  (memory-hard) and a fixed domain-separating salt, then AES-256-GCM encrypts
+  each object with a per-object nonce derived from the object hash. Legacy
+  `AGITRM01` objects (master key = a single SHA-256 of the secret) remain
+  decryptable so existing remotes keep working; they are never re-encrypted in
+  place. Because objects are content-addressed, identical plaintext yields
+  identical ciphertext — the scheme hides object *contents* from the remote but
+  not *equality* of objects, and a per-deployment random salt cannot be stored
+  without breaking dedup. Operators should still treat the encryption secret as
+  high-entropy key material; Argon2id only raises, not eliminates, the cost of
+  brute-forcing a weak passphrase.
+
 ## Implemented shape
 
 Remote configuration lives in `.agit/config.json` under a `remotes` array:

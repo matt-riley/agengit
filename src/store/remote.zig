@@ -5,8 +5,48 @@ const object_mod = @import("object.zig");
 const ref_mod = @import("ref.zig");
 const store_mod = @import("store.zig");
 
-const payload_magic = "AGITRM01";
+// Remote object envelope versions. Both magics are 8 bytes so the decode path
+// can slice a fixed-width header regardless of version.
+//   v1 (AGITRM01): legacy. Key = SHA-256("agit-remote-sync-v1" + secret) — a
+//                  single fast hash, brute-forceable for low-entropy secrets.
+//   v2 (AGITRM02): key derived with Argon2id (memory-hard). New encrypted writes
+//                  always use v2; v1 objects already on a remote stay readable.
+const payload_magic_v1 = "AGITRM01";
+const payload_magic_v2 = "AGITRM02";
+const payload_magic_len = payload_magic_v1.len;
 const payload_flag_encrypted: u8 = 0x01;
+
+comptime {
+    std.debug.assert(payload_magic_v1.len == payload_magic_v2.len);
+}
+
+// Fixed, domain-separating salt. A per-deployment random salt cannot be stored
+// alongside content-addressed objects without breaking dedup, so anti-precompute
+// uniqueness is traded away; Argon2id's memory-hardness still raises brute-force
+// cost against the secret by orders of magnitude versus the v1 single hash.
+const argon2_salt = "agit-remote-sync-argon2id-v2-salt";
+const argon2_params = std.crypto.pwhash.argon2.Params.owasp_2id;
+
+/// Keys derived once from the encryption secret per push/pull, so the expensive
+/// Argon2id derivation runs a single time rather than once per object.
+const RemoteCipher = struct {
+    v1_key: [32]u8,
+    v2_key: [32]u8,
+
+    fn init(io: std.Io, gpa: std.mem.Allocator, secret: []const u8) !RemoteCipher {
+        var v2_key: [32]u8 = undefined;
+        try std.crypto.pwhash.argon2.kdf(
+            gpa,
+            &v2_key,
+            secret,
+            argon2_salt,
+            argon2_params,
+            .argon2id,
+            io,
+        );
+        return .{ .v1_key = deriveKeyV1(secret), .v2_key = v2_key };
+    }
+};
 
 pub const PushResult = struct {
     uploaded_objects: usize = 0,
@@ -399,6 +439,11 @@ pub fn push(
     var client = S3Client.init(io, gpa, remote);
     defer client.deinit();
 
+    const cipher: ?RemoteCipher = if (remote.encryption_secret) |secret|
+        try RemoteCipher.init(io, gpa, secret)
+    else
+        null;
+
     var result: PushResult = .{ .encrypted = remote.encryption_secret != null };
     errdefer result.deinit(gpa);
 
@@ -425,7 +470,7 @@ pub fn push(
         const plain = try store.readBlob(io, gpa, hash);
         defer gpa.free(plain);
 
-        const encoded = try encodeRemoteObjectAlloc(gpa, hash_ptr.*, plain, remote.encryption_secret);
+        const encoded = try encodeRemoteObjectAlloc(gpa, hash_ptr.*, plain, cipher);
         defer gpa.free(encoded);
 
         try client.putObject(key, encoded);
@@ -466,6 +511,11 @@ pub fn pull(
     var client = S3Client.init(io, gpa, remote);
     defer client.deinit();
 
+    const cipher: ?RemoteCipher = if (remote.encryption_secret) |secret|
+        try RemoteCipher.init(io, gpa, secret)
+    else
+        null;
+
     var result: PullResult = .{ .encrypted = remote.encryption_secret != null };
     errdefer result.deinit(gpa);
 
@@ -476,7 +526,7 @@ pub fn pull(
     defer seen.deinit();
 
     for (refs) |remote_ref| {
-        try fetchReachableFromRemote(io, gpa, store, &client, remote_ref.hash, &seen, &result);
+        try fetchReachableFromRemote(io, gpa, store, &client, cipher, remote_ref.hash, &seen, &result);
 
         const local_head = try ref_mod.readSessionRef(io, store.root, gpa, remote_ref.origin, remote_ref.session_id);
         if (local_head) |head| {
@@ -664,6 +714,7 @@ fn fetchReachableFromRemote(
     gpa: std.mem.Allocator,
     store: *store_mod.Store,
     client: *S3Client,
+    cipher: ?RemoteCipher,
     head_hash: store_mod.Hash,
     seen: *std.AutoHashMap([64]u8, void),
     result: *PullResult,
@@ -684,7 +735,7 @@ fn fetchReachableFromRemote(
             const remote_bytes = try client.getObjectAlloc(key);
             defer gpa.free(remote_bytes);
 
-            const plain = try decodeRemoteObjectAlloc(gpa, current_hex, remote_bytes, client.remote.encryption_secret);
+            const plain = try decodeRemoteObjectAlloc(gpa, current_hex, remote_bytes, cipher);
             defer gpa.free(plain);
             const actual_hex = store_mod.Hash.ofBytes(plain).toHex();
             if (!std.mem.eql(u8, &actual_hex, &current_hex)) {
@@ -874,32 +925,41 @@ fn encodeRemoteObjectAlloc(
     gpa: std.mem.Allocator,
     object_hash_hex: [64]u8,
     plain: []const u8,
-    encryption_secret: ?[]const u8,
+    cipher: ?RemoteCipher,
 ) ![]u8 {
-    if (encryption_secret) |secret| {
-        const key = deriveKey(secret);
-        var nonce: [std.crypto.aead.aes_gcm.Aes256Gcm.nonce_length]u8 = undefined;
-        nonceForObject(&nonce, key, object_hash_hex);
-        const ciphertext = try gpa.alloc(u8, plain.len);
-        errdefer gpa.free(ciphertext);
-        var tag: [std.crypto.aead.aes_gcm.Aes256Gcm.tag_length]u8 = undefined;
-        std.crypto.aead.aes_gcm.Aes256Gcm.encrypt(ciphertext, &tag, plain, &object_hash_hex, nonce, key);
-
-        var payload = try gpa.alloc(u8, payload_magic.len + 1 + nonce.len + tag.len + ciphertext.len);
-        errdefer gpa.free(payload);
-        @memcpy(payload[0..payload_magic.len], payload_magic);
-        payload[payload_magic.len] = payload_flag_encrypted;
-        @memcpy(payload[payload_magic.len + 1 ..][0..nonce.len], &nonce);
-        @memcpy(payload[payload_magic.len + 1 + nonce.len ..][0..tag.len], &tag);
-        @memcpy(payload[payload_magic.len + 1 + nonce.len + tag.len ..], ciphertext);
-        gpa.free(ciphertext);
-        return payload;
+    if (cipher) |c| {
+        // New encrypted writes always use the v2 (Argon2id-derived) key.
+        return encodeEncryptedAlloc(gpa, object_hash_hex, plain, c.v2_key, payload_magic_v2);
     }
 
-    var payload = try gpa.alloc(u8, payload_magic.len + 1 + plain.len);
-    @memcpy(payload[0..payload_magic.len], payload_magic);
-    payload[payload_magic.len] = 0;
-    @memcpy(payload[payload_magic.len + 1 ..], plain);
+    var payload = try gpa.alloc(u8, payload_magic_len + 1 + plain.len);
+    @memcpy(payload[0..payload_magic_len], payload_magic_v1);
+    payload[payload_magic_len] = 0;
+    @memcpy(payload[payload_magic_len + 1 ..], plain);
+    return payload;
+}
+
+fn encodeEncryptedAlloc(
+    gpa: std.mem.Allocator,
+    object_hash_hex: [64]u8,
+    plain: []const u8,
+    key: [32]u8,
+    magic: []const u8,
+) ![]u8 {
+    var nonce: [std.crypto.aead.aes_gcm.Aes256Gcm.nonce_length]u8 = undefined;
+    nonceForObject(&nonce, key, object_hash_hex);
+    const ciphertext = try gpa.alloc(u8, plain.len);
+    defer gpa.free(ciphertext);
+    var tag: [std.crypto.aead.aes_gcm.Aes256Gcm.tag_length]u8 = undefined;
+    std.crypto.aead.aes_gcm.Aes256Gcm.encrypt(ciphertext, &tag, plain, &object_hash_hex, nonce, key);
+
+    var payload = try gpa.alloc(u8, magic.len + 1 + nonce.len + tag.len + ciphertext.len);
+    errdefer gpa.free(payload);
+    @memcpy(payload[0..magic.len], magic);
+    payload[magic.len] = payload_flag_encrypted;
+    @memcpy(payload[magic.len + 1 ..][0..nonce.len], &nonce);
+    @memcpy(payload[magic.len + 1 + nonce.len ..][0..tag.len], &tag);
+    @memcpy(payload[magic.len + 1 + nonce.len + tag.len ..], ciphertext);
     return payload;
 }
 
@@ -907,18 +967,25 @@ fn decodeRemoteObjectAlloc(
     gpa: std.mem.Allocator,
     object_hash_hex: [64]u8,
     payload: []const u8,
-    encryption_secret: ?[]const u8,
+    cipher: ?RemoteCipher,
 ) ![]u8 {
-    if (payload.len < payload_magic.len + 1) return error.InvalidRemoteObjectFormat;
-    if (!std.mem.eql(u8, payload[0..payload_magic.len], payload_magic)) return error.InvalidRemoteObjectFormat;
+    if (payload.len < payload_magic_len + 1) return error.InvalidRemoteObjectFormat;
+    const magic = payload[0..payload_magic_len];
+    const is_v1 = std.mem.eql(u8, magic, payload_magic_v1);
+    const is_v2 = std.mem.eql(u8, magic, payload_magic_v2);
+    if (!is_v1 and !is_v2) return error.InvalidRemoteObjectFormat;
 
-    const flags = payload[payload_magic.len];
+    const flags = payload[payload_magic_len];
     if ((flags & payload_flag_encrypted) == 0) {
-        return gpa.dupe(u8, payload[payload_magic.len + 1 ..]);
+        // v2 envelopes are always encrypted; an unencrypted v2 header is malformed.
+        if (is_v2) return error.InvalidRemoteObjectFormat;
+        return gpa.dupe(u8, payload[payload_magic_len + 1 ..]);
     }
 
-    const secret = encryption_secret orelse return error.MissingEncryptionSecret;
-    const nonce_start = payload_magic.len + 1;
+    const c = cipher orelse return error.MissingEncryptionSecret;
+    const key = if (is_v2) c.v2_key else c.v1_key;
+
+    const nonce_start = payload_magic_len + 1;
     const nonce_end = nonce_start + std.crypto.aead.aes_gcm.Aes256Gcm.nonce_length;
     const tag_end = nonce_end + std.crypto.aead.aes_gcm.Aes256Gcm.tag_length;
     if (payload.len < tag_end) return error.InvalidRemoteObjectFormat;
@@ -931,12 +998,13 @@ fn decodeRemoteObjectAlloc(
 
     const plain = try gpa.alloc(u8, ciphertext.len);
     errdefer gpa.free(plain);
-    const key = deriveKey(secret);
     try std.crypto.aead.aes_gcm.Aes256Gcm.decrypt(plain, ciphertext, tag, &object_hash_hex, nonce, key);
     return plain;
 }
 
-fn deriveKey(secret: []const u8) [32]u8 {
+/// Legacy v1 key derivation: a single SHA-256. Retained only so objects written
+/// by older agit versions remain decryptable.
+fn deriveKeyV1(secret: []const u8) [32]u8 {
     var digest: [32]u8 = undefined;
     var hasher = std.crypto.hash.sha2.Sha256.init(.{});
     hasher.update("agit-remote-sync-v1");
@@ -1026,13 +1094,37 @@ test "remote object envelope round-trips plaintext" {
     try std.testing.expectEqualStrings("hello", decoded);
 }
 
-test "remote object envelope round-trips encrypted" {
+test "remote object envelope round-trips encrypted with argon2id v2" {
+    const gpa = std.testing.allocator;
+    const cipher = try RemoteCipher.init(std.testing.io, gpa, "secret");
     const hash_hex = store_mod.Hash.ofBytes("hello").toHex();
-    const encoded = try encodeRemoteObjectAlloc(std.testing.allocator, hash_hex, "hello", "secret");
-    defer std.testing.allocator.free(encoded);
-    try std.testing.expect(!std.mem.eql(u8, encoded[payload_magic.len + 1 ..], "hello"));
+    const encoded = try encodeRemoteObjectAlloc(gpa, hash_hex, "hello", cipher);
+    defer gpa.free(encoded);
 
-    const decoded = try decodeRemoteObjectAlloc(std.testing.allocator, hash_hex, encoded, "secret");
-    defer std.testing.allocator.free(decoded);
+    // New encrypted writes carry the v2 magic and never expose plaintext.
+    try std.testing.expectEqualStrings(payload_magic_v2, encoded[0..payload_magic_len]);
+    try std.testing.expect(!std.mem.eql(u8, encoded[payload_magic_len + 1 ..], "hello"));
+
+    const decoded = try decodeRemoteObjectAlloc(gpa, hash_hex, encoded, cipher);
+    defer gpa.free(decoded);
     try std.testing.expectEqualStrings("hello", decoded);
+}
+
+test "decode still accepts legacy AGITRM01 encrypted objects" {
+    const gpa = std.testing.allocator;
+    const cipher = try RemoteCipher.init(std.testing.io, gpa, "secret");
+    const hash_hex = store_mod.Hash.ofBytes("legacy").toHex();
+
+    // Build a v1 envelope exactly as an older agit would have, using the legacy key.
+    const legacy = try encodeEncryptedAlloc(gpa, hash_hex, "legacy-plaintext", cipher.v1_key, payload_magic_v1);
+    defer gpa.free(legacy);
+
+    const decoded = try decodeRemoteObjectAlloc(gpa, hash_hex, legacy, cipher);
+    defer gpa.free(decoded);
+    try std.testing.expectEqualStrings("legacy-plaintext", decoded);
+}
+
+test "argon2id and legacy keys differ for the same secret" {
+    const cipher = try RemoteCipher.init(std.testing.io, std.testing.allocator, "secret");
+    try std.testing.expect(!std.mem.eql(u8, &cipher.v1_key, &cipher.v2_key));
 }
