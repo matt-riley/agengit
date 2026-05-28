@@ -1,44 +1,54 @@
-# ADR 032: Publish Release Please releases immediately
+# ADR 032: Bypass Release Please on merged release commits
 
 **Status:** Implemented
 **Date:** 2026-05-28
 
 ## Context
 
-`release-please-config.json` configured the root package with `"draft": true`.
-That let Release Please create a draft GitHub release as soon as a release PR
-merged, while the rest of `.github/workflows/release.yml` uploaded archives,
-checksums, and the Homebrew formula before publishing the release.
+The repository uses Release Please to manage version bumps, changelog updates,
+and release PRs. The release workflow also builds four archives, generates
+checksums, and updates the Homebrew tap after a release PR is merged.
 
-In practice that draft setting caused Release Please to mis-detect the just-cut
-release inside the same workflow run. On the push for merged release commit
-`c1ec1c3` (`chore(main): release 1.17.0 (#50)`), the Release Please job:
+Two incompatible behaviors surfaced on `2026-05-28`:
 
-1. created release `v1.17.0`,
-2. removed `autorelease: pending` and added `autorelease: tagged` to PR `#50`,
-3. then started its PR-building phase,
-4. logged `Expected 1 releases, only found 0`,
-5. concluded `No latest release found for path: .`,
-6. reconsidered the full historical commit set, and
-7. opened duplicate release PR `#51`.
+1. With `release-please-config.json` set to `"draft": true`, the push for
+   merged release commit `c1ec1c3` (`chore(main): release 1.17.0 (#50)`)
+   created draft release `v1.17.0`, then failed to recognize that release as
+   the latest one inside the same run, reconsidered historical commits, and
+   opened duplicate release PR `#51`.
+2. Changing Release Please to publish immediately avoided the duplicate PR, but
+   the release became immutable before the build jobs uploaded assets. The next
+   release run for merged commit `518fce3` (`chore(main): release 1.18.0 (#51)`)
+   failed every `gh release upload` step with `HTTP 422: Cannot upload assets
+   to an immutable release`.
 
-This matches the upstream duplicate-PR behavior reported for draft releases in
-googleapis/release-please-action issue `#962`.
+The repository therefore needs Release Please to keep managing release PRs,
+while a separate workflow path owns the actual GitHub release object so assets
+can be uploaded before publication.
 
 ## Decision
 
-Set `"draft": false` for the root Release Please package.
+Keep `release-please-config.json` on `"draft": true`, but stop running Release
+Please on merged release commits.
 
-The repository will now let Release Please create a published GitHub release
-immediately when a release PR merges. The follow-on workflow jobs still upload
-archives, checksums, and update the Homebrew tap against that same release.
+Instead, `.github/workflows/release.yml` now:
+
+1. detects whether `HEAD` is a merged release commit like
+   `chore(main): release 1.18.0 (#51)`,
+2. skips the reusable Release Please workflow for those commits,
+3. extracts the just-merged release notes from `CHANGELOG.md`,
+4. creates or reuses a draft GitHub release for the manifest version,
+5. uploads archives and checksums to that draft release, and
+6. publishes the release only after the assets are in place.
+
+On ordinary commits to `main`, the workflow still runs Release Please to create
+or update the pending release PR.
 
 ## Consequences
 
-- Merging a release PR no longer causes the same workflow run to open the next
-  release PR from the same historical commits.
-- GitHub may briefly show a newly published release before all archives and
-  checksums finish uploading.
-- The later `Publish release` workflow step becomes effectively idempotent; it
-  can remain in place as a harmless no-op until the workflow is simplified in a
-  future change.
+- Merged release commits no longer trigger the duplicate-PR path in Release
+  Please because the workflow does not invoke it for those commits.
+- Release assets remain uploadable because the workflow owns a draft release
+  until archives and checksums are attached.
+- Reruns stay idempotent: the workflow reuses an existing draft release for the
+  tag and skips uploads for assets that are already present.
