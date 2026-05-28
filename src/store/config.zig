@@ -69,6 +69,23 @@ pub const Loaded = struct {
     pub fn default() Loaded {
         return .{};
     }
+
+    pub fn failClosedCapture() Loaded {
+        return .{
+            .value = .{
+                .privacy = .{
+                    .capture = .{
+                        .prompts = .disabled,
+                        .assistant = .disabled,
+                        .tool_args = .disabled,
+                        .tool_results = .disabled,
+                        .snapshots = .disabled,
+                    },
+                    .display = .{ .redacted_by_default = true },
+                },
+            },
+        };
+    }
 };
 
 pub fn loadFromStore(io: std.Io, store_root: std.Io.Dir, gpa: std.mem.Allocator) !Loaded {
@@ -90,8 +107,8 @@ pub fn loadFromStore(io: std.Io, store_root: std.Io.Dir, gpa: std.mem.Allocator)
     };
 }
 
-pub fn loadOrDefaultFromStore(io: std.Io, store_root: std.Io.Dir, gpa: std.mem.Allocator) Loaded {
-    return loadFromStore(io, store_root, gpa) catch Loaded.default();
+pub fn loadOrDefaultFromStore(io: std.Io, store_root: std.Io.Dir, gpa: std.mem.Allocator) !Loaded {
+    return loadFromStore(io, store_root, gpa);
 }
 
 pub fn selectRemote(file: File, name: ?[]const u8) !RemoteConfig {
@@ -225,4 +242,19 @@ test "selectRemote resolves explicit and implicit remotes" {
         },
     };
     try std.testing.expectEqualStrings("only", (try selectRemote(single, null)).name);
+}
+
+test "loadOrDefaultFromStore reports malformed config errors" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.createDirPath(std.testing.io, ".agit");
+    var agit = try tmp.dir.openDir(std.testing.io, ".agit", .{});
+    defer agit.close(std.testing.io);
+    var file = try agit.createFile(std.testing.io, "config.json", .{ .truncate = true });
+    defer file.close(std.testing.io);
+    try file.writeStreamingAll(std.testing.io, "{not-json");
+
+    _ = loadOrDefaultFromStore(std.testing.io, agit, std.testing.allocator) catch return;
+    return error.TestExpectedError;
 }

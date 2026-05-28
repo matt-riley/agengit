@@ -84,6 +84,43 @@ test "remote_sync encrypted push stores unreadable objects and pull restores the
     try std.testing.expectEqual(@as(u8, 0), log_result.exit_code);
 }
 
+test "remote_sync push blocks when encryption secret env var is present but empty" {
+    var sandbox = try harness.Sandbox.init(std.testing.allocator);
+    defer sandbox.deinit();
+
+    var remote = try fake_s3.Server.start(std.testing.allocator, std.testing.io, sandbox.root);
+    defer remote.deinit();
+
+    try sandbox.writeRepoFile(".agit/.keep", "");
+    try writeRemoteConfig(&sandbox, remote.endpoint, true);
+    try recordSession(&sandbox, "empty-secret-sess", "Authorization: Bearer secret-token-123456");
+
+    var push_result = try sandbox.runWithEnv(&.{"push"}, null, remoteEnvEmptySecret());
+    defer push_result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(u8, 1), push_result.exit_code);
+    try std.testing.expect(
+        std.mem.indexOf(u8, push_result.stdout, "sensitive plaintext") != null or
+            std.mem.indexOf(u8, push_result.stderr, "sensitive plaintext") != null,
+    );
+}
+
+test "remote_sync rejects insecure non-local HTTP endpoints before upload" {
+    var sandbox = try harness.Sandbox.init(std.testing.allocator);
+    defer sandbox.deinit();
+
+    try sandbox.writeRepoFile(".agit/.keep", "");
+    try writeRemoteConfig(&sandbox, "http://example.com", false);
+    try recordSession(&sandbox, "http-remote-sess", "Write docs");
+
+    var push_result = try sandbox.runWithEnv(&.{ "push", "--json" }, null, remoteEnv(false));
+    defer push_result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(u8, 1), push_result.exit_code);
+    try std.testing.expect(
+        std.mem.indexOf(u8, push_result.stdout, "InsecureRemoteEndpoint") != null or
+            std.mem.indexOf(u8, push_result.stderr, "InsecureRemoteEndpoint") != null,
+    );
+}
+
 fn writeRemoteConfig(sandbox: *harness.Sandbox, endpoint: []const u8, encrypted: bool) !void {
     const config = if (encrypted)
         try std.fmt.allocPrint(std.testing.allocator,
@@ -196,6 +233,14 @@ fn remoteEnv(comptime encrypted: bool) []const []const u8 {
             "AGIT_S3_ACCESS_KEY=test-access",
             "AGIT_S3_SECRET_KEY=test-secret",
         };
+}
+
+fn remoteEnvEmptySecret() []const []const u8 {
+    return &.{
+        "AGIT_S3_ACCESS_KEY=test-access",
+        "AGIT_S3_SECRET_KEY=test-secret",
+        "AGIT_S3_ENCRYPTION_SECRET=",
+    };
 }
 
 fn parseJson(data: []const u8) !std.json.Parsed(std.json.Value) {

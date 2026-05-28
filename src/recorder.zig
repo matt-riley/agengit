@@ -262,7 +262,7 @@ pub const Recorder = struct {
 
         // Non-fatal: fall back to defaults if .agitignore is absent or unreadable.
         const ignorer = Ignorer.fromDir(io, repo_dir, gpa) catch Ignorer.initDefault(gpa);
-        const privacy_config = config_mod.loadOrDefaultFromStore(io, s.root, gpa);
+        const privacy_config = config_mod.loadOrDefaultFromStore(io, s.root, gpa) catch config_mod.Loaded.failClosedCapture();
 
         return .{
             .gpa = gpa,

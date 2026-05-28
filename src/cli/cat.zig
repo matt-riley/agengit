@@ -49,7 +49,16 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
 
     var store = try status.openStoreOrExit(io, gpa, &stdout, .human, usage.name);
     defer store.deinit(io);
-    var loaded_config = config_mod.loadOrDefaultFromStore(io, store.root, gpa);
+    var loaded_config = config_mod.loadOrDefaultFromStore(io, store.root, gpa) catch |err| {
+        try status.writeDiagnostic(&stdout, .human, usage.name, .{
+            .code = "invalid_config",
+            .message = "Failed to load .agit/config.json.",
+            .hint = @errorName(err),
+            .path = ".agit/config.json",
+        });
+        try stdout.flush();
+        std.process.exit(1);
+    };
     defer loaded_config.deinit();
     const use_redaction = switch (redaction_mode) {
         .auto => loaded_config.value.privacy.display.redacted_by_default,

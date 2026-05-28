@@ -15,6 +15,7 @@ const payload_magic_v1 = "AGITRM01";
 const payload_magic_v2 = "AGITRM02";
 const payload_magic_len = payload_magic_v1.len;
 const payload_flag_encrypted: u8 = 0x01;
+const min_encryption_secret_bytes: usize = 16;
 
 comptime {
     std.debug.assert(payload_magic_v1.len == payload_magic_v2.len);
@@ -562,6 +563,8 @@ pub fn pull(
 fn resolveRemote(environ: std.process.Environ, config: config_mod.RemoteConfig) !ResolvedRemote {
     const endpoint_uri = try std.Uri.parse(config.endpoint);
     if (endpoint_uri.host == null) return error.InvalidRemoteEndpoint;
+    const protocol = std.http.Client.Protocol.fromUri(endpoint_uri) orelse return error.InvalidRemoteEndpoint;
+    if (protocol == .plain and !try isLocalEndpoint(endpoint_uri)) return error.InsecureRemoteEndpoint;
     if (!endpoint_uri.path.isEmpty()) {
         var path_buf: [256]u8 = undefined;
         const path = endpoint_uri.path.toRaw(&path_buf) catch return error.InvalidRemoteEndpoint;
@@ -569,16 +572,19 @@ fn resolveRemote(environ: std.process.Environ, config: config_mod.RemoteConfig) 
     }
     if (endpoint_uri.query != null or endpoint_uri.fragment != null) return error.InvalidRemoteEndpoint;
 
-    const access_key = environ.getPosix(config.access_key_env) orelse return error.MissingRemoteCredential;
-    const secret_key = environ.getPosix(config.secret_key_env) orelse return error.MissingRemoteCredential;
+    const access_key = try requireNonEmptyEnv(environ, config.access_key_env, error.MissingRemoteCredential);
+    const secret_key = try requireNonEmptyEnv(environ, config.secret_key_env, error.MissingRemoteCredential);
     const session_token = if (config.session_token_env) |name|
-        (environ.getPosix(name) orelse return error.MissingRemoteCredential)
+        (try requireNonEmptyEnv(environ, name, error.MissingRemoteCredential))
     else
         null;
-    const encryption_secret = if (config.encryption_secret_env) |name|
-        (environ.getPosix(name) orelse return error.MissingEncryptionSecret)
-    else
-        null;
+    const encryption_secret = if (config.encryption_secret_env) |name| blk: {
+        const value = try requireNonEmptyEnv(environ, name, error.MissingEncryptionSecret);
+        if (std.mem.trim(u8, value, " \t\r\n").len < min_encryption_secret_bytes) {
+            return error.WeakEncryptionSecret;
+        }
+        break :blk value;
+    } else null;
 
     return .{
         .config = config,
@@ -588,6 +594,22 @@ fn resolveRemote(environ: std.process.Environ, config: config_mod.RemoteConfig) 
         .session_token = session_token,
         .encryption_secret = encryption_secret,
     };
+}
+
+fn requireNonEmptyEnv(environ: std.process.Environ, name: []const u8, missing_err: anyerror) ![]const u8 {
+    const value = environ.getPosix(name) orelse return missing_err;
+    if (std.mem.trim(u8, value, " \t\r\n").len == 0) return missing_err;
+    return value;
+}
+
+fn isLocalEndpoint(uri: std.Uri) !bool {
+    var host_buf: [std.Io.net.HostName.max_len]u8 = undefined;
+    const host = try uri.getHost(&host_buf);
+    const name = host.bytes;
+    if (std.ascii.eqlIgnoreCase(name, "localhost")) return true;
+    if (std.mem.eql(u8, name, "::1")) return true;
+    if (std.mem.eql(u8, name, "127.0.0.1")) return true;
+    return false;
 }
 
 fn collectLocalRefs(io: std.Io, gpa: std.mem.Allocator, store: *store_mod.Store) ![]LocalRef {

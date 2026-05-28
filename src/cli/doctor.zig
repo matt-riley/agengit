@@ -3,6 +3,7 @@ const store_mod = @import("../store/store.zig");
 const exe_path_mod = @import("../util/exe_path.zig");
 const home_mod = @import("../util/home.zig");
 const file_lock_mod = @import("../util/file_lock.zig");
+const path_lookup = @import("../util/path_lookup.zig");
 const help_mod = @import("help.zig");
 const output_mod = @import("output.zig");
 const specs = @import("specs.zig");
@@ -39,7 +40,7 @@ pub fn run(
     defer gpa.free(exe);
 
     if (options.json) {
-        try runJson(io, gpa, home, exe, options, &stdout);
+        try runJson(io, gpa, environ, home, exe, options, &stdout);
         return;
     }
 
@@ -81,9 +82,9 @@ pub fn run(
     try checkConfigTmpFiles(io, gpa, home, "claude", ".claude/settings.json", &stdout);
     try checkConfigTmpFiles(io, gpa, home, "codex", ".codex/hooks.json", &stdout);
     try checkConfigTmpFiles(io, gpa, home, "gemini", ".gemini/settings.json", &stdout);
-    if (!try checkAgent(io, gpa, home, exe, "claude", ".claude/settings.json", &stdout)) has_failures = true;
-    if (!try checkAgent(io, gpa, home, exe, "codex", ".codex/hooks.json", &stdout)) has_failures = true;
-    if (!try checkAgent(io, gpa, home, exe, "gemini", ".gemini/settings.json", &stdout)) has_failures = true;
+    if (!try checkAgent(io, gpa, environ, home, exe, "claude", ".claude/settings.json", &stdout)) has_failures = true;
+    if (!try checkAgent(io, gpa, environ, home, exe, "codex", ".codex/hooks.json", &stdout)) has_failures = true;
+    if (!try checkAgent(io, gpa, environ, home, exe, "gemini", ".gemini/settings.json", &stdout)) has_failures = true;
 
     try stdout.flush();
     if (has_failures) std.process.exit(1);
@@ -138,6 +139,7 @@ const LockInfo = struct {
 fn runJson(
     io: std.Io,
     gpa: std.mem.Allocator,
+    environ: std.process.Environ,
     home: []const u8,
     exe: []const u8,
     options: DoctorOptions,
@@ -277,9 +279,9 @@ fn runJson(
     try appendConfigTmpCheck(io, gpa, aa, home, "claude", ".claude/settings.json", &checks);
     try appendConfigTmpCheck(io, gpa, aa, home, "codex", ".codex/hooks.json", &checks);
     try appendConfigTmpCheck(io, gpa, aa, home, "gemini", ".gemini/settings.json", &checks);
-    try checks.append(gpa, try collectAgentCheck(io, gpa, aa, home, exe, "claude", ".claude/settings.json"));
-    try checks.append(gpa, try collectAgentCheck(io, gpa, aa, home, exe, "codex", ".codex/hooks.json"));
-    try checks.append(gpa, try collectAgentCheck(io, gpa, aa, home, exe, "gemini", ".gemini/settings.json"));
+    try checks.append(gpa, try collectAgentCheck(io, gpa, environ, aa, home, exe, "claude", ".claude/settings.json"));
+    try checks.append(gpa, try collectAgentCheck(io, gpa, environ, aa, home, exe, "codex", ".codex/hooks.json"));
+    try checks.append(gpa, try collectAgentCheck(io, gpa, environ, aa, home, exe, "gemini", ".gemini/settings.json"));
 
     const check_slice = try checks.toOwnedSlice(gpa);
     defer gpa.free(check_slice);
@@ -354,13 +356,6 @@ fn lastNonEmptyLine(content: []const u8) ?[]const u8 {
     const raw = if (start == 0) content[0..end] else content[start + 1 .. end];
     const trimmed = std.mem.trim(u8, raw, " \t\r");
     return if (trimmed.len == 0) null else trimmed;
-}
-
-fn detectBinary(io: std.Io, gpa: std.mem.Allocator, name: []const u8) bool {
-    const result = std.process.run(gpa, io, .{ .argv = &.{ "which", name } }) catch return false;
-    defer gpa.free(result.stdout);
-    defer gpa.free(result.stderr);
-    return result.term == .exited and result.term.exited == 0;
 }
 
 const AgitIgnoreDiagnostics = union(enum) {
@@ -711,13 +706,14 @@ fn appendConfigTmpCheck(
 fn collectAgentCheck(
     io: std.Io,
     gpa: std.mem.Allocator,
+    environ: std.process.Environ,
     aa: std.mem.Allocator,
     home: []const u8,
     exe: []const u8,
     agent_name: []const u8,
     rel_config: []const u8,
 ) !output_mod.Check {
-    if (!detectBinary(io, gpa, agent_name)) {
+    if (!path_lookup.hasExecutableInPath(io, gpa, environ, agent_name)) {
         return .{
             .code = "agent_not_installed",
             .status = .info,
@@ -840,13 +836,14 @@ fn readLastHookErrorRaw(
 fn checkAgent(
     io: std.Io,
     gpa: std.mem.Allocator,
+    environ: std.process.Environ,
     home: []const u8,
     exe: []const u8,
     agent_name: []const u8,
     rel_config: []const u8,
     stdout: *std.Io.File.Writer,
 ) !bool {
-    const has_bin = detectBinary(io, gpa, agent_name);
+    const has_bin = path_lookup.hasExecutableInPath(io, gpa, environ, agent_name);
     if (!has_bin) {
         try stdout.interface.print("  - {s}: not installed\n", .{agent_name});
         return true;

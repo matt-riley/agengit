@@ -54,6 +54,25 @@ pub const Store = struct {
         return openWithOptions(io, repo_dir, gpa, .{});
     }
 
+    /// Open an existing store rooted at `repo_dir/.agit/` without creating
+    /// missing directories or running reconcile side effects.
+    pub fn openExisting(io: std.Io, repo_dir: std.Io.Dir, gpa: std.mem.Allocator) !Store {
+        _ = gpa;
+        var root = try repo_dir.openDir(io, ".agit", .{});
+        errdefer root.close(io);
+
+        var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const n = try root.realPath(io, &path_buf);
+        var db_path_buf: [std.fs.max_path_bytes + 12]u8 = undefined;
+        const db_path = try std.fmt.bufPrintZ(&db_path_buf, "{s}/index.db", .{path_buf[0..n]});
+
+        const idx = try Index.open(db_path);
+        errdefer idx.close();
+        try idx.migrate();
+
+        return .{ .root = root, .index = idx };
+    }
+
     pub fn openWithOptions(io: std.Io, repo_dir: std.Io.Dir, gpa: std.mem.Allocator, options: OpenOptions) !Store {
         // Ensure .agit/ and its subdirectories exist.
         try repo_dir.createDirPath(io, ".agit/objects");
@@ -97,13 +116,14 @@ pub const Store = struct {
         self.* = undefined;
     }
 
-    /// Walk up from `start_dir` looking for a `.agit/` directory.
-    /// Returns `error.StoreNotFound` if none is found, otherwise opens the store.
-    /// Does NOT create `.agit/` or any subdirectories.
+    /// Walk up from `start_dir` looking for a `.agit/` directory and open the
+    /// existing store without creating or reconciling mutable store paths.
+    ///
+    /// Returns `error.StoreNotFound` if none is found.
     pub fn findAndOpen(io: std.Io, start_dir: std.Io.Dir, gpa: std.mem.Allocator) !Store {
         var repo_dir = try Store.findRoot(io, start_dir);
         defer repo_dir.close(io);
-        return Store.open(io, repo_dir, gpa);
+        return Store.openExisting(io, repo_dir, gpa);
     }
 
     pub fn findRoot(io: std.Io, start_dir: std.Io.Dir) !std.Io.Dir {

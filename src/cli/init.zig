@@ -32,7 +32,7 @@ pub fn run(
     defer gpa.free(exe);
     const crash_after_tmp_write = shouldCrashAfterTmpWrite(environ);
 
-    var builder = init_plan_mod.Builder.init(gpa, io, home, exe, options.force, options.dry_run);
+    var builder = init_plan_mod.Builder.init(gpa, io, environ, home, exe, options.force, options.dry_run);
     defer builder.deinit();
 
     // Apply agent selections if any were specified.
@@ -119,13 +119,6 @@ fn parseOptions(gpa: std.mem.Allocator, iter: *std.process.Args.Iterator, stdout
         }
     }
     return options;
-}
-
-fn detectBinary(io: std.Io, gpa: std.mem.Allocator, name: []const u8) bool {
-    const result = std.process.run(gpa, io, .{ .argv = &.{ "which", name } }) catch return false;
-    defer gpa.free(result.stdout);
-    defer gpa.free(result.stderr);
-    return result.term == .exited and result.term.exited == 0;
 }
 
 fn deinitPlan(gpa: std.mem.Allocator, plan: init_plan_mod.Plan) void {

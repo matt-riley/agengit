@@ -1,5 +1,6 @@
 const std = @import("std");
 const atomic_json_mod = @import("../util/atomic_json.zig");
+const path_lookup = @import("../util/path_lookup.zig");
 
 /// Agent metadata shared across init, doctor, uninstall.
 pub const AgentMetadata = struct {
@@ -97,6 +98,7 @@ pub const Plan = struct {
 pub const Builder = struct {
     gpa: std.mem.Allocator,
     io: std.Io,
+    environ: std.process.Environ,
     home: []const u8,
     exe: []const u8,
     force: bool,
@@ -106,6 +108,7 @@ pub const Builder = struct {
     pub fn init(
         gpa: std.mem.Allocator,
         io: std.Io,
+        environ: std.process.Environ,
         home: []const u8,
         exe: []const u8,
         force: bool,
@@ -114,6 +117,7 @@ pub const Builder = struct {
         return .{
             .gpa = gpa,
             .io = io,
+            .environ = environ,
             .home = home,
             .exe = exe,
             .force = force,
@@ -155,7 +159,7 @@ pub const Builder = struct {
             const config_path = try std.mem.concat(self.gpa, u8, &.{ self.home, "/", agent.config_path_rel });
             defer self.gpa.free(config_path);
 
-            const binary_found = detectBinary(self.io, self.gpa, agent.id);
+            const binary_found = path_lookup.hasExecutableInPath(self.io, self.gpa, self.environ, agent.id);
 
             if (!binary_found) {
                 try agent_plans.append(self.gpa, .{
@@ -218,13 +222,6 @@ pub const Builder = struct {
     }
 };
 
-fn detectBinary(io: std.Io, gpa: std.mem.Allocator, name: []const u8) bool {
-    const result = std.process.run(gpa, io, .{ .argv = &.{ "which", name } }) catch return false;
-    defer gpa.free(result.stdout);
-    defer gpa.free(result.stderr);
-    return result.term == .exited and result.term.exited == 0;
-}
-
 test "isValidId recognizes all agents" {
     try std.testing.expect(isValidId("claude"));
     try std.testing.expect(isValidId("codex"));
@@ -234,7 +231,12 @@ test "isValidId recognizes all agents" {
 
 test "Builder.selectAgent validates agent names" {
     const gpa = std.testing.allocator;
-    var builder = Builder.init(gpa, undefined, "/tmp", "/bin/agit", false, false);
+    var env_map = std.process.EnvMap.init(gpa);
+    defer env_map.deinit();
+    const environ = try std.process.Environ.init(gpa, &env_map);
+    defer environ.deinit(gpa);
+
+    var builder = Builder.init(gpa, undefined, environ, "/tmp", "/bin/agit", false, false);
     defer builder.deinit();
 
     try builder.selectAgent("claude");

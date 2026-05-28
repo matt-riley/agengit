@@ -42,7 +42,16 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
     var store = try status_cmd.openStoreOrExit(io, gpa, &stdout, options.format, usage.name);
     defer store.deinit(io);
 
-    var loaded = config_mod.loadOrDefaultFromStore(io, store.root, gpa);
+    var loaded = config_mod.loadFromStore(io, store.root, gpa) catch |err| {
+        try status_cmd.writeDiagnostic(&stdout, options.format, usage.name, .{
+            .code = "invalid_config",
+            .message = "Failed to load .agit/config.json.",
+            .hint = @errorName(err),
+            .path = ".agit/config.json",
+        });
+        try stdout.flush();
+        std.process.exit(1);
+    };
     defer loaded.deinit();
 
     const selected_refs = try bundle_mod.selectRefs(io, gpa, &store, options.filters);
