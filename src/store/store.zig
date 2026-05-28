@@ -442,8 +442,11 @@ pub const Store = struct {
             return .repaired;
         }
 
-        if (mode == .dry_run) return .index_ahead;
-        return .index_ahead;
+        // ref_tip is set, indexed, and meta_ref is set but doesn't match ref_tip.
+        // The ref file is the source of truth; update the meta to catch up.
+        if (mode == .dry_run) return .drifted;
+        try self.updateSessionMeta(gpa, origin, session_id, ref_tip.?);
+        return .repaired;
     }
 
     fn replaySessionChain(
@@ -1161,6 +1164,45 @@ test "reconcile repairs when ref is ahead of index" {
 
     const step_hex = h.toHex();
     try std.testing.expect(try s.index.hasStep(&step_hex));
+}
+
+test "reconcile repairs stale meta_ref when ref_tip is already indexed" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+
+    var s = try Store.open(io, tmp.dir, gpa);
+    defer s.deinit(io);
+
+    const step = Step{
+        .parent = null,
+        .tree = "c" ** 64,
+        .session_id = "sess-r3",
+        .origin = "github.com/u/r",
+        .turn_id = "t1",
+        .causes = &.{},
+        .timestamp = 1002,
+    };
+    const h = try s.writeStep(io, gpa, step);
+    try std.testing.expect(try s.casRef(io, gpa, step.origin, step.session_id, null, h, &step, step.messages, step.tool_calls));
+
+    // Corrupt meta_ref so it diverges from the ref file while the tip is indexed.
+    // Key format mirrors metaKeyAlloc: "session::{hex(origin)}:{hex(session_id)}::{field}"
+    const wrong_key = try std.fmt.allocPrint(gpa, "session::{x}:{x}::last_ref_hash", .{ step.origin, step.session_id });
+    defer gpa.free(wrong_key);
+    try s.index.metaSet(wrong_key, &("ff" ** 32).*);
+
+    const dry = try s.reconcile(io, gpa, .dry_run);
+    try std.testing.expectEqual(@as(usize, 1), dry.drifted);
+
+    const repaired = try s.reconcile(io, gpa, .repair);
+    try std.testing.expectEqual(@as(usize, 1), repaired.repaired);
+
+    // After repair meta_ref must match the ref file.
+    const meta_tip = try s.readMetaRefTip(gpa, step.origin, step.session_id);
+    try std.testing.expect(meta_tip != null);
+    try std.testing.expect(h.eql(meta_tip.?));
 }
 
 test "reconcile reports index ahead of ref without mutation" {
