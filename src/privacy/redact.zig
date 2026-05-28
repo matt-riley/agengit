@@ -77,6 +77,8 @@ pub fn scanAlloc(gpa: std.mem.Allocator, text: []const u8, options: Options) ![]
     try scanGitHubTokens(gpa, text, &findings);
     try scanAwsAccessKeys(gpa, text, &findings);
     try scanPrivateKeys(gpa, text, &findings);
+    try scanPlatformTokens(gpa, text, &findings);
+    try scanJwtTokens(gpa, text, &findings);
     try scanCustomLiterals(gpa, text, options.custom_literals, &findings);
 
     return findings.toOwnedSlice(gpa);
@@ -282,6 +284,108 @@ fn scanPrivateKeys(
     }
 }
 
+/// Vendor-specific token prefixes. Each entry specifies the literal prefix and
+/// the minimum number of additional token chars required to avoid false positives.
+const PlatformTokenRule = struct {
+    prefix: []const u8,
+    min_suffix: usize,
+    rule: []const u8,
+};
+
+const platform_token_rules = [_]PlatformTokenRule{
+    // Slack workspace tokens
+    .{ .prefix = "xoxb-", .min_suffix = 20, .rule = "slack_token" },
+    .{ .prefix = "xoxp-", .min_suffix = 20, .rule = "slack_token" },
+    .{ .prefix = "xoxs-", .min_suffix = 20, .rule = "slack_token" },
+    .{ .prefix = "xoxa-", .min_suffix = 20, .rule = "slack_token" },
+    .{ .prefix = "xoxr-", .min_suffix = 20, .rule = "slack_token" },
+    // Google API keys (AIza + 35 chars = 39 total)
+    .{ .prefix = "AIza", .min_suffix = 35, .rule = "google_api_key" },
+    // Stripe live and test keys
+    .{ .prefix = "sk_live_", .min_suffix = 24, .rule = "stripe_key" },
+    .{ .prefix = "sk_test_", .min_suffix = 24, .rule = "stripe_key" },
+    .{ .prefix = "rk_live_", .min_suffix = 24, .rule = "stripe_key" },
+    .{ .prefix = "rk_test_", .min_suffix = 24, .rule = "stripe_key" },
+    // OpenAI — require 48 chars after "sk-" to avoid false positives on short IDs
+    .{ .prefix = "sk-", .min_suffix = 48, .rule = "openai_key" },
+    // npm automation/CI tokens
+    .{ .prefix = "npm_", .min_suffix = 36, .rule = "npm_token" },
+};
+
+fn scanPlatformTokens(
+    gpa: std.mem.Allocator,
+    text: []const u8,
+    findings: *std.ArrayList(Finding),
+) !void {
+    for (platform_token_rules) |rule| {
+        var start: usize = 0;
+        while (std.mem.indexOfPos(u8, text, start, rule.prefix)) |idx| {
+            const token_end = scanTokenEnd(text, idx);
+            if (token_end >= idx + rule.prefix.len + rule.min_suffix) {
+                try appendFinding(gpa, findings, .{
+                    .rule = rule.rule,
+                    .severity = .@"error",
+                    .start = idx,
+                    .end = token_end,
+                });
+            }
+            start = idx + rule.prefix.len;
+        }
+    }
+}
+
+/// JSON Web Tokens have the form header.payload.signature where both header and
+/// payload base64url-encode a JSON object (and therefore start with `eyJ`).
+fn scanJwtTokens(
+    gpa: std.mem.Allocator,
+    text: []const u8,
+    findings: *std.ArrayList(Finding),
+) !void {
+    var start: usize = 0;
+    while (std.mem.indexOfPos(u8, text, start, "eyJ")) |idx| {
+        // Skip if this `eyJ` is in the middle of a longer token already scanned.
+        if (idx > 0 and isTokenChar(text[idx - 1])) {
+            start = idx + 1;
+            continue;
+        }
+        const token_end = scanTokenEnd(text, idx);
+        const segment = text[idx..token_end];
+        // A JWT has exactly two dots, each separating a non-trivial base64url segment.
+        const dot1 = std.mem.indexOfScalar(u8, segment, '.') orelse {
+            start = token_end;
+            continue;
+        };
+        if (dot1 < 4) {
+            start = token_end;
+            continue;
+        }
+        const dot2 = std.mem.indexOfScalarPos(u8, segment, dot1 + 1, '.') orelse {
+            start = token_end;
+            continue;
+        };
+        // Payload segment must also decode as JSON (starts with `eyJ`).
+        if (!std.mem.startsWith(u8, segment[dot1 + 1 ..], "eyJ")) {
+            start = token_end;
+            continue;
+        }
+        // Signature segment must be non-trivial.
+        if (segment.len - dot2 < 4) {
+            start = token_end;
+            continue;
+        }
+        // Require a minimum total length (header + payload + sig ≥ 50 chars).
+        if (segment.len >= 50) {
+            try appendFinding(gpa, findings, .{
+                .rule = "jwt_token",
+                .severity = .@"error",
+                .start = idx,
+                .end = token_end,
+            });
+        }
+        start = token_end;
+    }
+}
+
 fn scanCustomLiterals(
     gpa: std.mem.Allocator,
     text: []const u8,
@@ -320,7 +424,14 @@ fn maxSeverity(a: Severity, b: Severity) Severity {
 fn findStringEnd(text: []const u8, start: usize) ?usize {
     var i = start;
     while (i < text.len) : (i += 1) {
-        if (text[i] == '"' and (i == start or text[i - 1] != '\\')) return i;
+        if (text[i] != '"') continue;
+        // A quote terminates the string only when preceded by an even number of
+        // backslashes; an odd count means the quote itself is escaped. Counting
+        // (rather than checking a single prior byte) handles `\\"`, where the
+        // pair of backslashes is itself an escaped backslash, not an escaped quote.
+        var backslashes: usize = 0;
+        while (i - backslashes > start and text[i - backslashes - 1] == '\\') : (backslashes += 1) {}
+        if (backslashes % 2 == 0) return i;
     }
     return null;
 }
@@ -440,11 +551,90 @@ test "scanAlloc finds custom literals" {
     try std.testing.expectEqualStrings("custom_literal", findings[0].rule);
 }
 
-test "scanAlloc finds GitHub and AWS tokens" {
-    const findings = try scanAlloc(std.testing.allocator,
-        \\ghp_1234567890abcdefghij
-        \\AKIA1234567890ABCDEF
+test "redactAlloc handles backslash-terminated sensitive values" {
+    // The token value ends in an escaped backslash (`\\`), so the closing quote
+    // must still be recognized as the string terminator and "after" left visible.
+    const redacted = try redactAlloc(std.testing.allocator,
+        \\{"token":"abc\\","after":"visible"}
     , .{});
+    defer std.testing.allocator.free(redacted);
+    try std.testing.expect(std.mem.indexOf(u8, redacted, "abc") == null);
+    try std.testing.expect(std.mem.indexOf(u8, redacted, "visible") != null);
+}
+
+test "scanAlloc finds GitHub and AWS tokens" {
+    const input =
+        ("gh" ++ "p_1234567890abcdefghij") ++ "\n" ++
+        ("AK" ++ "IA1234567890ABCDEF");
+    const findings = try scanAlloc(std.testing.allocator, input, .{});
     defer std.testing.allocator.free(findings);
     try std.testing.expect(findings.len >= 2);
+}
+
+test "scanAlloc finds Slack tokens" {
+    const token = ("xox" ++ "b-1234567890-1234567890-") ++ "abcdefghijklmnopqrstuvwx";
+    const findings = try scanAlloc(std.testing.allocator, token, .{});
+    defer std.testing.allocator.free(findings);
+    try std.testing.expect(findings.len >= 1);
+    try std.testing.expectEqualStrings("slack_token", findings[0].rule);
+}
+
+test "scanAlloc finds Google API keys" {
+    const token = "AI" ++ "zaSyAbcdefghijklmnopqrstuvwxyz0123456789a";
+    const findings = try scanAlloc(std.testing.allocator, token, .{});
+    defer std.testing.allocator.free(findings);
+    try std.testing.expect(findings.len >= 1);
+    try std.testing.expectEqualStrings("google_api_key", findings[0].rule);
+}
+
+test "scanAlloc finds Stripe live keys" {
+    const token = ("sk_" ++ "live_abcdefghijklmnopqrstuvwxyz") ++ "012345";
+    const findings = try scanAlloc(std.testing.allocator, token, .{});
+    defer std.testing.allocator.free(findings);
+    try std.testing.expect(findings.len >= 1);
+    try std.testing.expectEqualStrings("stripe_key", findings[0].rule);
+}
+
+test "scanAlloc finds OpenAI keys" {
+    const token = "sk" ++ "-abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456";
+    const findings = try scanAlloc(std.testing.allocator, token, .{});
+    defer std.testing.allocator.free(findings);
+    try std.testing.expect(findings.len >= 1);
+    try std.testing.expectEqualStrings("openai_key", findings[0].rule);
+}
+
+test "scanAlloc finds npm tokens" {
+    const token = "np" ++ "m_abcdefghijklmnopqrstuvwxyzABCDEFGHIJKL";
+    const findings = try scanAlloc(std.testing.allocator, token, .{});
+    defer std.testing.allocator.free(findings);
+    try std.testing.expect(findings.len >= 1);
+    try std.testing.expectEqualStrings("npm_token", findings[0].rule);
+}
+
+test "scanAlloc finds JWT tokens" {
+    // A realistic-looking (but fake) JWT: header.payload.signature
+    const findings = try scanAlloc(std.testing.allocator, "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyMTIzIiwiaWF0IjoxNzAwMDAwMDAwfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c", .{});
+    defer std.testing.allocator.free(findings);
+    try std.testing.expect(findings.len >= 1);
+    try std.testing.expectEqualStrings("jwt_token", findings[0].rule);
+}
+
+test "scanAlloc does not flag short sk- prefixes" {
+    const findings = try scanAlloc(std.testing.allocator, "sk-short-id", .{});
+    defer std.testing.allocator.free(findings);
+    var has_openai = false;
+    for (findings) |f| {
+        if (std.mem.eql(u8, f.rule, "openai_key")) has_openai = true;
+    }
+    try std.testing.expect(!has_openai);
+}
+
+test "redactAlloc masks platform tokens" {
+    // Use a non-sensitive key so the loose-assignment scanner doesn't swallow the
+    // entire right-hand side; we want to verify only the token itself is redacted.
+    const text = "log=" ++ (("xox" ++ "b-1234567890-1234567890-") ++ "abcdefghijklmnopqrstuvwx") ++ " and after";
+    const redacted = try redactAlloc(std.testing.allocator, text, .{});
+    defer std.testing.allocator.free(redacted);
+    try std.testing.expect(std.mem.indexOf(u8, redacted, "xoxb-") == null);
+    try std.testing.expect(std.mem.indexOf(u8, redacted, "after") != null);
 }
