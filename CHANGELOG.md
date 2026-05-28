@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.18.1](https://github.com/matt-riley/agengit/compare/v1.18.0...v1.18.1) (2026-05-28)
+
+
+### Bug Fixes
+
+* split release publishing from release-please ([#52](https://github.com/matt-riley/agengit/issues/52)) ([62cacb3](https://github.com/matt-riley/agengit/commit/62cacb3dff9f7c8feca0de9cd5d65b1892ff0a27))
+
 ## [1.18.0](https://github.com/matt-riley/agengit/compare/v1.17.0...v1.18.0) (2026-05-28)
 
 
