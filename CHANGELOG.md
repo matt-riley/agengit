@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.16.0](https://github.com/matt-riley/agengit/compare/v1.15.0...v1.16.0) (2026-05-27)
+
+
+### Features
+
+* add experimental observer support ([faf2545](https://github.com/matt-riley/agengit/commit/faf2545181e93f10120bc8438300ef6d3dde0cdb))
+* add portable bundle export and import ([6299f93](https://github.com/matt-riley/agengit/commit/6299f93ed64155bf8f67b82d4ce5edfaa1bd5b26))
+* add remote push and pull sync ([111f6d0](https://github.com/matt-riley/agengit/commit/111f6d01e827afc5c3cb0a11f40473cd7376f924))
+
+
+### Bug Fixes
+
+* write fake S3 ready file atomically ([ddf550f](https://github.com/matt-riley/agengit/commit/ddf550f2c157751830ec4b4ec2915db5bdfdbb17))
+
 ## [1.15.0](https://github.com/matt-riley/agengit/compare/v1.14.0...v1.15.0) (2026-05-26)
 
 
