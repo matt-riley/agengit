@@ -5,6 +5,8 @@ test "status does not recreate missing .agit subdirectories during open" {
     var sandbox = try harness.Sandbox.init(std.testing.allocator);
     defer sandbox.deinit();
 
+    try sandbox.writeRepoFile(".agit/.keep", "");
+
     const user_payload = try std.fmt.allocPrint(std.testing.allocator,
         \\{{"session_id":"status-open-sess","transcript_path":"transcript.jsonl","cwd":"{s}","hook_event_name":"UserPromptSubmit","prompt":"seed store"}}
     , .{sandbox.cwd});
