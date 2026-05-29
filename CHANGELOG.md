@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.18.2](https://github.com/matt-riley/agengit/compare/v1.18.1...v1.18.2) (2026-05-29)
+
+
+### Bug Fixes
+
+* correct JSON string-end detection and expand secret redaction rules ([16d55ad](https://github.com/matt-riley/agengit/commit/16d55add7c6c963effd070a1e63b9c581360b3dd))
+* harden privacy config and remote security defaults ([1c58dea](https://github.com/matt-riley/agengit/commit/1c58dea56e4004bebf438e0c4f4e7aaa9f443acc))
+* implement Windows process liveness via OpenProcess/GetExitCodeProcess ([04aae7e](https://github.com/matt-riley/agengit/commit/04aae7eb9b91706235e96083997d38d4645635d5))
+* repair stale meta_ref in reconcileSession divergence case ([69a3d42](https://github.com/matt-riley/agengit/commit/69a3d4250e06942cc66095a594874a167e653a95))
+* seed .agit store root before running hooks in non_mutating_open e2e test ([#55](https://github.com/matt-riley/agengit/issues/55)) ([e4cf2c6](https://github.com/matt-riley/agengit/commit/e4cf2c649fc4531f21cd5901f800b77b1daf8e23))
+* upgrade remote encryption KDF from SHA-256 to Argon2id ([c24dab9](https://github.com/matt-riley/agengit/commit/c24dab9071d21010a1d6c528acb6a744c6cd48c5))
+
 ## [1.18.1](https://github.com/matt-riley/agengit/compare/v1.18.0...v1.18.1) (2026-05-28)
 
 
