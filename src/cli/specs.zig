@@ -262,6 +262,20 @@ pub const diff_usage = help_mod.UsageSpec{
     },
 };
 
+pub const between_usage = help_mod.UsageSpec{
+    .name = "between",
+    .synopsis = "[OPTIONS] <FROM> [TO]",
+    .description = "Show recorded steps whose captured Git commit falls between two revisions.",
+    .options = &.{
+        .{ .long = "json", .description = "Render matching steps as structured JSON." },
+        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
+    },
+    .examples = &.{
+        .{ .description = "show steps recorded after one commit through HEAD", .command = "abc123def" },
+        .{ .description = "show steps recorded between two tags", .command = "v1.0.0 v1.1.0" },
+    },
+};
+
 pub const grep_usage = help_mod.UsageSpec{
     .name = "grep",
     .synopsis = "[OPTIONS] <QUERY>",
@@ -385,6 +399,7 @@ pub const public_commands = [_]help_mod.CommandSpec{
     .{ .name = "log", .summary = "Show step history for a session", .usage = &log_usage },
     .{ .name = "show", .summary = "Show details of a step", .usage = &show_usage },
     .{ .name = "diff", .summary = "Show a text diff for a step", .usage = &diff_usage },
+    .{ .name = "between", .summary = "Show steps recorded between Git revisions", .usage = &between_usage },
     .{ .name = "grep", .summary = "Search recorded messages and tool activity", .usage = &grep_usage },
     .{ .name = "blame", .summary = "Show per-line step attribution for a file", .usage = &blame_usage },
     .{ .name = "cat", .summary = "Print a raw object by hash", .usage = &cat_usage },

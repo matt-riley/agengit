@@ -231,6 +231,9 @@ fn indexStepData(
         step.parent,
         step.tree,
         step.timestamp,
+        step.git_commit,
+        step.git_branch,
+        step.git_dirty,
     );
     for (step.messages, 0..) |msg, i| {
         try store.index.insertMessage(object_hex, @intCast(i), msg.role, msg.content);
@@ -361,6 +364,9 @@ fn replayFromHead(
             step.parent,
             step.tree,
             step.timestamp,
+            step.git_commit,
+            step.git_branch,
+            step.git_dirty,
         );
         for (step.messages, 0..) |msg, seq| {
             try store.index.insertMessage(&h_hex, @intCast(seq), msg.role, msg.content);

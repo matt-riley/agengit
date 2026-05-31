@@ -22,6 +22,9 @@ const LatestCapture = struct {
     session_id: []const u8,
     turn_id: []const u8,
     timestamp: i64,
+    git_commit: ?[]const u8 = null,
+    git_branch: ?[]const u8 = null,
+    git_dirty: ?bool = null,
 };
 
 const WarningSummary = struct {
@@ -165,6 +168,13 @@ fn writeHuman(
             capture.turn_id,
             capture.hash[0..@min(12, capture.hash.len)],
         });
+        if (capture.git_commit) |commit| {
+            try stdout.interface.print("Git context:     {s}@{s}{s}\n", .{
+                capture.git_branch orelse "(detached)",
+                commit[0..@min(12, commit.len)],
+                if (capture.git_dirty orelse false) "*" else "",
+            });
+        }
     } else {
         try stdout.interface.writeAll("Latest capture:  (none)\n");
     }
@@ -302,6 +312,9 @@ fn loadLatestCapture(gpa: std.mem.Allocator, store: *store_mod.Store) !?LatestCa
         .session_id = row.session_id,
         .turn_id = row.turn_id,
         .timestamp = row.timestamp,
+        .git_commit = row.git_commit,
+        .git_branch = row.git_branch,
+        .git_dirty = row.git_dirty,
     };
 }
 
@@ -310,6 +323,8 @@ fn deinitLatestCapture(gpa: std.mem.Allocator, capture: LatestCapture) void {
     gpa.free(capture.origin);
     gpa.free(capture.session_id);
     gpa.free(capture.turn_id);
+    if (capture.git_commit) |value| gpa.free(value);
+    if (capture.git_branch) |value| gpa.free(value);
 }
 
 fn chooseNextStep(steps_count: i64, warnings: WarningSummary, agent_summary: AgentSummary) []const u8 {

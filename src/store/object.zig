@@ -48,6 +48,12 @@ pub const StepToolCall = struct {
     result: ?[]const u8,
 };
 
+pub const GitContext = struct {
+    commit: ?[]const u8 = null,
+    branch: ?[]const u8 = null,
+    dirty: ?bool = null,
+};
+
 /// An agent turn: the core unit of recorded activity.
 ///
 /// `messages` and `tool_calls` default to empty so that step objects written
@@ -63,6 +69,9 @@ pub const Step = struct {
     timestamp: i64,
     messages: []const StepMessage = &.{},
     tool_calls: []const StepToolCall = &.{},
+    git_commit: ?[]const u8 = null,
+    git_branch: ?[]const u8 = null,
+    git_dirty: ?bool = null,
 };
 
 /// Write `data` to the content-addressed object store under `root`.
@@ -289,6 +298,16 @@ test "write and read Step" {
     try std.testing.expectEqualStrings("session-abc", parsed.value.session_id);
     try std.testing.expect(parsed.value.parent == null);
     try std.testing.expectEqual(@as(i64, 1700000000000), parsed.value.timestamp);
+}
+
+test "read Step without git context defaults optional fields to null" {
+    var parsed = try std.json.parseFromSlice(Step, std.testing.allocator,
+        \\{"type":"step","parent":null,"tree":"b","session_id":"session-abc","origin":"claude","turn_id":"turn-1","causes":[],"timestamp":1700000000000}
+    , .{ .allocate = .alloc_always });
+    defer parsed.deinit();
+    try std.testing.expect(parsed.value.git_commit == null);
+    try std.testing.expect(parsed.value.git_branch == null);
+    try std.testing.expect(parsed.value.git_dirty == null);
 }
 
 test "resolvePrefix finds object" {

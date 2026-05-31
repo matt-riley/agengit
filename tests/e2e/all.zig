@@ -37,6 +37,7 @@ test {
     _ = @import("fsck/object_hash_mismatch.zig");
     _ = @import("fsck/reindex_repairs_index.zig");
     _ = @import("gc/prune_and_cleanup.zig");
+    _ = @import("git/between.zig");
     _ = @import("grep/search.zig");
     _ = @import("investigation/views.zig");
     _ = @import("portable_bundle.zig");
