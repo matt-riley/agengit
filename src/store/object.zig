@@ -69,6 +69,7 @@ pub const Step = struct {
     timestamp: i64,
     messages: []const StepMessage = &.{},
     tool_calls: []const StepToolCall = &.{},
+    outcome: ?[]const u8 = null,
     git_commit: ?[]const u8 = null,
     git_branch: ?[]const u8 = null,
     git_dirty: ?bool = null,
@@ -300,11 +301,12 @@ test "write and read Step" {
     try std.testing.expectEqual(@as(i64, 1700000000000), parsed.value.timestamp);
 }
 
-test "read Step without git context defaults optional fields to null" {
+test "read Step without optional metadata defaults fields to null" {
     var parsed = try std.json.parseFromSlice(Step, std.testing.allocator,
         \\{"type":"step","parent":null,"tree":"b","session_id":"session-abc","origin":"claude","turn_id":"turn-1","causes":[],"timestamp":1700000000000}
     , .{ .allocate = .alloc_always });
     defer parsed.deinit();
+    try std.testing.expect(parsed.value.outcome == null);
     try std.testing.expect(parsed.value.git_commit == null);
     try std.testing.expect(parsed.value.git_branch == null);
     try std.testing.expect(parsed.value.git_dirty == null);

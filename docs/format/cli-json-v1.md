@@ -49,6 +49,7 @@ Doctor checks extend the same shape with a `status` field whose values are
 - `agit sessions --json`
 - `agit log --json`
 - `agit show --json <hash>`
+- `agit recall --json [QUERY]`
 - `agit doctor --json`
 - `agit fsck --json`
 - `agit export --json <path>`

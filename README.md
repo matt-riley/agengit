@@ -14,11 +14,10 @@ change before a long-term stable format is declared.
 
 Shipping today: local `.agit/` capture stores, hook installation for Claude
 Code/OpenAI Codex CLI/Google Gemini CLI/GitHub Copilot CLI/Pi, investigation
-views including
-`agit timeline`, `agit show --files/--stat`, and `agit diff`, health/recovery
-tooling including read-only `agit fsck`, S3-compatible remote `agit push` /
-`agit pull`, generated shell completions, and structured JSON for the commands
-that advertise it.
+views including `agit timeline`, `agit show --files/--stat`, `agit diff`, and
+`agit recall`, health/recovery tooling including read-only `agit fsck`,
+S3-compatible remote `agit push` / `agit pull`, generated shell completions,
+and structured JSON for the commands that advertise it.
 
 Supported hook integrations today:
 
@@ -266,6 +265,18 @@ Show recorded steps whose captured Git commit falls between two revisions.
 # show steps recorded after one commit through HEAD
 agit between abc123def
 ```
+
+### `agit recall`
+Retrieve prior recorded steps to inform the current task.
+
+**Synopsis:** `agit recall [OPTIONS] [QUERY]`
+
+```sh
+# show recent prior work on one file
+agit recall --path src/main.zig
+```
+
+**Notes:** Recall is agent-initiated pull memory. Pass a query, a --path filter, or both.
 
 ### `agit grep`
 Search recorded messages and tool activity across all sessions.

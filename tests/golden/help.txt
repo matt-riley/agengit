@@ -25,6 +25,7 @@ Commands:
   show          Show details of a step
   diff          Show captured file diffs
   between       Show steps recorded between Git revisions
+  recall        Retrieve prior recorded steps
   grep          Search recorded messages and tool activity
   blame         Show per-line step attribution for a file
   watch         Follow newly recorded steps
