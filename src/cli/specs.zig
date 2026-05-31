@@ -322,13 +322,16 @@ pub const blame_usage = help_mod.UsageSpec{
     .synopsis = "[OPTIONS] <FILE>",
     .description = "Show per-line step attribution for a file path.",
     .options = &.{
-        .{ .long = "no-limits", .description = "Disable the blame file-size cap for this invocation when blame output is available." },
+        .{ .long = "json", .description = "Render blame attribution as structured JSON." },
+        .{ .long = "step", .value_name = "hash", .description = "Show blame as of the given step instead of the latest." },
+        .{ .long = "no-limits", .description = "Disable the blame file-size cap for this invocation." },
         .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
     },
     .examples = &.{
         .{ .description = "show blame for a file", .command = "src/main.zig" },
+        .{ .description = "show blame as of a specific step", .command = "--step abc123 src/main.zig" },
     },
-    .notes = "Blame recording is not yet available. When blame rendering lands, AGIT_MAX_FILE_BYTES will set the default large-file cap and --no-limits will disable it for one run.",
+    .notes = "AGIT_MAX_FILE_BYTES sets the default large-file cap and --no-limits disables it for one run.",
 };
 
 pub const cat_usage = help_mod.UsageSpec{

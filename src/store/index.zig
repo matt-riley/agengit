@@ -5,7 +5,7 @@ const zqlite = @import("zqlite");
 pub const Index = struct {
     db: zqlite.Conn,
 
-    pub const current_schema_version: i64 = 8;
+    pub const current_schema_version: i64 = 9;
     pub const objects_complete_meta_key = "index.objects.complete";
 
     pub const ObjectPrefixMatches = struct {
@@ -87,6 +87,9 @@ pub const Index = struct {
         }
         if (current_version < 8) {
             try self.applyMigration8();
+        }
+        if (current_version < 9) {
+            try self.applyMigration9();
         }
     }
 
@@ -382,6 +385,7 @@ pub const Index = struct {
         try self.db.execNoArgs("delete from messages");
         try self.db.execNoArgs("delete from steps");
         try self.db.execNoArgs("delete from sessions");
+        try self.db.execNoArgs("delete from blame_maps");
         try self.db.execNoArgs("delete from packed_objects");
         try self.db.execNoArgs("delete from objects");
         try self.db.commit();
@@ -529,6 +533,134 @@ pub const Index = struct {
         ) orelse return null;
         defer row.deinit();
         return std.mem.eql(u8, row.get([]const u8, 0), "1");
+    }
+
+    fn applyMigration9(self: Index) !void {
+        try self.db.transaction();
+        errdefer self.db.rollback();
+
+        try self.db.execNoArgs(
+            \\create table if not exists blame_maps (
+            \\  path           text not null,
+            \\  step_hash      text not null,
+            \\  blame_hash     text not null,
+            \\  blob_hash      text not null,
+            \\  session_origin text not null,
+            \\  session_id     text not null,
+            \\  timestamp      integer not null,
+            \\  primary key (path, step_hash)
+            \\)
+        );
+        try self.db.execNoArgs(
+            "create index if not exists blame_maps_path_order on blame_maps(path, timestamp desc, step_hash desc)",
+        );
+
+        try self.db.exec(
+            "insert into schema_migrations (version) values (?)",
+            .{@as(i64, 9)},
+        );
+
+        try self.db.execNoArgs("pragma user_version = 9");
+        try self.db.commit();
+    }
+
+    /// Insert or update the blame_maps row for (path, step_hash).
+    pub fn insertBlameMap(
+        self: Index,
+        path: []const u8,
+        step_hash: []const u8,
+        blame_hash: []const u8,
+        blob_hash: []const u8,
+        session_origin: []const u8,
+        session_id: []const u8,
+        timestamp: i64,
+    ) !void {
+        try self.db.exec(
+            \\insert into blame_maps
+            \\  (path, step_hash, blame_hash, blob_hash, session_origin, session_id, timestamp)
+            \\values (?, ?, ?, ?, ?, ?, ?)
+            \\on conflict(path, step_hash) do update set
+            \\  blame_hash = excluded.blame_hash,
+            \\  blob_hash  = excluded.blob_hash,
+            \\  timestamp  = excluded.timestamp
+        , .{ path, step_hash, blame_hash, blob_hash, session_origin, session_id, timestamp });
+    }
+
+    pub const BlameRow = struct {
+        step_hash: [64]u8,
+        blame_hash: [64]u8,
+        blob_hash: [64]u8,
+        timestamp: i64,
+    };
+
+    fn rowToBlame(row: anytype) ?BlameRow {
+        const step_hex = row.get([]const u8, 0);
+        const blame_hex = row.get([]const u8, 1);
+        const blob_hex = row.get([]const u8, 2);
+        if (step_hex.len != 64 or blame_hex.len != 64 or blob_hex.len != 64) return null;
+        var out: BlameRow = .{ .step_hash = undefined, .blame_hash = undefined, .blob_hash = undefined, .timestamp = row.get(i64, 3) };
+        @memcpy(out.step_hash[0..], step_hex);
+        @memcpy(out.blame_hash[0..], blame_hex);
+        @memcpy(out.blob_hash[0..], blob_hex);
+        return out;
+    }
+
+    /// Latest blame row for a path, by (timestamp, step_hash) descending.
+    pub fn queryLatestBlame(self: Index, path: []const u8) !?BlameRow {
+        const row = try self.db.row(
+            \\select step_hash, blame_hash, blob_hash, timestamp from blame_maps
+            \\where path=? order by timestamp desc, step_hash desc limit 1
+        , .{path}) orelse return null;
+        defer row.deinit();
+        return rowToBlame(row);
+    }
+
+    /// Latest blame row for a path at or before the given (timestamp, step_hash).
+    pub fn queryBlameAtStep(self: Index, path: []const u8, timestamp: i64, step_hash: []const u8) !?BlameRow {
+        const row = try self.db.row(
+            \\select step_hash, blame_hash, blob_hash, timestamp from blame_maps
+            \\where path=? and (timestamp < ? or (timestamp = ? and step_hash <= ?))
+            \\order by timestamp desc, step_hash desc limit 1
+        , .{ path, timestamp, timestamp, step_hash }) orelse return null;
+        defer row.deinit();
+        return rowToBlame(row);
+    }
+
+    pub fn clearBlameMaps(self: Index) !void {
+        try self.db.execNoArgs("delete from blame_maps");
+    }
+
+    pub const StepMeta = struct {
+        origin: []const u8,
+        timestamp: i64,
+    };
+
+    /// Origin and timestamp for an attributing step, looked up from any
+    /// blame_maps row it produced. `origin` is duplicated into `gpa`.
+    pub fn queryStepMeta(self: Index, gpa: std.mem.Allocator, step_hash: []const u8) !?StepMeta {
+        const row = try self.db.row(
+            "select session_origin, timestamp from blame_maps where step_hash=? limit 1",
+            .{step_hash},
+        ) orelse return null;
+        defer row.deinit();
+        return StepMeta{
+            .origin = try gpa.dupe(u8, row.get([]const u8, 0)),
+            .timestamp = row.get(i64, 1),
+        };
+    }
+
+    /// Append the distinct blame object hashes referenced by blame_maps to `out`.
+    pub fn collectBlameHashes(self: Index, gpa: std.mem.Allocator, out: *std.ArrayList([64]u8)) !void {
+        var rs = try self.db.rows("select distinct blame_hash from blame_maps", .{});
+        defer rs.deinit();
+        while (rs.next()) |row| {
+            const hex = row.get([]const u8, 0);
+            if (hex.len != 64) continue;
+            var buf: [64]u8 = undefined;
+            @memcpy(buf[0..], hex);
+            try out.append(gpa, buf);
+        }
+        if (rs.err) |err| return err;
     }
 
     /// Insert a message row for a step. Idempotent via (step_hash, seq) uniqueness.
@@ -1117,7 +1249,7 @@ test "index migrate creates query-path indexes" {
     const user_ver = try idx.db.row("pragma user_version", .{});
     try std.testing.expect(user_ver != null);
     defer user_ver.?.deinit();
-    try std.testing.expectEqual(@as(i64, 8), user_ver.?.get(i64, 0));
+    try std.testing.expectEqual(@as(i64, 9), user_ver.?.get(i64, 0));
 }
 
 test "index upsertSession and insertStep" {
@@ -1154,6 +1286,54 @@ test "index upsertSession and insertStep" {
     try std.testing.expect(step_row.?.get(?[]const u8, 0) == null);
     try std.testing.expect(step_row.?.get(?[]const u8, 1) == null);
     try std.testing.expect(step_row.?.get(?i64, 2) == null);
+}
+
+test "blame_maps insert and query helpers" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = std.testing.io;
+
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const n = try tmp.dir.realPath(io, &path_buf);
+    var db_path_buf: [std.fs.max_path_bytes + 12]u8 = undefined;
+    const db_path = try std.fmt.bufPrintZ(&db_path_buf, "{s}/index.db", .{path_buf[0..n]});
+
+    const idx = try Index.open(db_path);
+    defer idx.close();
+    try idx.migrate();
+
+    const step_a = "a" ** 64;
+    const step_b = "b" ** 64;
+    const blame_a = "1" ** 64;
+    const blame_b = "2" ** 64;
+    const blob_a = "3" ** 64;
+    const blob_b = "4" ** 64;
+
+    try idx.insertBlameMap("file.txt", step_a, blame_a, blob_a, "claude", "s1", 100);
+    try idx.insertBlameMap("file.txt", step_b, blame_b, blob_b, "codex", "s2", 200);
+
+    // Latest is the row with the greatest timestamp.
+    const latest = (try idx.queryLatestBlame("file.txt")).?;
+    try std.testing.expectEqualStrings(blame_b, latest.blame_hash[0..]);
+
+    // As-of an earlier step resolves to the earlier row.
+    const as_of = (try idx.queryBlameAtStep("file.txt", 100, step_a)).?;
+    try std.testing.expectEqualStrings(blame_a, as_of.blame_hash[0..]);
+
+    // Step metadata is recoverable for attribution rendering.
+    const meta = (try idx.queryStepMeta(std.testing.allocator, step_b)).?;
+    defer std.testing.allocator.free(meta.origin);
+    try std.testing.expectEqualStrings("codex", meta.origin);
+    try std.testing.expectEqual(@as(i64, 200), meta.timestamp);
+
+    // Reachable blame hashes are collected for gc marking.
+    var hashes: std.ArrayList([64]u8) = .empty;
+    defer hashes.deinit(std.testing.allocator);
+    try idx.collectBlameHashes(std.testing.allocator, &hashes);
+    try std.testing.expectEqual(@as(usize, 2), hashes.items.len);
+
+    try idx.clearBlameMaps();
+    try std.testing.expect((try idx.queryLatestBlame("file.txt")) == null);
 }
 
 test "insertStep is idempotent for duplicate turn ids" {

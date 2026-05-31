@@ -29,7 +29,7 @@ The goal is not to replace git. Git remains the source-control castle; `agit` is
 | Codex CLI hooks | Done | Captures prompt, tool-use, and stop events. |
 | Gemini CLI hooks | Done | Captures after-tool and after-agent events. |
 | User CLI | Mostly done | `status`, `sessions`, `log`, `show`, `cat`, `reindex`, `completion`, `doctor`, `init`, and `uninstall` exist. |
-| Line blame | Placeholder | `agit blame` is present, but blame recording is not available yet. |
+| Line blame | Done | `agit blame <file>` renders per-line step attribution, recorded at finalize and rebuildable via `agit reindex`. |
 | Pi support | Not started | Planned filesystem-observer path for the `pi.dev` coding agent. |
 | GitHub Copilot CLI support | Not started | Needs observer/MCP design because Copilot has no public lifecycle hooks. |
 | Release automation | Done | CI builds release archives, checksums, Release Please releases, and optional Homebrew formula updates. |

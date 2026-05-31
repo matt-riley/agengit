@@ -172,6 +172,8 @@ extern "agit grep" [
 ]
 
 extern "agit blame" [
+    --json
+    --step: string
     --no-limits
     --help(-h)
 ]

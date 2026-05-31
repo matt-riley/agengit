@@ -32,6 +32,34 @@ pub fn isBinary(data: []const u8) bool {
     return std.mem.indexOfScalar(u8, probe, 0) != null;
 }
 
+/// Prefix written by `transformSnapshotData` for `metadata_only` capture.
+pub const metadata_only_marker = "[[agit snapshot metadata-only";
+
+/// Returns true when `data` is a snapshot placeholder rather than real file
+/// content (e.g. a `metadata_only` capture).  Such blobs have no line content
+/// to attribute and are skipped by blame in both finalize and reindex so the
+/// two paths always agree.
+pub fn isSnapshotPlaceholder(data: []const u8) bool {
+    return std.mem.startsWith(u8, data, metadata_only_marker);
+}
+
+/// Split `text` into lines for line-level attribution.
+///
+/// Splits on `\n` and trims a trailing `\r` so CRLF and LF content compare
+/// equally.  A trailing `\n` yields a final empty line.  This is the single
+/// canonical line splitter shared by blame recording, reindex, and rendering;
+/// using it everywhere preserves the `old_blame.len == old_lines.len`
+/// invariant.  Caller owns the returned slice (the line slices borrow `text`).
+pub fn splitLines(gpa: std.mem.Allocator, text: []const u8) ![]const []const u8 {
+    var lines: std.ArrayList([]const u8) = .empty;
+    errdefer lines.deinit(gpa);
+    var iter = std.mem.splitScalar(u8, text, '\n');
+    while (iter.next()) |line| {
+        try lines.append(gpa, std.mem.trimEnd(u8, line, "\r"));
+    }
+    return lines.toOwnedSlice(gpa);
+}
+
 /// Walk `repo_dir` and write a snapshot Tree object to the store.
 ///
 /// Returns the Tree hash.  Paths are workspace-relative.  The following are
@@ -433,4 +461,42 @@ test "snapshot: disabled capture writes an empty tree" {
     var parsed = try object.readTree(io, tmp.dir, gpa, h);
     defer parsed.deinit();
     try std.testing.expectEqual(@as(usize, 0), parsed.value.entries.len);
+}
+
+test "splitLines: edge cases" {
+    const gpa = std.testing.allocator;
+
+    const empty = try splitLines(gpa, "");
+    defer gpa.free(empty);
+    try std.testing.expectEqual(@as(usize, 1), empty.len);
+    try std.testing.expectEqualStrings("", empty[0]);
+
+    const one = try splitLines(gpa, "a");
+    defer gpa.free(one);
+    try std.testing.expectEqual(@as(usize, 1), one.len);
+    try std.testing.expectEqualStrings("a", one[0]);
+
+    const trailing = try splitLines(gpa, "a\n");
+    defer gpa.free(trailing);
+    try std.testing.expectEqual(@as(usize, 2), trailing.len);
+    try std.testing.expectEqualStrings("a", trailing[0]);
+    try std.testing.expectEqualStrings("", trailing[1]);
+
+    const crlf = try splitLines(gpa, "a\r\n");
+    defer gpa.free(crlf);
+    try std.testing.expectEqual(@as(usize, 2), crlf.len);
+    try std.testing.expectEqualStrings("a", crlf[0]);
+    try std.testing.expectEqualStrings("", crlf[1]);
+
+    const blank = try splitLines(gpa, "a\n\n");
+    defer gpa.free(blank);
+    try std.testing.expectEqual(@as(usize, 3), blank.len);
+    try std.testing.expectEqualStrings("a", blank[0]);
+    try std.testing.expectEqualStrings("", blank[1]);
+    try std.testing.expectEqualStrings("", blank[2]);
+}
+
+test "isSnapshotPlaceholder: detects metadata-only marker" {
+    try std.testing.expect(isSnapshotPlaceholder("[[agit snapshot metadata-only path=a bytes=3]]\n"));
+    try std.testing.expect(!isSnapshotPlaceholder("hello\nworld\n"));
 }
