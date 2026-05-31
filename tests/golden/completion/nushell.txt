@@ -31,7 +31,7 @@ def "nu-complete agit command" [] {
     ]
 }
 def "nu-complete agit init-agent" [] {
-    ['claude', 'codex', 'gemini', 'copilot']
+    ['claude', 'codex', 'gemini', 'copilot', 'pi']
 }
 
 extern "agit" [

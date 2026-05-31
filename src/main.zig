@@ -41,6 +41,7 @@ const cli = struct {
     const codex_hook = @import("cli/codex_hook.zig");
     const gemini_hook = @import("cli/gemini_hook.zig");
     const copilot_hook = @import("cli/copilot_hook.zig");
+    const pi_hook = @import("cli/pi_hook.zig");
 };
 
 pub const version = version_mod.value;
@@ -79,6 +80,7 @@ const SubCommand = enum {
     @"codex-hook",
     @"gemini-hook",
     @"copilot-hook",
+    @"pi-hook",
 };
 
 const top_parsers = .{
@@ -176,6 +178,7 @@ pub fn main(init: std.process.Init) !void {
         .@"codex-hook" => try cli.codex_hook.run(init.io, init.gpa, &iter),
         .@"gemini-hook" => try cli.gemini_hook.run(init.io, init.gpa, &iter),
         .@"copilot-hook" => try cli.copilot_hook.run(init.io, init.gpa, &iter),
+        .@"pi-hook" => try cli.pi_hook.run(init.io, init.gpa, &iter),
     }
 
     try stdout.flush();
@@ -229,6 +232,8 @@ test {
     _ = @import("cli/codex_hook.zig");
     _ = @import("cli/gemini_hook.zig");
     _ = @import("cli/copilot_hook.zig");
+    _ = @import("cli/pi_hook.zig");
+    _ = @import("cli/pi_extension.zig");
     _ = @import("cli/reindex.zig");
     _ = @import("cli/init.zig");
     _ = @import("cli/observe.zig");

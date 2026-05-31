@@ -1,7 +1,28 @@
 # ADR 028: Observer-based integrations for agents without lifecycle hooks
 
-**Status:** Implemented
+**Status:** Partially superseded — see Update (2026)
 **Date:** 2026-05-25
+
+## Update (2026): Copilot and Pi ship as hook adapters
+
+This ADR assumed GitHub Copilot CLI and Pi lacked a usable lifecycle-hook shape
+and would require the observer framework. That assumption proved wrong for both:
+
+- **GitHub Copilot CLI** exposes a `~/.copilot/hooks.json` config with
+  `userPromptSubmitted`/`postToolUse`/`agentStop` command hooks that deliver
+  JSON payloads on stdin — the same model as Codex. It is implemented as a
+  standard hook adapter (`src/hook/adapters/copilot.zig`), not an observer.
+- **Pi** auto-discovers JavaScript extensions under `~/.pi/agent/extensions/`.
+  `agit init` writes a generated, self-contained `agit-recorder.js` that
+  subscribes to Pi lifecycle events and shells out to `agit pi-hook` with a
+  normalized payload. This is a generated-extension install kind
+  (`install_kind = .js_extension` in `src/cli/init_plan.zig`) feeding the same
+  hook adapter pipeline (`src/hook/adapters/pi.zig`), not an observer.
+
+The observer framework below remains the intended architecture for genuinely
+hookless agents (file/log/IPC-only state), and the experimental
+`agit observe --once` path is unchanged. Only the specific Pi/Copilot targeting
+in the original decision is superseded.
 
 ## Context
 

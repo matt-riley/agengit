@@ -1,9 +1,11 @@
 const std = @import("std");
 const exe_path_mod = @import("../util/exe_path.zig");
 const home_mod = @import("../util/home.zig");
+const fs_mod = @import("../util/fs.zig");
 const atomic_json_mod = @import("../util/atomic_json.zig");
 const help_mod = @import("help.zig");
 const init_plan_mod = @import("init_plan.zig");
+const pi_extension = @import("pi_extension.zig");
 const specs = @import("specs.zig");
 
 pub const usage = specs.init_usage;
@@ -296,6 +298,12 @@ fn installAgent(
         },
     };
 
+    // JS-extension agents (Pi) have no JSON config to merge; write a generated
+    // extension file that Pi auto-discovers and loads.
+    if (agent_plan.agent.install_kind == .js_extension) {
+        return installJsExtension(io, gpa, agent_plan, exe, crash_after_tmp_write, stdout);
+    }
+
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
     const aa = arena.allocator();
@@ -375,6 +383,40 @@ fn installAgent(
     };
 
     try stdout.interface.print("agit init: wrote {s} hooks to {s}\n", .{ agent_name, config_path });
+}
+
+/// Write a generated JS extension file for a JS-extension agent (Pi). The file
+/// is self-contained and embeds the agit binary path; it is always rewritten so
+/// reruns pick up a moved binary or updated template.
+fn installJsExtension(
+    io: std.Io,
+    gpa: std.mem.Allocator,
+    agent_plan: init_plan_mod.AgentPlan,
+    exe: []const u8,
+    crash_after_tmp_write: bool,
+    stdout: *std.Io.File.Writer,
+) !void {
+    const config_path = agent_plan.config_path;
+    const agent_name = agent_plan.agent.name;
+
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const aa = arena.allocator();
+
+    const source = try pi_extension.render(aa, exe);
+
+    var af = std.Io.Dir.cwd().createFileAtomic(io, config_path, .{ .replace = true, .make_path = false }) catch |err| {
+        try stdout.interface.print("agit init: failed to write {s} extension {s}: {s}\n", .{
+            agent_name, config_path, @errorName(err),
+        });
+        return err;
+    };
+    defer af.deinit(io);
+    try af.file.writeStreamingAll(io, source);
+    if (crash_after_tmp_write) return;
+    try fs_mod.atomicReplace(io, &af);
+
+    try stdout.interface.print("agit init: wrote {s} extension to {s}\n", .{ agent_name, config_path });
 }
 
 /// Merge agit-managed entries into Claude Code settings.json hooks object.

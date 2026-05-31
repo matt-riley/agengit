@@ -6,7 +6,7 @@ DESCRIPTION:
 
 OPTIONS:
     --agent <name>
-        Install only the specified agent (claude, codex, gemini, copilot). Can be repeated.
+        Install only the specified agent (claude, codex, gemini, copilot, pi). Can be repeated.
     --dry-run
         Show what would be installed without making changes.
     --force

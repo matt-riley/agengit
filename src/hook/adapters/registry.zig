@@ -4,6 +4,7 @@ const claude = @import("claude.zig");
 const codex = @import("codex.zig");
 const gemini = @import("gemini.zig");
 const copilot = @import("copilot.zig");
+const pi = @import("pi.zig");
 
 pub const all = [_]adapter_mod.Adapter{
     claude.hook_adapter,
@@ -11,6 +12,7 @@ pub const all = [_]adapter_mod.Adapter{
     codex.adapter,
     gemini.adapter,
     copilot.adapter,
+    pi.adapter,
 };
 
 test "registered adapters declare handler contract" {
