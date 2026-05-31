@@ -40,6 +40,7 @@ const cli = struct {
     const claude_tool_batch_hook = @import("cli/claude_tool_batch_hook.zig");
     const codex_hook = @import("cli/codex_hook.zig");
     const gemini_hook = @import("cli/gemini_hook.zig");
+    const copilot_hook = @import("cli/copilot_hook.zig");
 };
 
 pub const version = version_mod.value;
@@ -77,6 +78,7 @@ const SubCommand = enum {
     @"claude-tool-batch-hook",
     @"codex-hook",
     @"gemini-hook",
+    @"copilot-hook",
 };
 
 const top_parsers = .{
@@ -173,6 +175,7 @@ pub fn main(init: std.process.Init) !void {
         .@"claude-tool-batch-hook" => try cli.claude_tool_batch_hook.run(init.io, init.gpa, &iter),
         .@"codex-hook" => try cli.codex_hook.run(init.io, init.gpa, &iter),
         .@"gemini-hook" => try cli.gemini_hook.run(init.io, init.gpa, &iter),
+        .@"copilot-hook" => try cli.copilot_hook.run(init.io, init.gpa, &iter),
     }
 
     try stdout.flush();
@@ -225,6 +228,7 @@ test {
     _ = @import("cli/claude_tool_batch_hook.zig");
     _ = @import("cli/codex_hook.zig");
     _ = @import("cli/gemini_hook.zig");
+    _ = @import("cli/copilot_hook.zig");
     _ = @import("cli/reindex.zig");
     _ = @import("cli/init.zig");
     _ = @import("cli/observe.zig");

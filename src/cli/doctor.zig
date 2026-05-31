@@ -82,9 +82,11 @@ pub fn run(
     try checkConfigTmpFiles(io, gpa, home, "claude", ".claude/settings.json", &stdout);
     try checkConfigTmpFiles(io, gpa, home, "codex", ".codex/hooks.json", &stdout);
     try checkConfigTmpFiles(io, gpa, home, "gemini", ".gemini/settings.json", &stdout);
+    try checkConfigTmpFiles(io, gpa, home, "copilot", ".copilot/hooks.json", &stdout);
     if (!try checkAgent(io, gpa, environ, home, exe, "claude", ".claude/settings.json", &stdout)) has_failures = true;
     if (!try checkAgent(io, gpa, environ, home, exe, "codex", ".codex/hooks.json", &stdout)) has_failures = true;
     if (!try checkAgent(io, gpa, environ, home, exe, "gemini", ".gemini/settings.json", &stdout)) has_failures = true;
+    if (!try checkAgent(io, gpa, environ, home, exe, "copilot", ".copilot/hooks.json", &stdout)) has_failures = true;
 
     try stdout.flush();
     if (has_failures) std.process.exit(1);
@@ -279,9 +281,11 @@ fn runJson(
     try appendConfigTmpCheck(io, gpa, aa, home, "claude", ".claude/settings.json", &checks);
     try appendConfigTmpCheck(io, gpa, aa, home, "codex", ".codex/hooks.json", &checks);
     try appendConfigTmpCheck(io, gpa, aa, home, "gemini", ".gemini/settings.json", &checks);
+    try appendConfigTmpCheck(io, gpa, aa, home, "copilot", ".copilot/hooks.json", &checks);
     try checks.append(gpa, try collectAgentCheck(io, gpa, environ, aa, home, exe, "claude", ".claude/settings.json"));
     try checks.append(gpa, try collectAgentCheck(io, gpa, environ, aa, home, exe, "codex", ".codex/hooks.json"));
     try checks.append(gpa, try collectAgentCheck(io, gpa, environ, aa, home, exe, "gemini", ".gemini/settings.json"));
+    try checks.append(gpa, try collectAgentCheck(io, gpa, environ, aa, home, exe, "copilot", ".copilot/hooks.json"));
 
     const check_slice = try checks.toOwnedSlice(gpa);
     defer gpa.free(check_slice);

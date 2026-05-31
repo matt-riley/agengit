@@ -3,12 +3,14 @@ const adapter_mod = @import("../Adapter.zig");
 const claude = @import("claude.zig");
 const codex = @import("codex.zig");
 const gemini = @import("gemini.zig");
+const copilot = @import("copilot.zig");
 
 pub const all = [_]adapter_mod.Adapter{
     claude.hook_adapter,
     claude.tool_batch_adapter,
     codex.adapter,
     gemini.adapter,
+    copilot.adapter,
 };
 
 test "registered adapters declare handler contract" {

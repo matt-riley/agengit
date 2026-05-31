@@ -1,0 +1,8 @@
+{
+  "session_id": "copilot-sess-001",
+  "cwd": "/home/user/myproject",
+  "hook_event_name": "Stop",
+  "timestamp": "2024-01-01T00:00:02.000Z",
+  "transcript_path": "/home/user/.copilot/history/copilot-sess-001.json",
+  "stop_reason": "end_turn"
+}

@@ -40,6 +40,7 @@ pub fn run(
     try uninstallAgent(io, gpa, home, exe, ".claude/settings.json", crash_after_tmp_write, &stdout, removeClaude);
     try uninstallAgent(io, gpa, home, exe, ".codex/hooks.json", crash_after_tmp_write, &stdout, removeSimpleHooks);
     try uninstallAgent(io, gpa, home, exe, ".gemini/settings.json", crash_after_tmp_write, &stdout, removeSimpleHooks);
+    try uninstallAgent(io, gpa, home, exe, ".copilot/hooks.json", crash_after_tmp_write, &stdout, removeSimpleHooks);
 
     try stdout.flush();
 }

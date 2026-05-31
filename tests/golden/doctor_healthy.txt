@@ -6,3 +6,4 @@
   - claude: not installed
   - codex: not installed
   - gemini: not installed
+  - copilot: not installed

@@ -359,6 +359,8 @@ fn installAgent(
         try setCodexHooks(aa, &root.object, exe);
     } else if (std.mem.eql(u8, agent_plan.agent.id, "gemini")) {
         try setGeminiHooks(aa, &root.object, exe);
+    } else if (std.mem.eql(u8, agent_plan.agent.id, "copilot")) {
+        try setCopilotHooks(aa, &root.object, exe);
     } else {
         return error.UnknownAgent;
     }
@@ -497,6 +499,48 @@ fn makeGeminiHook(aa: std.mem.Allocator, exe: []const u8, subcmd: []const u8) !s
 
     var arr = std.json.Array.init(aa);
     try arr.append(std.json.Value{ .object = obj });
+    return std.json.Value{ .array = arr };
+}
+
+/// Merge agit-managed entries into Copilot CLI hooks.json.
+/// Copilot uses camelCase event keys with flat `{type, command, args}` entries.
+fn setCopilotHooks(aa: std.mem.Allocator, root: *std.json.ObjectMap, exe: []const u8) !void {
+    var hooks_obj = std.json.ObjectMap.empty;
+    try hooks_obj.put(aa, "userPromptSubmitted", try makeCopilotList(aa, exe, &.{"copilot-hook"}));
+    try hooks_obj.put(aa, "postToolUse", try makeCopilotList(aa, exe, &.{"copilot-hook"}));
+    try hooks_obj.put(aa, "agentStop", try makeCopilotList(aa, exe, &.{"copilot-hook"}));
+
+    if (root.get("hooks")) |existing| {
+        if (existing == .object) {
+            var it = existing.object.iterator();
+            while (it.next()) |entry| {
+                if (hooks_obj.get(entry.key_ptr.*) != null) continue;
+                try hooks_obj.put(aa, entry.key_ptr.*, entry.value_ptr.*);
+            }
+        }
+    }
+
+    try root.put(aa, "hooks", std.json.Value{ .object = hooks_obj });
+
+    var agit_meta = std.json.ObjectMap.empty;
+    try agit_meta.put(aa, "binary", std.json.Value{ .string = exe });
+    try root.put(aa, "_agit", std.json.Value{ .object = agit_meta });
+}
+
+/// Build a Copilot-format hook list: [{type: "command", command: exe, args: [...]}]
+fn makeCopilotList(aa: std.mem.Allocator, exe: []const u8, args: []const []const u8) !std.json.Value {
+    var entry_obj = std.json.ObjectMap.empty;
+    try entry_obj.put(aa, "type", std.json.Value{ .string = "command" });
+    try entry_obj.put(aa, "command", std.json.Value{ .string = exe });
+
+    var args_arr = std.json.Array.init(aa);
+    for (args) |arg| {
+        try args_arr.append(std.json.Value{ .string = arg });
+    }
+    try entry_obj.put(aa, "args", std.json.Value{ .array = args_arr });
+
+    var arr = std.json.Array.init(aa);
+    try arr.append(std.json.Value{ .object = entry_obj });
     return std.json.Value{ .array = arr };
 }
 
