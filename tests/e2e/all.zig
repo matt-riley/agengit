@@ -17,6 +17,7 @@ test {
     _ = @import("hooks/claude_payloads.zig");
     _ = @import("hooks/codex_payloads.zig");
     _ = @import("hooks/gemini_payloads.zig");
+    _ = @import("hooks/copilot_payloads.zig");
     _ = @import("hooks/payload_diagnostics.zig");
     _ = @import("hooks/turn_identity_and_cwd.zig");
     _ = @import("privacy/capture_policy.zig");

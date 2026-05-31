@@ -31,8 +31,15 @@ pub const gemini = AgentMetadata{
     .dir_path_rel = ".gemini",
 };
 
+pub const copilot = AgentMetadata{
+    .name = "Copilot CLI",
+    .id = "copilot",
+    .config_path_rel = ".copilot/hooks.json",
+    .dir_path_rel = ".copilot",
+};
+
 // Runtime-iterable array of all agents
-var all_agents = [_]AgentMetadata{ claude, codex, gemini };
+var all_agents = [_]AgentMetadata{ claude, codex, gemini, copilot };
 pub fn all() []AgentMetadata {
     return &all_agents;
 }
@@ -226,6 +233,7 @@ test "isValidId recognizes all agents" {
     try std.testing.expect(isValidId("claude"));
     try std.testing.expect(isValidId("codex"));
     try std.testing.expect(isValidId("gemini"));
+    try std.testing.expect(isValidId("copilot"));
     try std.testing.expect(!isValidId("unknown"));
 }
 

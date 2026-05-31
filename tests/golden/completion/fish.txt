@@ -30,7 +30,7 @@ complete -c agit -f -n '__fish_use_subcommand' -a reindex -d 'Rebuild the index 
 complete -c agit -f -n '__fish_use_subcommand' -a version -d 'Print version information'
 complete -c agit -f -n '__fish_use_subcommand' -a completion -d 'Generate shell completion scripts'
 
-complete -c agit -f -n '__fish_seen_subcommand_from init' -l agent -r -a 'claude codex gemini' -d 'Install only the specified agent (claude, codex, gemini). Can be repeated.'
+complete -c agit -f -n '__fish_seen_subcommand_from init' -l agent -r -a 'claude codex gemini copilot' -d 'Install only the specified agent (claude, codex, gemini, copilot). Can be repeated.'
 complete -c agit -f -n '__fish_seen_subcommand_from init' -l dry-run -d 'Show what would be installed without making changes.'
 complete -c agit -f -n '__fish_seen_subcommand_from init' -l force -d 'Back up and replace malformed/non-object existing JSON config.'
 complete -c agit -f -n '__fish_seen_subcommand_from init' -s h -l help -d 'Display this help and exit.'

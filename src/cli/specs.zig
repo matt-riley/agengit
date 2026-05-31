@@ -6,7 +6,7 @@ pub const init_usage = help_mod.UsageSpec{
     .synopsis = "[OPTIONS]",
     .description = "Set up agit hooks for installed agent CLIs.",
     .options = &.{
-        .{ .long = "agent", .value_name = "name", .description = "Install only the specified agent (claude, codex, gemini). Can be repeated.", .repeatable = true, .value_choices = &.{ "claude", "codex", "gemini" } },
+        .{ .long = "agent", .value_name = "name", .description = "Install only the specified agent (claude, codex, gemini, copilot). Can be repeated.", .repeatable = true, .value_choices = &.{ "claude", "codex", "gemini", "copilot" } },
         .{ .long = "dry-run", .description = "Show what would be installed without making changes." },
         .{ .long = "force", .description = "Back up and replace malformed/non-object existing JSON config." },
         .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
