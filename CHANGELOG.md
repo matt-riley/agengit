@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.19.0](https://github.com/matt-riley/agengit/compare/v1.18.2...v1.19.0) (2026-05-31)
+
+
+### Features
+
+* add Copilot CLI hook integration ([c5e3bb1](https://github.com/matt-riley/agengit/commit/c5e3bb1d3c086a377569f324aebb265fd57815ed))
+* add Pi hook integration ([674e12e](https://github.com/matt-riley/agengit/commit/674e12e56e77d75e28b581376b92a6018de7b0f8))
+* add watch and analytics commands ([0053195](https://github.com/matt-riley/agengit/commit/005319530bb31286c7d2771ca0ebb7ce59f92a3a))
+* correlate sessions with git commits ([f2bace0](https://github.com/matt-riley/agengit/commit/f2bace0481480a9b6117506443aa595650cc623d))
+* record and render per-line blame attribution ([8fd7eb0](https://github.com/matt-riley/agengit/commit/8fd7eb0ef94565204c2ea64bf7a20e7e94f7986b))
+* restore captured snapshots to the working tree ([58aefe3](https://github.com/matt-riley/agengit/commit/58aefe3a66b29dc0766b9f75719364a687c1c102))
+
 ## [1.18.2](https://github.com/matt-riley/agengit/compare/v1.18.1...v1.18.2) (2026-05-29)
 
 
