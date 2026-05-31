@@ -5,6 +5,7 @@ const object = @import("store/object.zig");
 const redact_mod = @import("privacy/redact.zig");
 const fs_mod = @import("util/fs.zig");
 const file_lock_mod = @import("util/file_lock.zig");
+const git_mod = @import("util/git.zig");
 
 pub const Hash = store_mod.Hash;
 pub const Ignorer = store_mod.Ignorer;
@@ -397,6 +398,8 @@ pub const Recorder = struct {
         var tree_hex = tree_hash.toHex();
 
         const timestamp = std.Io.Timestamp.now(io, .real).toMilliseconds();
+        var git_context = git_mod.captureContext(io, self.gpa, self.repo_dir) catch git_mod.Context{};
+        defer git_context.deinit(self.gpa);
 
         var expected_parent = try self.store.readRef(io, self.gpa, meta.origin, meta.session_id);
         var attempt: u32 = 0;
@@ -412,6 +415,9 @@ pub const Recorder = struct {
                 .tool_calls = staging_val.tool_calls,
                 .expected_parent = expected_parent,
                 .retry_delta = @intCast(attempt),
+                .git_commit = git_context.commit,
+                .git_branch = git_context.branch,
+                .git_dirty = git_context.dirty,
             });
 
             switch (result) {

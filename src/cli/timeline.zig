@@ -149,6 +149,13 @@ fn writeHuman(
             row.turn_id,
             row.hash[0..@min(12, row.hash.len)],
         });
+        if (row.git_commit) |commit| {
+            try stdout.interface.print("  git {s}@{s}{s}\n", .{
+                row.git_branch orelse "(detached)",
+                commit[0..@min(12, commit.len)],
+                if (row.git_dirty orelse false) "*" else "",
+            });
+        }
         try stdout.interface.print("  {s}\n", .{preview});
     }
 }

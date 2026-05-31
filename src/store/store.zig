@@ -532,6 +532,9 @@ pub const Store = struct {
                 step.parent,
                 step.tree,
                 step.timestamp,
+                step.git_commit,
+                step.git_branch,
+                step.git_dirty,
             );
             for (step.messages, 0..) |msg, seq| {
                 try self.index.insertMessage(&hex, @intCast(seq), msg.role, msg.content);
@@ -727,6 +730,9 @@ pub const Store = struct {
         tool_calls: []const StepToolCall,
         expected_parent: ?Hash,
         retry_delta: i64 = 0,
+        git_commit: ?[]const u8 = null,
+        git_branch: ?[]const u8 = null,
+        git_dirty: ?bool = null,
     };
 
     pub const FinalizeCommitResult = union(enum) {
@@ -792,6 +798,9 @@ pub const Store = struct {
             .timestamp = input.timestamp,
             .messages = input.messages,
             .tool_calls = input.tool_calls,
+            .git_commit = input.git_commit,
+            .git_branch = input.git_branch,
+            .git_dirty = input.git_dirty,
         };
         const step_write = try object.writeStepDetailed(io, self.root, gpa, step);
         const step_hash = step_write.hash;
@@ -810,6 +819,9 @@ pub const Store = struct {
             parent_str,
             input.tree_hash,
             input.timestamp,
+            input.git_commit,
+            input.git_branch,
+            input.git_dirty,
         );
         for (input.messages, 0..) |msg, i| {
             try self.index.insertMessage(&step_hex, @intCast(i), msg.role, msg.content);
@@ -914,6 +926,9 @@ pub const Store = struct {
             parent_hex_buf,
             step.tree,
             step.timestamp,
+            step.git_commit,
+            step.git_branch,
+            step.git_dirty,
         );
         for (messages, 0..) |msg, i| {
             try self.index.insertMessage(new_hex_str, @intCast(i), msg.role, msg.content);

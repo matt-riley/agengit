@@ -244,6 +244,16 @@ Render a text diff between a step tree and its parent tree.
 agit diff abc123def
 ```
 
+### `agit between`
+Show recorded steps whose captured Git commit falls between two revisions.
+
+**Synopsis:** `agit between [OPTIONS] <FROM> [TO]`
+
+```sh
+# show steps recorded after one commit through HEAD
+agit between abc123def
+```
+
 ### `agit grep`
 Search recorded messages and tool activity across all sessions.
 

@@ -17,6 +17,7 @@ def "nu-complete agit command" [] {
         { value: 'log', description: 'Show step history for a session' }
         { value: 'show', description: 'Show details of a step' }
         { value: 'diff', description: 'Show a text diff for a step' }
+        { value: 'between', description: 'Show steps recorded between Git revisions' }
         { value: 'grep', description: 'Search recorded messages and tool activity' }
         { value: 'blame', description: 'Show per-line step attribution for a file' }
         { value: 'cat', description: 'Print a raw object by hash' }
@@ -140,6 +141,11 @@ extern "agit show" [
 extern "agit diff" [
     --redacted
     --full
+    --help(-h)
+]
+
+extern "agit between" [
+    --json
     --help(-h)
 ]
 
