@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.20.0](https://github.com/matt-riley/agengit/compare/v1.19.0...v1.20.0) (2026-05-31)
+
+
+### Features
+
+* add recall memory retrieval and replay non-goal ADR ([3585245](https://github.com/matt-riley/agengit/commit/358524573b3ef2a96fec7d0318e78508fb917cc1))
+
 ## [1.19.0](https://github.com/matt-riley/agengit/compare/v1.18.2...v1.19.0) (2026-05-31)
 
 
