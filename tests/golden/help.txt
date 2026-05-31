@@ -21,6 +21,7 @@ Commands:
   timeline      Show recent recorded steps
   sessions      List recorded agent sessions
   log           Show step history for a session
+  restore       Restore files from a recorded snapshot
   show          Show details of a step
   diff          Show a text diff for a step
   between       Show steps recorded between Git revisions

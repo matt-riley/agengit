@@ -15,6 +15,7 @@ def "nu-complete agit command" [] {
         { value: 'timeline', description: 'Show recent recorded steps' }
         { value: 'sessions', description: 'List recorded agent sessions' }
         { value: 'log', description: 'Show step history for a session' }
+        { value: 'restore', description: 'Restore files from a recorded snapshot' }
         { value: 'show', description: 'Show details of a step' }
         { value: 'diff', description: 'Show a text diff for a step' }
         { value: 'between', description: 'Show steps recorded between Git revisions' }
@@ -126,6 +127,14 @@ extern "agit sessions" [
 
 extern "agit log" [
     --json
+    --help(-h)
+]
+
+extern "agit restore" [
+    --json
+    --all
+    --force
+    --dry-run
     --help(-h)
 ]
 

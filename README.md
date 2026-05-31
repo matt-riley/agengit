@@ -224,6 +224,16 @@ Show step history for a session.
 agit log
 ```
 
+### `agit restore`
+Restore captured files from a step snapshot into the working tree. Whole-tree restores require --all; existing files are skipped unless --force is set.
+
+**Synopsis:** `agit restore [OPTIONS] <HASH> [-- <PATH>...]`
+
+```sh
+# restore one captured file
+agit restore abc123def -- src/main.zig
+```
+
 ### `agit show`
 Show details of a recorded step object by its BLAKE3 hash.
 

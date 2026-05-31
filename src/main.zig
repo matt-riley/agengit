@@ -23,6 +23,7 @@ const cli = struct {
     const timeline = @import("cli/timeline.zig");
     const sessions = @import("cli/sessions.zig");
     const log_cmd = @import("cli/log.zig");
+    const restore = @import("cli/restore.zig");
     const show = @import("cli/show.zig");
     const diff = @import("cli/diff.zig");
     const between = @import("cli/between.zig");
@@ -56,6 +57,7 @@ const SubCommand = enum {
     timeline,
     sessions,
     log,
+    restore,
     show,
     diff,
     between,
@@ -151,6 +153,7 @@ pub fn main(init: std.process.Init) !void {
         .timeline => try cli.timeline.run(init.io, init.gpa, &iter),
         .sessions => try cli.sessions.run(init.io, init.gpa, &iter),
         .log => try cli.log_cmd.run(init.io, init.gpa, &iter),
+        .restore => try cli.restore.run(init.io, init.gpa, &iter),
         .show => try cli.show.run(init.io, init.gpa, &iter),
         .diff => try cli.diff.run(init.io, init.gpa, &iter),
         .between => try cli.between.run(init.io, init.gpa, &iter),
@@ -199,6 +202,7 @@ test {
     _ = @import("store/snapshot.zig");
     _ = @import("store/config.zig");
     _ = @import("store/pack.zig");
+    _ = @import("store/path_safety.zig");
     _ = @import("recorder.zig");
     _ = @import("hook.zig");
     _ = @import("hook/Adapter.zig");
@@ -230,6 +234,7 @@ test {
     _ = @import("cli/timeline.zig");
     _ = @import("cli/sessions.zig");
     _ = @import("cli/log.zig");
+    _ = @import("cli/restore.zig");
     _ = @import("cli/show.zig");
     _ = @import("cli/diff.zig");
     _ = @import("cli/between.zig");
