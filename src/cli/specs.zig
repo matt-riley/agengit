@@ -228,6 +228,24 @@ pub const log_usage = help_mod.UsageSpec{
     },
 };
 
+pub const restore_usage = help_mod.UsageSpec{
+    .name = "restore",
+    .synopsis = "[OPTIONS] <HASH> [-- <PATH>...]",
+    .description = "Restore captured files from a step snapshot into the working tree. Whole-tree restores require --all; existing files are skipped unless --force is set.",
+    .options = &.{
+        .{ .long = "json", .description = "Render the restore summary as structured JSON." },
+        .{ .long = "all", .description = "Restore every file in the captured snapshot." },
+        .{ .long = "force", .description = "Overwrite existing files instead of skipping them." },
+        .{ .long = "dry-run", .description = "Report what would be restored without writing files." },
+        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
+    },
+    .examples = &.{
+        .{ .description = "restore one captured file", .command = "abc123def -- src/main.zig" },
+        .{ .description = "preview restoring an entire snapshot", .command = "--dry-run --all abc123def" },
+        .{ .description = "overwrite an existing local file", .command = "--force abc123def -- README.md" },
+    },
+};
+
 pub const show_usage = help_mod.UsageSpec{
     .name = "show",
     .synopsis = "[OPTIONS] <HASH>",
@@ -397,6 +415,7 @@ pub const public_commands = [_]help_mod.CommandSpec{
     .{ .name = "timeline", .summary = "Show recent recorded steps", .usage = &timeline_usage },
     .{ .name = "sessions", .summary = "List recorded agent sessions", .usage = &sessions_usage },
     .{ .name = "log", .summary = "Show step history for a session", .usage = &log_usage },
+    .{ .name = "restore", .summary = "Restore files from a recorded snapshot", .usage = &restore_usage },
     .{ .name = "show", .summary = "Show details of a step", .usage = &show_usage },
     .{ .name = "diff", .summary = "Show a text diff for a step", .usage = &diff_usage },
     .{ .name = "between", .summary = "Show steps recorded between Git revisions", .usage = &between_usage },

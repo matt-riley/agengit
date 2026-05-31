@@ -17,6 +17,7 @@ _agit() {
         'timeline:Show recent recorded steps'
         'sessions:List recorded agent sessions'
         'log:Show step history for a session'
+        'restore:Restore files from a recorded snapshot'
         'show:Show details of a step'
         'diff:Show a text diff for a step'
         'between:Show steps recorded between Git revisions'
@@ -132,6 +133,14 @@ _agit() {
                 log)
                     _arguments \
                         '--json[Render the session log as structured JSON.]' \
+                        '--help[Display this help and exit.]'
+                    ;;
+                restore)
+                    _arguments \
+                        '--json[Render the restore summary as structured JSON.]' \
+                        '--all[Restore every file in the captured snapshot.]' \
+                        '--force[Overwrite existing files instead of skipping them.]' \
+                        '--dry-run[Report what would be restored without writing files.]' \
                         '--help[Display this help and exit.]'
                     ;;
                 show)
