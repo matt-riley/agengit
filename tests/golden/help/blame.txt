@@ -5,15 +5,21 @@ DESCRIPTION:
     Show per-line step attribution for a file path.
 
 OPTIONS:
+    --json
+        Render blame attribution as structured JSON.
+    --step <hash>
+        Show blame as of the given step instead of the latest.
     --no-limits
-        Disable the blame file-size cap for this invocation when blame output is available.
+        Disable the blame file-size cap for this invocation.
     -h, --help
         Display this help and exit.
 
 EXAMPLES:
     # show blame for a file
     agit blame src/main.zig
+    # show blame as of a specific step
+    agit blame --step abc123 src/main.zig
 
 NOTES:
-    Blame recording is not yet available. When blame rendering lands, AGIT_MAX_FILE_BYTES will set the default large-file cap and --no-limits will disable it for one run.
+    AGIT_MAX_FILE_BYTES sets the default large-file cap and --no-limits disables it for one run.
 

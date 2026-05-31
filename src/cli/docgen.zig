@@ -199,5 +199,5 @@ test "rendered section exposes one synopsis per public command" {
     try std.testing.expectEqual(specs.public_commands.len, synopses.count());
     try std.testing.expectEqualStrings("agit init [OPTIONS]", synopses.get("init").?);
     try std.testing.expectEqualStrings("agit version [OPTIONS]", synopses.get("version").?);
-    try std.testing.expect(std.mem.indexOf(u8, section, "**Notes:** Blame recording is not yet available.") != null);
+    try std.testing.expect(std.mem.indexOf(u8, section, "**Notes:** AGIT_MAX_FILE_BYTES sets the default large-file cap") != null);
 }

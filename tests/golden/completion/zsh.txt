@@ -178,7 +178,9 @@ _agit() {
                     ;;
                 blame)
                     _arguments \
-                        '--no-limits[Disable the blame file-size cap for this invocation when blame output is available.]' \
+                        '--json[Render blame attribution as structured JSON.]' \
+                        '--step[Show blame as of the given step instead of the latest.]:hash' \
+                        '--no-limits[Disable the blame file-size cap for this invocation.]' \
                         '--help[Display this help and exit.]'
                     ;;
                 cat)

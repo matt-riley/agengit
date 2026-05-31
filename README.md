@@ -284,7 +284,7 @@ Show per-line step attribution for a file path.
 agit blame src/main.zig
 ```
 
-**Notes:** Blame recording is not yet available. When blame rendering lands, AGIT_MAX_FILE_BYTES will set the default large-file cap and --no-limits will disable it for one run.
+**Notes:** AGIT_MAX_FILE_BYTES sets the default large-file cap and --no-limits disables it for one run.
 
 ### `agit cat`
 Print a raw object by its BLAKE3 hash.

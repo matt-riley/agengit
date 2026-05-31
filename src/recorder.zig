@@ -5,6 +5,7 @@ const object = @import("store/object.zig");
 const redact_mod = @import("privacy/redact.zig");
 const fs_mod = @import("util/fs.zig");
 const file_lock_mod = @import("util/file_lock.zig");
+const file_limits_mod = @import("util/file_limits.zig");
 const git_mod = @import("util/git.zig");
 
 pub const Hash = store_mod.Hash;
@@ -384,6 +385,11 @@ pub const Recorder = struct {
         var maintenance_lock = try file_lock_mod.LockFile.acquire(io, self.store.root, "gc.lock", .{});
         defer maintenance_lock.release(io);
 
+        // Decide up front whether incremental blame is safe this turn. If a prior
+        // finalize failed to record blame (flag set) or could not be read, skip
+        // incremental blame and leave the store stale until `agit reindex`.
+        const do_incremental_blame = !(self.store.blameNeedsReindex() catch true);
+
         // Take a workspace snapshot — this is the same tree regardless of CAS retries.
         const tree_hash = try self.store.snapshot(
             io,
@@ -397,7 +403,15 @@ pub const Recorder = struct {
         );
         var tree_hex = tree_hash.toHex();
 
-        const timestamp = std.Io.Timestamp.now(io, .real).toMilliseconds();
+        // Strictly increasing step timestamps give blame a canonical global order
+        // that `agit reindex` can reproduce. If the monotonic counter cannot be
+        // read, fall back to wall-clock time but disable incremental blame so we
+        // never record a non-monotonic timestamp into the blame chain.
+        var timestamp_monotonic = true;
+        const timestamp = self.store.monotonicTimestamp(std.Io.Timestamp.now(io, .real).toMilliseconds()) catch blk: {
+            timestamp_monotonic = false;
+            break :blk std.Io.Timestamp.now(io, .real).toMilliseconds();
+        };
         var git_context = git_mod.captureContext(io, self.gpa, self.repo_dir) catch git_mod.Context{};
         defer git_context.deinit(self.gpa);
 
@@ -421,7 +435,22 @@ pub const Recorder = struct {
             });
 
             switch (result) {
-                .committed => return,
+                .committed => |step_hash| {
+                    // Persist the advanced monotonic counter for the next
+                    // finalize. Incremental blame is only safe if the timestamp
+                    // was monotonic AND durably advanced; otherwise flag a
+                    // reindex and skip so the chain never goes non-monotonic.
+                    const timestamp_persisted = blk: {
+                        self.store.advanceBlameTimestamp(timestamp) catch break :blk false;
+                        break :blk true;
+                    };
+                    if (do_incremental_blame and timestamp_monotonic and timestamp_persisted) {
+                        self.recordBlameForStep(io, step_hash, meta, tree_hex[0..], timestamp);
+                    } else {
+                        self.store.setBlameNeedsReindex(true) catch {};
+                    }
+                    return;
+                },
                 .parent_moved => |next_parent| {
                     expected_parent = next_parent;
                     continue;
@@ -438,6 +467,40 @@ pub const Recorder = struct {
             }
         }
         return error.CasConflict;
+    }
+
+    /// Record incremental blame for a just-committed step. Crash-safe and
+    /// fail-open: the blame index is durably marked as needing a reindex BEFORE
+    /// any blame is written, and the flag is cleared only after the rows commit
+    /// successfully. A crash (or error) between commit and completion therefore
+    /// leaves the flag set, so subsequent finalizes skip incremental blame
+    /// (staying stale, never wrong) until `agit reindex` rebuilds and clears it.
+    fn recordBlameForStep(
+        self: *Recorder,
+        io: std.Io,
+        step_hash: Hash,
+        meta: SessionMeta,
+        tree_hex: []const u8,
+        timestamp: i64,
+    ) void {
+        self.store.setBlameNeedsReindex(true) catch |err| {
+            self.logHookFailure(io, "blame", err, .{ .session_id = meta.session_id });
+            return;
+        };
+        const step_hex = step_hash.toHex();
+        self.store.recordStepBlame(io, self.gpa, .{
+            .step_hash = step_hex[0..],
+            .tree_hash = tree_hex,
+            .session_origin = meta.origin,
+            .session_id = meta.session_id,
+            .timestamp = timestamp,
+            .max_file_bytes = file_limits_mod.effectiveMaxFileBytes(16 * 1024 * 1024),
+        }) catch |err| {
+            // Leave the reindex flag set so blame is rebuilt later.
+            self.logHookFailure(io, "blame", err, .{ .session_id = meta.session_id });
+            return;
+        };
+        self.store.setBlameNeedsReindex(false) catch {};
     }
 
     /// Write a structured error entry to `log/hook-error.log` inside `.agit/`.

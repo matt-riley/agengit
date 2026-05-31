@@ -35,6 +35,9 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
 
     if (options.from) |from_hash| {
         const rebuilt = try reindexFrom(io, gpa, &store, from_hash);
+        // Blame is a global per-path chain, so rebuild it fully from the now
+        // up-to-date step table even for incremental --from reindexes.
+        try rebuildBlame(io, gpa, &store);
         const from_hex = from_hash.toHex();
         try stdout.interface.print(
             "reindexed from {s}: {d} session(s), {d} step(s)\n",
@@ -117,7 +120,72 @@ pub fn reindex(io: std.Io, gpa: std.mem.Allocator, store: *store_mod.Store) !Rei
     }
 
     try store.index.setObjectsComplete(true);
+    try rebuildBlame(io, gpa, store);
     return stats;
+}
+
+const StepIdent = struct {
+    hash: []const u8,
+    tree: []const u8,
+    origin: []const u8,
+    session_id: []const u8,
+    timestamp: i64,
+};
+
+/// Rebuild the `blame_maps` linkage from the indexed step chain.  Steps are
+/// replayed in the same canonical `(timestamp, hash)` order finalize uses, so
+/// blame output is identical after an index rebuild.
+fn rebuildBlame(io: std.Io, gpa: std.mem.Allocator, store: *store_mod.Store) !void {
+    // Mark blame dirty for the whole rebuild: a crash mid-replay must leave the
+    // flag set so the partial chain is never treated as healthy. It is cleared
+    // only after every step replays successfully.
+    try store.setBlameNeedsReindex(true);
+    try store.index.clearBlameMaps();
+
+    var arena_state = std.heap.ArenaAllocator.init(gpa);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var steps: std.ArrayList(StepIdent) = .empty;
+
+    {
+        // Drain all step rows before recording blame: recordStepBlame opens its
+        // own transaction on the same connection, which cannot overlap an open
+        // result set.
+        var rs = try store.index.db.rows(
+            "select hash, tree_hash, session_origin, session_id, timestamp from steps order by timestamp asc, hash asc",
+            .{},
+        );
+        defer rs.deinit();
+        while (rs.next()) |row| {
+            try steps.append(arena, .{
+                .hash = try arena.dupe(u8, row.get([]const u8, 0)),
+                .tree = try arena.dupe(u8, row.get([]const u8, 1)),
+                .origin = try arena.dupe(u8, row.get([]const u8, 2)),
+                .session_id = try arena.dupe(u8, row.get([]const u8, 3)),
+                .timestamp = row.get(i64, 4),
+            });
+        }
+        if (rs.err) |err| return err;
+    }
+
+    var any_failed = false;
+    for (steps.items) |s| {
+        store.recordStepBlame(io, gpa, .{
+            .step_hash = s.hash,
+            .tree_hash = s.tree,
+            .session_origin = s.origin,
+            .session_id = s.session_id,
+            .timestamp = s.timestamp,
+            .max_changed_files = 0,
+        }) catch {
+            any_failed = true;
+        };
+    }
+
+    // Clear the dirty flag only if the entire chain rebuilt cleanly; otherwise
+    // leave it set so finalize stays conservative and a later reindex retries.
+    if (!any_failed) try store.setBlameNeedsReindex(false);
 }
 
 fn reindexLooseObjects(

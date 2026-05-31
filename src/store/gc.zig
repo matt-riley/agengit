@@ -197,6 +197,22 @@ fn markReachable(
         const head_hash = try parseRefHash(data);
         try markStepChain(io, gpa, store, reachable, head_hash);
     }
+
+    try markBlame(gpa, store, reachable);
+}
+
+/// Mark every live blame object as reachable.  Blame objects are linked only
+/// from the rebuildable `blame_maps` index, so the index is their reachability
+/// source; run `agit reindex` before `agit gc` if `index.db` was lost.
+fn markBlame(
+    gpa: std.mem.Allocator,
+    store: *store_mod.Store,
+    reachable: *std.AutoHashMap([hash_mod.hex_len]u8, void),
+) !void {
+    var hashes: std.ArrayList([64]u8) = .empty;
+    defer hashes.deinit(gpa);
+    try store.index.collectBlameHashes(gpa, &hashes);
+    for (hashes.items) |hex| try reachable.put(hex, {});
 }
 
 fn markStepChain(
