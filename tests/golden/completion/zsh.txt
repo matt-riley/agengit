@@ -45,7 +45,7 @@ _agit() {
             case $words[2] in
                 init)
                     _arguments \
-                        '--agent[Install only the specified agent (claude, codex, gemini, copilot). Can be repeated.]:name:(claude codex gemini copilot)' \
+                        '--agent[Install only the specified agent (claude, codex, gemini, copilot, pi). Can be repeated.]:name:(claude codex gemini copilot pi)' \
                         '--dry-run[Show what would be installed without making changes.]' \
                         '--force[Back up and replace malformed/non-object existing JSON config.]' \
                         '--help[Display this help and exit.]'

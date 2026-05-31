@@ -13,7 +13,8 @@ change before a long-term stable format is declared.
 ## Today
 
 Shipping today: local `.agit/` capture stores, hook installation for Claude
-Code/OpenAI Codex CLI/Google Gemini CLI, investigation views including
+Code/OpenAI Codex CLI/Google Gemini CLI/GitHub Copilot CLI/Pi, investigation
+views including
 `agit timeline`, `agit show --files/--stat`, and `agit diff`, health/recovery
 tooling including read-only `agit fsck`, S3-compatible remote `agit push` /
 `agit pull`, generated shell completions, and structured JSON for the commands
@@ -26,6 +27,8 @@ Supported hook integrations today:
 | Claude Code | `UserPromptSubmit`, `PostToolBatch`, `Stop` in `~/.claude/settings.json` |
 | OpenAI Codex CLI | `UserPromptSubmit`, `PostToolUse`, `Stop` in `~/.codex/hooks.json` |
 | Google Gemini CLI | `AfterTool`, `AfterAgent` in `~/.gemini/settings.json` |
+| GitHub Copilot CLI | `userPromptSubmitted`, `postToolUse`, `agentStop` in `~/.copilot/hooks.json` |
+| Pi | generated extension `~/.pi/agent/extensions/agit-recorder.js` (auto-discovered) |
 
 ## What gets recorded
 
@@ -367,8 +370,6 @@ Planned but not shipped today:
 
 - historical content search
 - portable export/import bundles
-- additional observer-backed agent targets such as Pi and
-  GitHub Copilot CLI
 
 Experimental today: `agit observe --once fixture --input observer.json` exercises
 the observer framework and persists replay checkpoints under

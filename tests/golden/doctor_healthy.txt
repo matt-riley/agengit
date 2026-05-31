@@ -7,3 +7,4 @@
   - codex: not installed
   - gemini: not installed
   - copilot: not installed
+  - pi: not installed

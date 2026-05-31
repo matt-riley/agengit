@@ -8,6 +8,15 @@ pub const AgentMetadata = struct {
     id: []const u8,
     config_path_rel: []const u8,
     dir_path_rel: []const u8,
+    /// How agit installs into this agent.
+    /// - `json_hooks`: merge agit hooks + `_agit` metadata into a JSON config file.
+    /// - `js_extension`: write a generated JS extension file (no JSON config).
+    install_kind: InstallKind = .json_hooks,
+};
+
+pub const InstallKind = enum {
+    json_hooks,
+    js_extension,
 };
 
 pub const claude = AgentMetadata{
@@ -38,8 +47,16 @@ pub const copilot = AgentMetadata{
     .dir_path_rel = ".copilot",
 };
 
+pub const pi = AgentMetadata{
+    .name = "Pi",
+    .id = "pi",
+    .config_path_rel = ".pi/agent/extensions/agit-recorder.js",
+    .dir_path_rel = ".pi/agent/extensions",
+    .install_kind = .js_extension,
+};
+
 // Runtime-iterable array of all agents
-var all_agents = [_]AgentMetadata{ claude, codex, gemini, copilot };
+var all_agents = [_]AgentMetadata{ claude, codex, gemini, copilot, pi };
 pub fn all() []AgentMetadata {
     return &all_agents;
 }
@@ -179,6 +196,20 @@ pub const Builder = struct {
                 continue;
             }
 
+            // JS-extension agents have no JSON config to load/merge; agit always
+            // (re)writes a self-contained extension file, so they are ready when
+            // the binary is present.
+            if (agent.install_kind == .js_extension) {
+                try agent_plans.append(self.gpa, .{
+                    .agent = agent,
+                    .state = .ready,
+                    .config_path = try self.gpa.dupe(u8, config_path),
+                    .backup_path = null,
+                    .malformed_diag = null,
+                });
+                continue;
+            }
+
             const loaded = atomic_json_mod.loadObject(self.io, aa, config_path) catch |err| {
                 return err;
             };
@@ -234,6 +265,7 @@ test "isValidId recognizes all agents" {
     try std.testing.expect(isValidId("codex"));
     try std.testing.expect(isValidId("gemini"));
     try std.testing.expect(isValidId("copilot"));
+    try std.testing.expect(isValidId("pi"));
     try std.testing.expect(!isValidId("unknown"));
 }
 
