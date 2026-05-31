@@ -19,10 +19,12 @@ _agit() {
         'log:Show step history for a session'
         'restore:Restore files from a recorded snapshot'
         'show:Show details of a step'
-        'diff:Show a text diff for a step'
+        'diff:Show captured file diffs'
         'between:Show steps recorded between Git revisions'
         'grep:Search recorded messages and tool activity'
         'blame:Show per-line step attribution for a file'
+        'watch:Follow newly recorded steps'
+        'stats:Summarize recorded activity'
         'cat:Print a raw object by hash'
         'privacy:Scan reachable content for sensitive data'
         'reindex:Rebuild the index from the object store'
@@ -154,6 +156,8 @@ _agit() {
                     ;;
                 diff)
                     _arguments \
+                        '--json[Render diff metadata and changed paths as structured JSON.]' \
+                        '--session[Diff the first step's parent tree against the latest step in one session.]:id' \
                         '--redacted[Redact obvious secrets in diff output.]' \
                         '--full[Render full diff output even when redaction is the repo default.]' \
                         '--help[Display this help and exit.]'
@@ -181,6 +185,23 @@ _agit() {
                         '--json[Render blame attribution as structured JSON.]' \
                         '--step[Show blame as of the given step instead of the latest.]:hash' \
                         '--no-limits[Disable the blame file-size cap for this invocation.]' \
+                        '--help[Display this help and exit.]'
+                    ;;
+                watch)
+                    _arguments \
+                        '--json[Render each watch event as a cli-json-v1 JSON line.]' \
+                        '--origin[Only follow steps recorded by the given origin.]:name' \
+                        '--session[Only follow one session id, or pass origin/session-id to disambiguate.]:id' \
+                        '--since[Stream existing and new steps on or after UTC midnight for the given date.]:YYYY-MM-DD' \
+                        '--interval[Polling interval such as 1s or 250ms. Defaults to 1s.]:DURATION' \
+                        '--redacted[Redact obvious secrets in rendered previews.]' \
+                        '--full[Render full previews even when redaction is the repo default.]' \
+                        '--help[Display this help and exit.]'
+                    ;;
+                stats)
+                    _arguments \
+                        '--json[Render stats as structured JSON.]' \
+                        '--session[Only summarize one session id, or pass origin/session-id to disambiguate.]:id' \
                         '--help[Display this help and exit.]'
                     ;;
                 cat)

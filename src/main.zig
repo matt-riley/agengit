@@ -21,6 +21,8 @@ const cli = struct {
     const import_cmd = @import("cli/import.zig");
     const status = @import("cli/status.zig");
     const timeline = @import("cli/timeline.zig");
+    const watch = @import("cli/watch.zig");
+    const stats = @import("cli/stats.zig");
     const sessions = @import("cli/sessions.zig");
     const log_cmd = @import("cli/log.zig");
     const restore = @import("cli/restore.zig");
@@ -55,6 +57,8 @@ const SubCommand = enum {
     import,
     status,
     timeline,
+    watch,
+    stats,
     sessions,
     log,
     restore,
@@ -151,6 +155,8 @@ pub fn main(init: std.process.Init) !void {
         .import => try cli.import_cmd.run(init.io, init.gpa, &iter),
         .status => try cli.status.run(init.io, init.gpa, init.minimal.environ, &iter),
         .timeline => try cli.timeline.run(init.io, init.gpa, &iter),
+        .watch => try cli.watch.run(init.io, init.gpa, &iter),
+        .stats => try cli.stats.run(init.io, init.gpa, &iter),
         .sessions => try cli.sessions.run(init.io, init.gpa, &iter),
         .log => try cli.log_cmd.run(init.io, init.gpa, &iter),
         .restore => try cli.restore.run(init.io, init.gpa, &iter),
@@ -232,6 +238,9 @@ test {
     _ = @import("cli/import.zig");
     _ = @import("cli/status.zig");
     _ = @import("cli/timeline.zig");
+    _ = @import("cli/watch.zig");
+    _ = @import("cli/stats.zig");
+    _ = @import("cli/session_arg.zig");
     _ = @import("cli/sessions.zig");
     _ = @import("cli/log.zig");
     _ = @import("cli/restore.zig");

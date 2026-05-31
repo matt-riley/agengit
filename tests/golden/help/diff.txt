@@ -1,10 +1,14 @@
 USAGE:
-    agit diff [OPTIONS] <HASH> [-- <PATH>]
+    agit diff [OPTIONS] (<HASH> [<HASH>] | --session <ID>) [-- <PATH>]
 
 DESCRIPTION:
-    Render a text diff between a step tree and its parent tree.
+    Render a diff for one step, between two steps, or across a session.
 
 OPTIONS:
+    --json
+        Render diff metadata and changed paths as structured JSON.
+    --session <id>
+        Diff the first step's parent tree against the latest step in one session.
     --redacted
         Redact obvious secrets in diff output.
     --full
@@ -15,6 +19,10 @@ OPTIONS:
 EXAMPLES:
     # diff a recorded step against its parent
     agit diff abc123def
+    # diff two recorded steps
+    agit diff abc123def fed456abc
+    # diff a complete session
+    agit diff --session codex/session-abc123
     # diff one captured path only
     agit diff abc123def -- src/main.zig
 

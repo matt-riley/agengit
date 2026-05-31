@@ -30,6 +30,7 @@ The goal is not to replace git. Git remains the source-control castle; `agit` is
 | Gemini CLI hooks | Done | Captures after-tool and after-agent events. |
 | User CLI | Mostly done | `status`, `sessions`, `log`, `show`, `cat`, `reindex`, `completion`, `doctor`, `init`, and `uninstall` exist. |
 | Line blame | Done | `agit blame <file>` renders per-line step attribution, recorded at finalize and rebuildable via `agit reindex`. |
+| Live follow | Done | `agit watch` streams newly finalized steps with filters, JSON lines, and clean interrupt summaries. |
 | Pi support | Not started | Planned filesystem-observer path for the `pi.dev` coding agent. |
 | GitHub Copilot CLI support | Not started | Needs observer/MCP design because Copilot has no public lifecycle hooks. |
 | Release automation | Done | CI builds release archives, checksums, Release Please releases, and optional Homebrew formula updates. |
@@ -48,15 +49,15 @@ The goal is not to replace git. Git remains the source-control castle; `agit` is
 | `agit cat <hash>` | Print a raw object. | Done |
 | `agit reindex` | Rebuild SQLite rows from object data. | Done |
 | `agit completion <shell>` | Generate bash, zsh, fish, or Nushell completions. | Done |
-| `agit blame <path>` | Show per-line agent-step attribution. | Planned |
+| `agit blame <path>` | Show per-line agent-step attribution. | Done |
+| `agit watch` | Follow newly finalized steps until interrupted. | Done |
 
 ## Near-term work
 
-1. Make `agit blame` real by wiring blame-map writes into finalized steps and teaching the CLI to resolve line attribution.
-2. Tighten hook event fidelity, especially turn ids and richer assistant/tool metadata where agents provide it.
-3. Improve `doctor` so it can explain common misconfigurations with "fix this next" guidance instead of only status lines.
-4. Add more golden-output tests for the human-facing CLI.
-5. Document and test `.agitignore` behavior with practical examples.
+1. Tighten hook event fidelity, especially turn ids and richer assistant/tool metadata where agents provide it.
+2. Improve `doctor` so it can explain common misconfigurations with "fix this next" guidance instead of only status lines.
+3. Add more golden-output tests for the human-facing CLI.
+4. Document and test `.agitignore` behavior with practical examples.
 
 ## Later work
 

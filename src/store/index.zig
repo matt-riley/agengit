@@ -808,6 +808,168 @@ pub const Index = struct {
         return row.get(i64, 0);
     }
 
+    pub fn statsSummary(self: Index, options: StatsOptions) !StatsSummaryRow {
+        const row = try self.db.row(
+            \\select
+            \\  (select count(*) from sessions
+            \\   where (? is null or origin = ?)
+            \\     and (? is null or session_id = ?)),
+            \\  (select count(*) from steps
+            \\   where (? is null or session_origin = ?)
+            \\     and (? is null or session_id = ?)),
+            \\  (select count(distinct session_origin || char(0) || session_id || char(0) || turn_id) from steps
+            \\   where (? is null or session_origin = ?)
+            \\     and (? is null or session_id = ?)),
+            \\  (select min(timestamp) from steps
+            \\   where (? is null or session_origin = ?)
+            \\     and (? is null or session_id = ?)),
+            \\  (select max(timestamp) from steps
+            \\   where (? is null or session_origin = ?)
+            \\     and (? is null or session_id = ?))
+        , .{
+            options.origin,
+            options.origin,
+            options.session_id,
+            options.session_id,
+            options.origin,
+            options.origin,
+            options.session_id,
+            options.session_id,
+            options.origin,
+            options.origin,
+            options.session_id,
+            options.session_id,
+            options.origin,
+            options.origin,
+            options.session_id,
+            options.session_id,
+            options.origin,
+            options.origin,
+            options.session_id,
+            options.session_id,
+        }) orelse return .{};
+        defer row.deinit();
+        return .{
+            .session_count = row.get(i64, 0),
+            .step_count = row.get(i64, 1),
+            .turn_count = row.get(i64, 2),
+            .first_timestamp = row.get(?i64, 3),
+            .last_timestamp = row.get(?i64, 4),
+        };
+    }
+
+    pub fn listSessionStats(self: Index, gpa: std.mem.Allocator, options: StatsOptions) ![]const SessionStatsRow {
+        var list: std.ArrayList(SessionStatsRow) = .empty;
+        errdefer {
+            for (list.items) |row| freeSessionStatsRow(gpa, row);
+            list.deinit(gpa);
+        }
+
+        var rs = try self.db.rows(
+            \\select s.origin, s.session_id, count(st.hash), count(distinct st.turn_id), min(st.timestamp), max(st.timestamp)
+            \\from sessions s
+            \\left join steps st on st.session_origin = s.origin and st.session_id = s.session_id
+            \\where (? is null or s.origin = ?)
+            \\  and (? is null or s.session_id = ?)
+            \\group by s.origin, s.session_id
+            \\order by max(st.timestamp) desc, s.updated_at desc, s.origin asc, s.session_id asc
+        , .{
+            options.origin,
+            options.origin,
+            options.session_id,
+            options.session_id,
+        });
+        defer rs.deinit();
+
+        while (rs.next()) |row| {
+            try list.append(gpa, .{
+                .origin = try gpa.dupe(u8, row.get([]const u8, 0)),
+                .session_id = try gpa.dupe(u8, row.get([]const u8, 1)),
+                .step_count = row.get(i64, 2),
+                .turn_count = row.get(i64, 3),
+                .first_timestamp = row.get(?i64, 4),
+                .last_timestamp = row.get(?i64, 5),
+            });
+        }
+        if (rs.err) |err| return err;
+        return list.toOwnedSlice(gpa);
+    }
+
+    pub fn listToolCounts(self: Index, gpa: std.mem.Allocator, options: StatsOptions, limit: usize) ![]const ToolCountRow {
+        var list: std.ArrayList(ToolCountRow) = .empty;
+        errdefer {
+            for (list.items) |row| freeToolCountRow(gpa, row);
+            list.deinit(gpa);
+        }
+
+        var rs = try self.db.rows(
+            \\select case when trim(t.tool_name) = '' then '(unknown)' else t.tool_name end as tool_name,
+            \\       count(*) as call_count
+            \\from tool_calls t
+            \\join steps s on s.hash = t.step_hash
+            \\where (? is null or s.session_origin = ?)
+            \\  and (? is null or s.session_id = ?)
+            \\group by tool_name
+            \\order by call_count desc, tool_name asc
+            \\limit ?
+        , .{
+            options.origin,
+            options.origin,
+            options.session_id,
+            options.session_id,
+            @as(i64, @intCast(limit)),
+        });
+        defer rs.deinit();
+
+        while (rs.next()) |row| {
+            try list.append(gpa, .{
+                .tool_name = try gpa.dupe(u8, row.get([]const u8, 0)),
+                .count = row.get(i64, 1),
+            });
+        }
+        if (rs.err) |err| return err;
+        return list.toOwnedSlice(gpa);
+    }
+
+    pub fn listStatsSteps(self: Index, gpa: std.mem.Allocator, options: StatsOptions, limit: usize) ![]const StepRow {
+        var list: std.ArrayList(StepRow) = .empty;
+        errdefer {
+            for (list.items) |r| freeStepRow(gpa, r);
+            list.deinit(gpa);
+        }
+
+        var rs = try self.db.rows(
+            \\select hash, turn_id, parent_hash, tree_hash, timestamp, git_commit, git_branch, coalesce(git_dirty, -1)
+            \\from steps
+            \\where (? is null or session_origin = ?)
+            \\  and (? is null or session_id = ?)
+            \\order by timestamp asc, hash asc
+            \\limit ?
+        , .{
+            options.origin,
+            options.origin,
+            options.session_id,
+            options.session_id,
+            @as(i64, @intCast(limit)),
+        });
+        defer rs.deinit();
+
+        while (rs.next()) |row| {
+            try list.append(gpa, StepRow{
+                .hash = try gpa.dupe(u8, row.get([]const u8, 0)),
+                .turn_id = try gpa.dupe(u8, row.get([]const u8, 1)),
+                .parent_hash = if (row.get(?[]const u8, 2)) |p| try gpa.dupe(u8, p) else null,
+                .tree_hash = try gpa.dupe(u8, row.get([]const u8, 3)),
+                .timestamp = row.get(i64, 4),
+                .git_commit = if (row.get(?[]const u8, 5)) |commit| try gpa.dupe(u8, commit) else null,
+                .git_branch = if (row.get(?[]const u8, 6)) |branch| try gpa.dupe(u8, branch) else null,
+                .git_dirty = dirtyFromInt(row.get(i64, 7)),
+            });
+        }
+        if (rs.err) |err| return err;
+        return list.toOwnedSlice(gpa);
+    }
+
     /// List all sessions ordered by most recently updated first.
     /// Caller must call `freeSessionRows(gpa, result)` when done.
     pub fn listSessions(self: Index, gpa: std.mem.Allocator) ![]const SessionRow {
@@ -911,6 +1073,73 @@ pub const Index = struct {
                 .git_commit = if (row.get(?[]const u8, 5)) |commit| try gpa.dupe(u8, commit) else null,
                 .git_branch = if (row.get(?[]const u8, 6)) |branch| try gpa.dupe(u8, branch) else null,
                 .git_dirty = dirtyFromInt(row.get(i64, 7)),
+            });
+        }
+        if (rs.err) |err| return err;
+        return list.toOwnedSlice(gpa);
+    }
+
+    pub fn latestWatchRowid(self: Index, options: WatchOptions) !?i64 {
+        const row = try self.db.row(
+            \\select rowid
+            \\from steps
+            \\where (? is null or session_origin = ?)
+            \\  and (? is null or session_id = ?)
+            \\order by rowid desc
+            \\limit 1
+        , .{
+            options.origin,
+            options.origin,
+            options.session_id,
+            options.session_id,
+        }) orelse return null;
+        defer row.deinit();
+        return row.get(i64, 0);
+    }
+
+    pub fn listStepsAfterCursor(
+        self: Index,
+        gpa: std.mem.Allocator,
+        options: WatchOptions,
+    ) ![]const TimelineRow {
+        var list: std.ArrayList(TimelineRow) = .empty;
+        errdefer {
+            for (list.items) |row| freeTimelineRow(gpa, row);
+            list.deinit(gpa);
+        }
+
+        var rs = try self.db.rows(
+            \\select rowid, hash, session_origin, session_id, turn_id, timestamp, git_commit, git_branch, coalesce(git_dirty, -1)
+            \\from steps
+            \\where rowid > ?
+            \\  and (? is null or session_origin = ?)
+            \\  and (? is null or session_id = ?)
+            \\  and (? is null or timestamp >= ?)
+            \\order by rowid asc
+            \\limit ?
+        , .{
+            options.after_rowid,
+            options.origin,
+            options.origin,
+            options.session_id,
+            options.session_id,
+            options.since_ms,
+            options.since_ms,
+            @as(i64, @intCast(options.limit)),
+        });
+        defer rs.deinit();
+
+        while (rs.next()) |row| {
+            try list.append(gpa, .{
+                .rowid = row.get(i64, 0),
+                .hash = try gpa.dupe(u8, row.get([]const u8, 1)),
+                .origin = try gpa.dupe(u8, row.get([]const u8, 2)),
+                .session_id = try gpa.dupe(u8, row.get([]const u8, 3)),
+                .turn_id = try gpa.dupe(u8, row.get([]const u8, 4)),
+                .timestamp = row.get(i64, 5),
+                .git_commit = if (row.get(?[]const u8, 6)) |commit| try gpa.dupe(u8, commit) else null,
+                .git_branch = if (row.get(?[]const u8, 7)) |branch| try gpa.dupe(u8, branch) else null,
+                .git_dirty = dirtyFromInt(row.get(i64, 8)),
             });
         }
         if (rs.err) |err| return err;
@@ -1093,7 +1322,43 @@ pub const TimelineOptions = struct {
     limit: usize,
 };
 
+pub const StatsOptions = struct {
+    origin: ?[]const u8 = null,
+    session_id: ?[]const u8 = null,
+};
+
+pub const StatsSummaryRow = struct {
+    session_count: i64 = 0,
+    step_count: i64 = 0,
+    turn_count: i64 = 0,
+    first_timestamp: ?i64 = null,
+    last_timestamp: ?i64 = null,
+};
+
+pub const SessionStatsRow = struct {
+    origin: []const u8,
+    session_id: []const u8,
+    step_count: i64,
+    turn_count: i64,
+    first_timestamp: ?i64,
+    last_timestamp: ?i64,
+};
+
+pub const ToolCountRow = struct {
+    tool_name: []const u8,
+    count: i64,
+};
+
+pub const WatchOptions = struct {
+    origin: ?[]const u8 = null,
+    session_id: ?[]const u8 = null,
+    since_ms: ?i64 = null,
+    after_rowid: i64,
+    limit: usize,
+};
+
 pub const TimelineRow = struct {
+    rowid: i64 = 0,
     hash: []const u8,
     origin: []const u8,
     session_id: []const u8,
@@ -1161,6 +1426,25 @@ pub fn freeStepRows(gpa: std.mem.Allocator, rows: []const StepRow) void {
 
 pub fn freeTimelineRows(gpa: std.mem.Allocator, rows: []const TimelineRow) void {
     for (rows) |row| freeTimelineRow(gpa, row);
+    gpa.free(rows);
+}
+
+pub fn freeSessionStatsRow(gpa: std.mem.Allocator, row: SessionStatsRow) void {
+    gpa.free(row.origin);
+    gpa.free(row.session_id);
+}
+
+pub fn freeSessionStatsRows(gpa: std.mem.Allocator, rows: []const SessionStatsRow) void {
+    for (rows) |row| freeSessionStatsRow(gpa, row);
+    gpa.free(rows);
+}
+
+pub fn freeToolCountRow(gpa: std.mem.Allocator, row: ToolCountRow) void {
+    gpa.free(row.tool_name);
+}
+
+pub fn freeToolCountRows(gpa: std.mem.Allocator, rows: []const ToolCountRow) void {
+    for (rows) |row| freeToolCountRow(gpa, row);
     gpa.free(rows);
 }
 
@@ -1429,6 +1713,127 @@ test "index meta round trip" {
     try idx.metaDelete("k");
     const missing = try idx.metaGet(gpa, "k");
     try std.testing.expect(missing == null);
+}
+
+test "watch cursor queries rows in insertion order with filters" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const n = try tmp.dir.realPath(io, &path_buf);
+    var db_path_buf: [std.fs.max_path_bytes + 12]u8 = undefined;
+    const db_path = try std.fmt.bufPrintZ(&db_path_buf, "{s}/index.db", .{path_buf[0..n]});
+
+    const idx = try Index.open(db_path);
+    defer idx.close();
+    try idx.migrate();
+
+    try idx.upsertSession("codex", "s1", null);
+    try idx.upsertSession("codex", "s2", null);
+    try idx.insertStep("a" ** 64, "codex", "s1", "t1", null, "b" ** 64, 1000, null, null, null);
+    try idx.insertStep("c" ** 64, "codex", "s2", "t1", null, "d" ** 64, 1100, null, null, null);
+    try idx.insertStep("e" ** 64, "codex", "s1", "t2", "a" ** 64, "f" ** 64, 900, null, null, null);
+
+    const rows = try idx.listStepsAfterCursor(gpa, .{
+        .origin = "codex",
+        .session_id = "s1",
+        .after_rowid = 0,
+        .limit = 10,
+    });
+    defer freeTimelineRows(gpa, rows);
+
+    try std.testing.expectEqual(@as(usize, 2), rows.len);
+    try std.testing.expectEqualStrings("a" ** 64, rows[0].hash);
+    try std.testing.expectEqualStrings("e" ** 64, rows[1].hash);
+    try std.testing.expect(rows[0].rowid < rows[1].rowid);
+
+    const late_rows = try idx.listStepsAfterCursor(gpa, .{
+        .origin = "codex",
+        .session_id = "s1",
+        .after_rowid = rows[0].rowid,
+        .limit = 10,
+    });
+    defer freeTimelineRows(gpa, late_rows);
+
+    try std.testing.expectEqual(@as(usize, 1), late_rows.len);
+    try std.testing.expectEqualStrings("e" ** 64, late_rows[0].hash);
+
+    const latest = try idx.latestWatchRowid(.{
+        .origin = "codex",
+        .session_id = "s1",
+        .after_rowid = 0,
+        .limit = 10,
+    });
+    try std.testing.expectEqual(rows[1].rowid, latest.?);
+
+    const since_rows = try idx.listStepsAfterCursor(gpa, .{
+        .origin = "codex",
+        .session_id = "s1",
+        .since_ms = 950,
+        .after_rowid = 0,
+        .limit = 10,
+    });
+    defer freeTimelineRows(gpa, since_rows);
+
+    try std.testing.expectEqual(@as(usize, 1), since_rows.len);
+    try std.testing.expectEqualStrings("a" ** 64, since_rows[0].hash);
+}
+
+test "stats aggregate queries count sessions turns tools and bounded steps" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const n = try tmp.dir.realPath(io, &path_buf);
+    var db_path_buf: [std.fs.max_path_bytes + 12]u8 = undefined;
+    const db_path = try std.fmt.bufPrintZ(&db_path_buf, "{s}/index.db", .{path_buf[0..n]});
+
+    const idx = try Index.open(db_path);
+    defer idx.close();
+    try idx.migrate();
+
+    try idx.upsertSession("codex", "s1", "b" ** 64);
+    try idx.upsertSession("claude", "s2", "c" ** 64);
+    try idx.insertStep("a" ** 64, "codex", "s1", "t1", null, "1" ** 64, 1000, null, null, null);
+    try idx.insertStep("b" ** 64, "codex", "s1", "t2", "a" ** 64, "2" ** 64, 1200, null, null, null);
+    try idx.insertStep("c" ** 64, "claude", "s2", "t1", null, "3" ** 64, 1100, null, null, null);
+    try idx.insertToolCall("a" ** 64, 0, "Read", "{}", null);
+    try idx.insertToolCall("b" ** 64, 0, "Bash", "{}", "ok");
+    try idx.insertToolCall("c" ** 64, 0, "Bash", "{}", "ok");
+
+    const summary = try idx.statsSummary(.{});
+    try std.testing.expectEqual(@as(i64, 2), summary.session_count);
+    try std.testing.expectEqual(@as(i64, 3), summary.step_count);
+    try std.testing.expectEqual(@as(i64, 3), summary.turn_count);
+    try std.testing.expectEqual(@as(i64, 1000), summary.first_timestamp.?);
+    try std.testing.expectEqual(@as(i64, 1200), summary.last_timestamp.?);
+
+    const scoped = try idx.statsSummary(.{ .origin = "codex", .session_id = "s1" });
+    try std.testing.expectEqual(@as(i64, 1), scoped.session_count);
+    try std.testing.expectEqual(@as(i64, 2), scoped.step_count);
+    try std.testing.expectEqual(@as(i64, 2), scoped.turn_count);
+
+    const sessions = try idx.listSessionStats(gpa, .{});
+    defer freeSessionStatsRows(gpa, sessions);
+    try std.testing.expectEqual(@as(usize, 2), sessions.len);
+
+    const tools = try idx.listToolCounts(gpa, .{}, 10);
+    defer freeToolCountRows(gpa, tools);
+    try std.testing.expectEqual(@as(usize, 2), tools.len);
+    try std.testing.expectEqualStrings("Bash", tools[0].tool_name);
+    try std.testing.expectEqual(@as(i64, 2), tools[0].count);
+    try std.testing.expectEqualStrings("Read", tools[1].tool_name);
+    try std.testing.expectEqual(@as(i64, 1), tools[1].count);
+
+    const bounded = try idx.listStatsSteps(gpa, .{}, 2);
+    defer freeStepRows(gpa, bounded);
+    try std.testing.expectEqual(@as(usize, 2), bounded.len);
+    try std.testing.expectEqualStrings("a" ** 64, bounded[0].hash);
+    try std.testing.expectEqualStrings("c" ** 64, bounded[1].hash);
 }
 
 test "index object lookup and completeness marker" {
