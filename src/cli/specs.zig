@@ -298,6 +298,29 @@ pub const between_usage = help_mod.UsageSpec{
     },
 };
 
+pub const recall_usage = help_mod.UsageSpec{
+    .name = "recall",
+    .synopsis = "[OPTIONS] [QUERY]",
+    .description = "Retrieve prior recorded steps to inform the current task.",
+    .options = &.{
+        .{ .long = "json", .description = "Render recall matches as structured JSON." },
+        .{ .long = "path", .value_name = "file", .description = "Only return steps that touched the given captured path." },
+        .{ .long = "origin", .value_name = "name", .description = "Only return steps recorded by the given origin." },
+        .{ .long = "session", .value_name = "id", .description = "Only return steps from one session id, or pass origin/session-id to disambiguate." },
+        .{ .long = "outcome", .value_name = "kind", .description = "Only return steps with outcome success, failure, or unknown." },
+        .{ .long = "limit", .value_name = "N", .description = "Return at most <N> recall matches. Defaults to 20." },
+        .{ .long = "redacted", .description = "Redact obvious secrets in rendered previews." },
+        .{ .long = "full", .description = "Render full previews even when redaction is the repo default." },
+        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
+    },
+    .examples = &.{
+        .{ .description = "show recent prior work on one file", .command = "--path src/main.zig" },
+        .{ .description = "show only failed prior attempts for a file", .command = "--path src/main.zig --outcome failure" },
+        .{ .description = "search for prior token-related work in one session", .command = "--session codex/session-abc123 token" },
+    },
+    .notes = "Recall is agent-initiated pull memory. Pass a query, a --path filter, or both.",
+};
+
 pub const grep_usage = help_mod.UsageSpec{
     .name = "grep",
     .synopsis = "[OPTIONS] <QUERY>",
@@ -465,6 +488,7 @@ pub const public_commands = [_]help_mod.CommandSpec{
     .{ .name = "show", .summary = "Show details of a step", .usage = &show_usage },
     .{ .name = "diff", .summary = "Show captured file diffs", .usage = &diff_usage },
     .{ .name = "between", .summary = "Show steps recorded between Git revisions", .usage = &between_usage },
+    .{ .name = "recall", .summary = "Retrieve prior recorded steps", .usage = &recall_usage },
     .{ .name = "grep", .summary = "Search recorded messages and tool activity", .usage = &grep_usage },
     .{ .name = "blame", .summary = "Show per-line step attribution for a file", .usage = &blame_usage },
     .{ .name = "watch", .summary = "Follow newly recorded steps", .usage = &watch_usage },

@@ -6,6 +6,7 @@ const ref = @import("ref.zig");
 const index_mod = @import("index.zig");
 const file_lock = @import("../util/file_lock.zig");
 const ignore_mod = @import("ignore.zig");
+const outcome_mod = @import("outcome.zig");
 const snapshot_mod = @import("snapshot.zig");
 const blame_mod = @import("blame.zig");
 const zqlite = @import("zqlite");
@@ -32,6 +33,7 @@ pub const Ignorer = ignore_mod.Ignorer;
 pub const SnapshotConfig = snapshot_mod.SnapshotConfig;
 pub const BlameMap = blame_mod.BlameMap;
 pub const BlameEntry = blame_mod.BlameEntry;
+pub const Outcome = outcome_mod.Outcome;
 pub const freeBlameMap = blame_mod.freeBlameMap;
 pub const computeBlame = blame_mod.computeBlame;
 pub const finalize_retries_metric_key = "metrics.finalize_retries_total";
@@ -677,6 +679,7 @@ pub const Store = struct {
                 step.parent,
                 step.tree,
                 step.timestamp,
+                step.outcome,
                 step.git_commit,
                 step.git_branch,
                 step.git_dirty,
@@ -873,6 +876,7 @@ pub const Store = struct {
         causes: []const Cause,
         messages: []const StepMessage,
         tool_calls: []const StepToolCall,
+        outcome: ?[]const u8 = null,
         expected_parent: ?Hash,
         retry_delta: i64 = 0,
         git_commit: ?[]const u8 = null,
@@ -943,6 +947,7 @@ pub const Store = struct {
             .timestamp = input.timestamp,
             .messages = input.messages,
             .tool_calls = input.tool_calls,
+            .outcome = input.outcome,
             .git_commit = input.git_commit,
             .git_branch = input.git_branch,
             .git_dirty = input.git_dirty,
@@ -964,6 +969,7 @@ pub const Store = struct {
             parent_str,
             input.tree_hash,
             input.timestamp,
+            input.outcome,
             input.git_commit,
             input.git_branch,
             input.git_dirty,
@@ -1071,6 +1077,7 @@ pub const Store = struct {
             parent_hex_buf,
             step.tree,
             step.timestamp,
+            step.outcome,
             step.git_commit,
             step.git_branch,
             step.git_dirty,

@@ -29,6 +29,7 @@ const cli = struct {
     const show = @import("cli/show.zig");
     const diff = @import("cli/diff.zig");
     const between = @import("cli/between.zig");
+    const recall = @import("cli/recall.zig");
     const grep = @import("cli/grep.zig");
     const blame = @import("cli/blame.zig");
     const cat = @import("cli/cat.zig");
@@ -67,6 +68,7 @@ const SubCommand = enum {
     show,
     diff,
     between,
+    recall,
     grep,
     blame,
     cat,
@@ -167,6 +169,7 @@ pub fn main(init: std.process.Init) !void {
         .show => try cli.show.run(init.io, init.gpa, &iter),
         .diff => try cli.diff.run(init.io, init.gpa, &iter),
         .between => try cli.between.run(init.io, init.gpa, &iter),
+        .recall => try cli.recall.run(init.io, init.gpa, &iter),
         .grep => try cli.grep.run(init.io, init.gpa, &iter),
         .blame => try cli.blame.run(init.io, init.gpa, &iter),
         .cat => try cli.cat.run(init.io, init.gpa, &iter),
@@ -256,6 +259,7 @@ test {
     _ = @import("cli/show.zig");
     _ = @import("cli/diff.zig");
     _ = @import("cli/between.zig");
+    _ = @import("cli/recall.zig");
     _ = @import("cli/grep.zig");
     _ = @import("cli/blame.zig");
     _ = @import("cli/cat.zig");

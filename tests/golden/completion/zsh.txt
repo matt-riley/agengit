@@ -21,6 +21,7 @@ _agit() {
         'show:Show details of a step'
         'diff:Show captured file diffs'
         'between:Show steps recorded between Git revisions'
+        'recall:Retrieve prior recorded steps'
         'grep:Search recorded messages and tool activity'
         'blame:Show per-line step attribution for a file'
         'watch:Follow newly recorded steps'
@@ -165,6 +166,18 @@ _agit() {
                 between)
                     _arguments \
                         '--json[Render matching steps as structured JSON.]' \
+                        '--help[Display this help and exit.]'
+                    ;;
+                recall)
+                    _arguments \
+                        '--json[Render recall matches as structured JSON.]' \
+                        '--path[Only return steps that touched the given captured path.]:file' \
+                        '--origin[Only return steps recorded by the given origin.]:name' \
+                        '--session[Only return steps from one session id, or pass origin/session-id to disambiguate.]:id' \
+                        '--outcome[Only return steps with outcome success, failure, or unknown.]:kind' \
+                        '--limit[Return at most <N> recall matches. Defaults to 20.]:N' \
+                        '--redacted[Redact obvious secrets in rendered previews.]' \
+                        '--full[Render full previews even when redaction is the repo default.]' \
                         '--help[Display this help and exit.]'
                     ;;
                 grep)

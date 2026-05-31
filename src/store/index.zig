@@ -5,7 +5,7 @@ const zqlite = @import("zqlite");
 pub const Index = struct {
     db: zqlite.Conn,
 
-    pub const current_schema_version: i64 = 9;
+    pub const current_schema_version: i64 = 10;
     pub const objects_complete_meta_key = "index.objects.complete";
 
     pub const ObjectPrefixMatches = struct {
@@ -90,6 +90,9 @@ pub const Index = struct {
         }
         if (current_version < 9) {
             try self.applyMigration9();
+        }
+        if (current_version < 10) {
+            try self.applyMigration10();
         }
     }
 
@@ -364,6 +367,7 @@ pub const Index = struct {
         parent_hash: ?[]const u8,
         tree_hash: []const u8,
         timestamp: i64,
+        outcome: ?[]const u8,
         git_commit: ?[]const u8,
         git_branch: ?[]const u8,
         git_dirty: ?bool,
@@ -371,9 +375,9 @@ pub const Index = struct {
         const git_dirty_int: ?i64 = if (git_dirty) |dirty| if (dirty) 1 else 0 else null;
         try self.db.exec(
             \\insert or ignore into steps
-            \\  (hash, session_origin, session_id, turn_id, parent_hash, tree_hash, timestamp, git_commit, git_branch, git_dirty)
-            \\values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        , .{ hash, session_origin, session_id, turn_id, parent_hash, tree_hash, timestamp, git_commit, git_branch, git_dirty_int });
+            \\  (hash, session_origin, session_id, turn_id, parent_hash, tree_hash, timestamp, outcome, git_commit, git_branch, git_dirty)
+            \\values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        , .{ hash, session_origin, session_id, turn_id, parent_hash, tree_hash, timestamp, outcome, git_commit, git_branch, git_dirty_int });
     }
 
     /// Remove all step and session rows (used by reindex).
@@ -561,6 +565,24 @@ pub const Index = struct {
         );
 
         try self.db.execNoArgs("pragma user_version = 9");
+        try self.db.commit();
+    }
+
+    fn applyMigration10(self: Index) !void {
+        try self.db.transaction();
+        errdefer self.db.rollback();
+
+        try self.db.execNoArgs("alter table steps add column outcome text");
+        try self.db.execNoArgs(
+            "create index if not exists steps_outcome_timestamp on steps(outcome, timestamp desc) where outcome is not null",
+        );
+
+        try self.db.exec(
+            "insert into schema_migrations (version) values (?)",
+            .{@as(i64, 10)},
+        );
+
+        try self.db.execNoArgs("pragma user_version = 10");
         try self.db.commit();
     }
 
@@ -1199,6 +1221,80 @@ pub const Index = struct {
         return list.toOwnedSlice(gpa);
     }
 
+    pub fn listRecallStepsForPath(
+        self: Index,
+        gpa: std.mem.Allocator,
+        options: RecallPathOptions,
+    ) ![]const RecallRow {
+        var list: std.ArrayList(RecallRow) = .empty;
+        errdefer {
+            for (list.items) |row| freeRecallRow(gpa, row);
+            list.deinit(gpa);
+        }
+
+        var rs = try self.db.rows(
+            \\select s.hash, s.session_origin, s.session_id, s.turn_id, s.timestamp, s.outcome,
+            \\       s.git_commit, s.git_branch, coalesce(s.git_dirty, -1)
+            \\from blame_maps b
+            \\join steps s on s.hash = b.step_hash
+            \\where b.path = ?
+            \\  and (? is null or s.session_origin = ?)
+            \\  and (? is null or s.session_id = ?)
+            \\  and (? is null or s.outcome = ?)
+            \\order by s.timestamp desc, s.hash desc
+            \\limit ?
+        , .{
+            options.path,
+            options.origin,
+            options.origin,
+            options.session_id,
+            options.session_id,
+            options.outcome,
+            options.outcome,
+            @as(i64, @intCast(options.limit)),
+        });
+        defer rs.deinit();
+
+        while (rs.next()) |row| {
+            try list.append(gpa, .{
+                .hash = try gpa.dupe(u8, row.get([]const u8, 0)),
+                .origin = try gpa.dupe(u8, row.get([]const u8, 1)),
+                .session_id = try gpa.dupe(u8, row.get([]const u8, 2)),
+                .turn_id = try gpa.dupe(u8, row.get([]const u8, 3)),
+                .timestamp = row.get(i64, 4),
+                .outcome = if (row.get(?[]const u8, 5)) |value| try gpa.dupe(u8, value) else null,
+                .git_commit = if (row.get(?[]const u8, 6)) |value| try gpa.dupe(u8, value) else null,
+                .git_branch = if (row.get(?[]const u8, 7)) |value| try gpa.dupe(u8, value) else null,
+                .git_dirty = dirtyFromInt(row.get(i64, 8)),
+            });
+        }
+        if (rs.err) |err| return err;
+        return list.toOwnedSlice(gpa);
+    }
+
+    pub fn getRecallStepByHash(self: Index, gpa: std.mem.Allocator, hash: []const u8) !?RecallRow {
+        const row = try self.db.row(
+            \\select hash, session_origin, session_id, turn_id, timestamp, outcome,
+            \\       git_commit, git_branch, coalesce(git_dirty, -1)
+            \\from steps
+            \\where hash = ?
+            \\limit 1
+        , .{hash}) orelse return null;
+        defer row.deinit();
+
+        return .{
+            .hash = try gpa.dupe(u8, row.get([]const u8, 0)),
+            .origin = try gpa.dupe(u8, row.get([]const u8, 1)),
+            .session_id = try gpa.dupe(u8, row.get([]const u8, 2)),
+            .turn_id = try gpa.dupe(u8, row.get([]const u8, 3)),
+            .timestamp = row.get(i64, 4),
+            .outcome = if (row.get(?[]const u8, 5)) |value| try gpa.dupe(u8, value) else null,
+            .git_commit = if (row.get(?[]const u8, 6)) |value| try gpa.dupe(u8, value) else null,
+            .git_branch = if (row.get(?[]const u8, 7)) |value| try gpa.dupe(u8, value) else null,
+            .git_dirty = dirtyFromInt(row.get(i64, 8)),
+        };
+    }
+
     /// Return the most recent session that has a committed HEAD ref, or null.
     /// Caller must call `freeSessionRow(gpa, result)` when done.
     pub fn mostRecentSession(self: Index, gpa: std.mem.Allocator) !?SessionRow {
@@ -1390,6 +1486,26 @@ pub const SearchRow = struct {
     snippet: []const u8,
 };
 
+pub const RecallRow = struct {
+    hash: []const u8,
+    origin: []const u8,
+    session_id: []const u8,
+    turn_id: []const u8,
+    timestamp: i64,
+    outcome: ?[]const u8 = null,
+    git_commit: ?[]const u8 = null,
+    git_branch: ?[]const u8 = null,
+    git_dirty: ?bool = null,
+};
+
+pub const RecallPathOptions = struct {
+    path: []const u8,
+    origin: ?[]const u8 = null,
+    session_id: ?[]const u8 = null,
+    outcome: ?[]const u8 = null,
+    limit: usize,
+};
+
 pub fn freeSessionRow(gpa: std.mem.Allocator, r: SessionRow) void {
     gpa.free(r.origin);
     gpa.free(r.session_id);
@@ -1412,6 +1528,21 @@ pub fn freeTimelineRow(gpa: std.mem.Allocator, row: TimelineRow) void {
     gpa.free(row.turn_id);
     if (row.git_commit) |value| gpa.free(value);
     if (row.git_branch) |value| gpa.free(value);
+}
+
+pub fn freeRecallRow(gpa: std.mem.Allocator, row: RecallRow) void {
+    gpa.free(row.hash);
+    gpa.free(row.origin);
+    gpa.free(row.session_id);
+    gpa.free(row.turn_id);
+    if (row.outcome) |value| gpa.free(value);
+    if (row.git_commit) |value| gpa.free(value);
+    if (row.git_branch) |value| gpa.free(value);
+}
+
+pub fn freeRecallRows(gpa: std.mem.Allocator, rows: []const RecallRow) void {
+    for (rows) |row| freeRecallRow(gpa, row);
+    gpa.free(rows);
 }
 
 pub fn freeSessionRows(gpa: std.mem.Allocator, rows: []const SessionRow) void {
@@ -1533,7 +1664,7 @@ test "index migrate creates query-path indexes" {
     const user_ver = try idx.db.row("pragma user_version", .{});
     try std.testing.expect(user_ver != null);
     defer user_ver.?.deinit();
-    try std.testing.expectEqual(@as(i64, 9), user_ver.?.get(i64, 0));
+    try std.testing.expectEqual(@as(i64, 10), user_ver.?.get(i64, 0));
 }
 
 test "index upsertSession and insertStep" {
@@ -1551,7 +1682,7 @@ test "index upsertSession and insertStep" {
     try idx.migrate();
 
     try idx.upsertSession("origin", "s1", null);
-    try idx.insertStep("a" ** 64, "origin", "s1", "t1", null, "b" ** 64, 1000, null, null, null);
+    try idx.insertStep("a" ** 64, "origin", "s1", "t1", null, "b" ** 64, 1000, null, null, null, null);
 
     // Upsert should update head_hash.
     try idx.upsertSession("origin", "s1", "c" ** 64);
@@ -1635,8 +1766,8 @@ test "insertStep is idempotent for duplicate turn ids" {
     try idx.migrate();
 
     try idx.upsertSession("origin", "s1", null);
-    try idx.insertStep("a" ** 64, "origin", "s1", "t1", null, "b" ** 64, 1000, null, null, null);
-    try idx.insertStep("c" ** 64, "origin", "s1", "t1", "a" ** 64, "d" ** 64, 1001, null, null, null);
+    try idx.insertStep("a" ** 64, "origin", "s1", "t1", null, "b" ** 64, 1000, null, null, null, null);
+    try idx.insertStep("c" ** 64, "origin", "s1", "t1", "a" ** 64, "d" ** 64, 1001, null, null, null, null);
 
     const count_row = try idx.db.row(
         "select count(*) from steps where session_origin=? and session_id=? and turn_id=?",
@@ -1670,7 +1801,7 @@ test "index truncate" {
     try idx.migrate();
 
     try idx.upsertSession("origin", "s1", null);
-    try idx.insertStep("a" ** 64, "origin", "s1", "t1", null, "b" ** 64, 1000, null, null, null);
+    try idx.insertStep("a" ** 64, "origin", "s1", "t1", null, "b" ** 64, 1000, null, null, null, null);
     try idx.insertObject("a" ** 64, "step", 123);
     try idx.truncate();
 
@@ -1732,9 +1863,9 @@ test "watch cursor queries rows in insertion order with filters" {
 
     try idx.upsertSession("codex", "s1", null);
     try idx.upsertSession("codex", "s2", null);
-    try idx.insertStep("a" ** 64, "codex", "s1", "t1", null, "b" ** 64, 1000, null, null, null);
-    try idx.insertStep("c" ** 64, "codex", "s2", "t1", null, "d" ** 64, 1100, null, null, null);
-    try idx.insertStep("e" ** 64, "codex", "s1", "t2", "a" ** 64, "f" ** 64, 900, null, null, null);
+    try idx.insertStep("a" ** 64, "codex", "s1", "t1", null, "b" ** 64, 1000, null, null, null, null);
+    try idx.insertStep("c" ** 64, "codex", "s2", "t1", null, "d" ** 64, 1100, null, null, null, null);
+    try idx.insertStep("e" ** 64, "codex", "s1", "t2", "a" ** 64, "f" ** 64, 900, null, null, null, null);
 
     const rows = try idx.listStepsAfterCursor(gpa, .{
         .origin = "codex",
@@ -1798,9 +1929,9 @@ test "stats aggregate queries count sessions turns tools and bounded steps" {
 
     try idx.upsertSession("codex", "s1", "b" ** 64);
     try idx.upsertSession("claude", "s2", "c" ** 64);
-    try idx.insertStep("a" ** 64, "codex", "s1", "t1", null, "1" ** 64, 1000, null, null, null);
-    try idx.insertStep("b" ** 64, "codex", "s1", "t2", "a" ** 64, "2" ** 64, 1200, null, null, null);
-    try idx.insertStep("c" ** 64, "claude", "s2", "t1", null, "3" ** 64, 1100, null, null, null);
+    try idx.insertStep("a" ** 64, "codex", "s1", "t1", null, "1" ** 64, 1000, null, null, null, null);
+    try idx.insertStep("b" ** 64, "codex", "s1", "t2", "a" ** 64, "2" ** 64, 1200, null, null, null, null);
+    try idx.insertStep("c" ** 64, "claude", "s2", "t1", null, "3" ** 64, 1100, null, null, null, null);
     try idx.insertToolCall("a" ** 64, 0, "Read", "{}", null);
     try idx.insertToolCall("b" ** 64, 0, "Bash", "{}", "ok");
     try idx.insertToolCall("c" ** 64, 0, "Bash", "{}", "ok");
@@ -1889,7 +2020,7 @@ test "index search entries stay deduplicated and searchable" {
     try idx.migrate();
 
     try idx.upsertSession("claude", "session-1", null);
-    try idx.insertStep("a" ** 64, "claude", "session-1", "turn-1", null, "b" ** 64, 1_700_000_000_000, "f" ** 40, "main", true);
+    try idx.insertStep("a" ** 64, "claude", "session-1", "turn-1", null, "b" ** 64, 1_700_000_000_000, null, "f" ** 40, "main", true);
     try idx.insertMessage("a" ** 64, 0, "user", "factorial debugging");
     try idx.insertMessage("a" ** 64, 0, "user", "factorial debugging");
     try idx.insertToolCall("a" ** 64, 1, "Bash", "{\"command\":\"echo factorial\"}", "factorial result");

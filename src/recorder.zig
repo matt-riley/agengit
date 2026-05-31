@@ -7,6 +7,7 @@ const fs_mod = @import("util/fs.zig");
 const file_lock_mod = @import("util/file_lock.zig");
 const file_limits_mod = @import("util/file_limits.zig");
 const git_mod = @import("util/git.zig");
+const outcome_mod = @import("store/outcome.zig");
 
 pub const Hash = store_mod.Hash;
 pub const Ignorer = store_mod.Ignorer;
@@ -414,6 +415,7 @@ pub const Recorder = struct {
         };
         var git_context = git_mod.captureContext(io, self.gpa, self.repo_dir) catch git_mod.Context{};
         defer git_context.deinit(self.gpa);
+        const outcome = outcome_mod.derive(staging_val.tool_calls);
 
         var expected_parent = try self.store.readRef(io, self.gpa, meta.origin, meta.session_id);
         var attempt: u32 = 0;
@@ -427,6 +429,7 @@ pub const Recorder = struct {
                 .causes = all_causes.items,
                 .messages = msgs.items,
                 .tool_calls = staging_val.tool_calls,
+                .outcome = outcome.label(),
                 .expected_parent = expected_parent,
                 .retry_delta = @intCast(attempt),
                 .git_commit = git_context.commit,

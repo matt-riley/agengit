@@ -1,0 +1,37 @@
+USAGE:
+    agit recall [OPTIONS] [QUERY]
+
+DESCRIPTION:
+    Retrieve prior recorded steps to inform the current task.
+
+OPTIONS:
+    --json
+        Render recall matches as structured JSON.
+    --path <file>
+        Only return steps that touched the given captured path.
+    --origin <name>
+        Only return steps recorded by the given origin.
+    --session <id>
+        Only return steps from one session id, or pass origin/session-id to disambiguate.
+    --outcome <kind>
+        Only return steps with outcome success, failure, or unknown.
+    --limit <N>
+        Return at most <N> recall matches. Defaults to 20.
+    --redacted
+        Redact obvious secrets in rendered previews.
+    --full
+        Render full previews even when redaction is the repo default.
+    -h, --help
+        Display this help and exit.
+
+EXAMPLES:
+    # show recent prior work on one file
+    agit recall --path src/main.zig
+    # show only failed prior attempts for a file
+    agit recall --path src/main.zig --outcome failure
+    # search for prior token-related work in one session
+    agit recall --session codex/session-abc123 token
+
+NOTES:
+    Recall is agent-initiated pull memory. Pass a query, a --path filter, or both.
+
