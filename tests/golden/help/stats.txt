@@ -1,0 +1,25 @@
+USAGE:
+    agit stats [OPTIONS]
+
+DESCRIPTION:
+    Summarize recorded session, step, tool, and file-change activity.
+
+OPTIONS:
+    --json
+        Render stats as structured JSON.
+    --session <id>
+        Only summarize one session id, or pass origin/session-id to disambiguate.
+    -h, --help
+        Display this help and exit.
+
+EXAMPLES:
+    # show repository-wide analytics
+    agit stats
+    # show analytics for one session
+    agit stats --session codex/session-abc123
+    # emit machine-readable analytics
+    agit stats --json
+
+NOTES:
+    Stats read the SQLite index; run `agit reindex` if the index has drifted. Most-changed paths are computed from at most 500 steps by default.
+

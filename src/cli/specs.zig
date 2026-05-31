@@ -267,15 +267,19 @@ pub const show_usage = help_mod.UsageSpec{
 
 pub const diff_usage = help_mod.UsageSpec{
     .name = "diff",
-    .synopsis = "[OPTIONS] <HASH> [-- <PATH>]",
-    .description = "Render a text diff between a step tree and its parent tree.",
+    .synopsis = "[OPTIONS] (<HASH> [<HASH>] | --session <ID>) [-- <PATH>]",
+    .description = "Render a diff for one step, between two steps, or across a session.",
     .options = &.{
+        .{ .long = "json", .description = "Render diff metadata and changed paths as structured JSON." },
+        .{ .long = "session", .value_name = "id", .description = "Diff the first step's parent tree against the latest step in one session." },
         .{ .long = "redacted", .description = "Redact obvious secrets in diff output." },
         .{ .long = "full", .description = "Render full diff output even when redaction is the repo default." },
         .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
     },
     .examples = &.{
         .{ .description = "diff a recorded step against its parent", .command = "abc123def" },
+        .{ .description = "diff two recorded steps", .command = "abc123def fed456abc" },
+        .{ .description = "diff a complete session", .command = "--session codex/session-abc123" },
         .{ .description = "diff one captured path only", .command = "abc123def -- src/main.zig" },
     },
 };
@@ -332,6 +336,45 @@ pub const blame_usage = help_mod.UsageSpec{
         .{ .description = "show blame as of a specific step", .command = "--step abc123 src/main.zig" },
     },
     .notes = "AGIT_MAX_FILE_BYTES sets the default large-file cap and --no-limits disables it for one run.",
+};
+
+pub const watch_usage = help_mod.UsageSpec{
+    .name = "watch",
+    .synopsis = "[OPTIONS]",
+    .description = "Follow newly recorded steps as they are finalized.",
+    .options = &.{
+        .{ .long = "json", .description = "Render each watch event as a cli-json-v1 JSON line." },
+        .{ .long = "origin", .value_name = "name", .description = "Only follow steps recorded by the given origin." },
+        .{ .long = "session", .value_name = "id", .description = "Only follow one session id, or pass origin/session-id to disambiguate." },
+        .{ .long = "since", .value_name = "YYYY-MM-DD", .description = "Stream existing and new steps on or after UTC midnight for the given date." },
+        .{ .long = "interval", .value_name = "DURATION", .description = "Polling interval such as 1s or 250ms. Defaults to 1s." },
+        .{ .long = "redacted", .description = "Redact obvious secrets in rendered previews." },
+        .{ .long = "full", .description = "Render full previews even when redaction is the repo default." },
+        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
+    },
+    .examples = &.{
+        .{ .description = "follow newly recorded steps", .command = "" },
+        .{ .description = "follow one Codex session with a faster poll interval", .command = "--session codex/session-abc123 --interval 250ms" },
+        .{ .description = "stream JSON lines from today onward", .command = "--json --since 2026-05-31" },
+    },
+    .notes = "Watch polls the local SQLite index for committed steps and is near-real-time, not event-driven. Use `agit timeline` for one-shot CI output.",
+};
+
+pub const stats_usage = help_mod.UsageSpec{
+    .name = "stats",
+    .synopsis = "[OPTIONS]",
+    .description = "Summarize recorded session, step, tool, and file-change activity.",
+    .options = &.{
+        .{ .long = "json", .description = "Render stats as structured JSON." },
+        .{ .long = "session", .value_name = "id", .description = "Only summarize one session id, or pass origin/session-id to disambiguate." },
+        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
+    },
+    .examples = &.{
+        .{ .description = "show repository-wide analytics", .command = "" },
+        .{ .description = "show analytics for one session", .command = "--session codex/session-abc123" },
+        .{ .description = "emit machine-readable analytics", .command = "--json" },
+    },
+    .notes = "Stats read the SQLite index; run `agit reindex` if the index has drifted. Most-changed paths are computed from at most 500 steps by default.",
 };
 
 pub const cat_usage = help_mod.UsageSpec{
@@ -420,10 +463,12 @@ pub const public_commands = [_]help_mod.CommandSpec{
     .{ .name = "log", .summary = "Show step history for a session", .usage = &log_usage },
     .{ .name = "restore", .summary = "Restore files from a recorded snapshot", .usage = &restore_usage },
     .{ .name = "show", .summary = "Show details of a step", .usage = &show_usage },
-    .{ .name = "diff", .summary = "Show a text diff for a step", .usage = &diff_usage },
+    .{ .name = "diff", .summary = "Show captured file diffs", .usage = &diff_usage },
     .{ .name = "between", .summary = "Show steps recorded between Git revisions", .usage = &between_usage },
     .{ .name = "grep", .summary = "Search recorded messages and tool activity", .usage = &grep_usage },
     .{ .name = "blame", .summary = "Show per-line step attribution for a file", .usage = &blame_usage },
+    .{ .name = "watch", .summary = "Follow newly recorded steps", .usage = &watch_usage },
+    .{ .name = "stats", .summary = "Summarize recorded activity", .usage = &stats_usage },
     .{ .name = "cat", .summary = "Print a raw object by hash", .usage = &cat_usage },
     .{ .name = "privacy", .summary = "Scan reachable content for sensitive data", .usage = &privacy_usage },
     .{ .name = "reindex", .summary = "Rebuild the index from the object store", .usage = &reindex_usage },

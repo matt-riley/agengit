@@ -23,10 +23,12 @@ Commands:
   log           Show step history for a session
   restore       Restore files from a recorded snapshot
   show          Show details of a step
-  diff          Show a text diff for a step
+  diff          Show captured file diffs
   between       Show steps recorded between Git revisions
   grep          Search recorded messages and tool activity
   blame         Show per-line step attribution for a file
+  watch         Follow newly recorded steps
+  stats         Summarize recorded activity
   cat           Print a raw object by hash
   privacy       Scan reachable content for sensitive data
   reindex       Rebuild the index from the object store

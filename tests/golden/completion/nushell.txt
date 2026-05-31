@@ -17,10 +17,12 @@ def "nu-complete agit command" [] {
         { value: 'log', description: 'Show step history for a session' }
         { value: 'restore', description: 'Restore files from a recorded snapshot' }
         { value: 'show', description: 'Show details of a step' }
-        { value: 'diff', description: 'Show a text diff for a step' }
+        { value: 'diff', description: 'Show captured file diffs' }
         { value: 'between', description: 'Show steps recorded between Git revisions' }
         { value: 'grep', description: 'Search recorded messages and tool activity' }
         { value: 'blame', description: 'Show per-line step attribution for a file' }
+        { value: 'watch', description: 'Follow newly recorded steps' }
+        { value: 'stats', description: 'Summarize recorded activity' }
         { value: 'cat', description: 'Print a raw object by hash' }
         { value: 'privacy', description: 'Scan reachable content for sensitive data' }
         { value: 'reindex', description: 'Rebuild the index from the object store' }
@@ -148,6 +150,8 @@ extern "agit show" [
 ]
 
 extern "agit diff" [
+    --json
+    --session: string
     --redacted
     --full
     --help(-h)
@@ -175,6 +179,23 @@ extern "agit blame" [
     --json
     --step: string
     --no-limits
+    --help(-h)
+]
+
+extern "agit watch" [
+    --json
+    --origin: string
+    --session: string
+    --since: string
+    --interval: string
+    --redacted
+    --full
+    --help(-h)
+]
+
+extern "agit stats" [
+    --json
+    --session: string
     --help(-h)
 ]
 

@@ -245,9 +245,9 @@ agit show abc123def
 ```
 
 ### `agit diff`
-Render a text diff between a step tree and its parent tree.
+Render a diff for one step, between two steps, or across a session.
 
-**Synopsis:** `agit diff [OPTIONS] <HASH> [-- <PATH>]`
+**Synopsis:** `agit diff [OPTIONS] (<HASH> [<HASH>] | --session <ID>) [-- <PATH>]`
 
 ```sh
 # diff a recorded step against its parent
@@ -285,6 +285,30 @@ agit blame src/main.zig
 ```
 
 **Notes:** AGIT_MAX_FILE_BYTES sets the default large-file cap and --no-limits disables it for one run.
+
+### `agit watch`
+Follow newly recorded steps as they are finalized.
+
+**Synopsis:** `agit watch [OPTIONS]`
+
+```sh
+# follow newly recorded steps
+agit watch
+```
+
+**Notes:** Watch polls the local SQLite index for committed steps and is near-real-time, not event-driven. Use `agit timeline` for one-shot CI output.
+
+### `agit stats`
+Summarize recorded session, step, tool, and file-change activity.
+
+**Synopsis:** `agit stats [OPTIONS]`
+
+```sh
+# show repository-wide analytics
+agit stats
+```
+
+**Notes:** Stats read the SQLite index; run `agit reindex` if the index has drifted. Most-changed paths are computed from at most 500 steps by default.
 
 ### `agit cat`
 Print a raw object by its BLAKE3 hash.
