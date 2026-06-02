@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.20.1](https://github.com/matt-riley/agengit/compare/v1.20.0...v1.20.1) (2026-06-02)
+
+
+### Bug Fixes
+
+* install Copilot capture as an extension ([9838892](https://github.com/matt-riley/agengit/commit/98388924e7e72ac43a618e0927aaef1bba787aad))
+
 ## [1.20.0](https://github.com/matt-riley/agengit/compare/v1.19.0...v1.20.0) (2026-05-31)
 
 
