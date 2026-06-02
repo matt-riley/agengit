@@ -3,15 +3,19 @@
 **Status:** Partially superseded — see Update (2026)
 **Date:** 2026-05-25
 
-## Update (2026): Copilot and Pi ship as hook adapters
+## Update (2026): Pi ships as a generated extension, and Copilot moved to one
 
 This ADR assumed GitHub Copilot CLI and Pi lacked a usable lifecycle-hook shape
 and would require the observer framework. That assumption proved wrong for both:
 
-- **GitHub Copilot CLI** exposes a `~/.copilot/hooks.json` config with
-  `userPromptSubmitted`/`postToolUse`/`agentStop` command hooks that deliver
-  JSON payloads on stdin — the same model as Codex. It is implemented as a
-  standard hook adapter (`src/hook/adapters/copilot.zig`), not an observer.
+- **GitHub Copilot CLI** now ships with a stable public extensions surface
+  under `~/.copilot/extensions/`, and current supported `agit` installs use a
+  generated `extension.mjs` that subscribes to
+  `onUserPromptSubmitted`/`onPostToolUse`/`onAgentStop` and shells out to
+  `agit copilot-hook` with a normalized payload. Earlier standalone
+  `hooks.json` assumptions drifted from the live CLI contract, so Copilot is
+  now a generated-extension install feeding the same hook adapter pipeline
+  (`src/hook/adapters/copilot.zig`), not an observer.
 - **Pi** auto-discovers JavaScript extensions under `~/.pi/agent/extensions/`.
   `agit init` writes a generated, self-contained `agit-recorder.js` that
   subscribes to Pi lifecycle events and shells out to `agit pi-hook` with a
