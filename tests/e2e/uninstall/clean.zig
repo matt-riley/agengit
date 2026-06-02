@@ -8,6 +8,7 @@ test "uninstall/clean" {
     try sandbox.createFakeAgent("claude");
     try sandbox.createFakeAgent("codex");
     try sandbox.createFakeAgent("gemini");
+    try sandbox.createFakeAgent("copilot");
 
     var init_result = try sandbox.run(&.{"init"}, null);
     defer init_result.deinit(std.testing.allocator);
@@ -26,10 +27,23 @@ test "uninstall/clean" {
     defer std.testing.allocator.free(claude);
     try std.testing.expect(std.mem.indexOf(u8, claude, "\"_agit\"") == null);
     try std.testing.expect(std.mem.indexOf(u8, claude, "\"custom\": \"keep\"") != null);
+
+    const copilot_ext = try readHomeOptional(&sandbox, ".copilot/extensions/agit-recorder/extension.mjs");
+    defer if (copilot_ext) |text| std.testing.allocator.free(text);
+    try std.testing.expect(copilot_ext == null);
 }
 
 fn readHome(sandbox: *harness.Sandbox, rel_path: []const u8) ![]u8 {
     const abs = try std.fmt.allocPrint(std.testing.allocator, "{s}/{s}", .{ sandbox.home, rel_path });
     defer std.testing.allocator.free(abs);
     return std.Io.Dir.cwd().readFileAlloc(sandbox.io, abs, std.testing.allocator, .unlimited);
+}
+
+fn readHomeOptional(sandbox: *harness.Sandbox, rel_path: []const u8) !?[]u8 {
+    const abs = try std.fmt.allocPrint(std.testing.allocator, "{s}/{s}", .{ sandbox.home, rel_path });
+    defer std.testing.allocator.free(abs);
+    return std.Io.Dir.cwd().readFileAlloc(sandbox.io, abs, std.testing.allocator, .unlimited) catch |err| switch (err) {
+        error.FileNotFound => null,
+        else => err,
+    };
 }

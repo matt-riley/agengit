@@ -26,7 +26,7 @@ Supported hook integrations today:
 | Claude Code | `UserPromptSubmit`, `PostToolBatch`, `Stop` in `~/.claude/settings.json` |
 | OpenAI Codex CLI | `UserPromptSubmit`, `PostToolUse`, `Stop` in `~/.codex/hooks.json` |
 | Google Gemini CLI | `AfterTool`, `AfterAgent` in `~/.gemini/settings.json` |
-| GitHub Copilot CLI | `userPromptSubmitted`, `postToolUse`, `agentStop` in `~/.copilot/hooks.json` |
+| GitHub Copilot CLI | generated extension `~/.copilot/extensions/agit-recorder/extension.mjs` (subscribes to `onUserPromptSubmitted`, `onPostToolUse`, `onAgentStop`) |
 | Pi | generated extension `~/.pi/agent/extensions/agit-recorder.js` (auto-discovered) |
 
 ## What gets recorded
@@ -76,7 +76,9 @@ agit init
 ```
 
 `agit init` discovers supported agent CLIs on `PATH` and installs hook commands
-into their user config files, creating `*.agit.bak` backups first.
+into their user config files or writes generated recorder extensions for agents
+that expose public extension hooks. JSON config installs create `*.agit.bak`
+backups first.
 
 If a target config file exists but contains malformed or non-object JSON,
 `agit init` refuses to overwrite it unless you rerun with `agit init --force`.

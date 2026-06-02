@@ -41,6 +41,7 @@ pub fn run(
     try uninstallAgent(io, gpa, home, exe, ".codex/hooks.json", crash_after_tmp_write, &stdout, removeSimpleHooks);
     try uninstallAgent(io, gpa, home, exe, ".gemini/settings.json", crash_after_tmp_write, &stdout, removeSimpleHooks);
     try uninstallAgent(io, gpa, home, exe, ".copilot/hooks.json", crash_after_tmp_write, &stdout, removeSimpleHooks);
+    try uninstallJsExtension(io, gpa, home, ".copilot/extensions/agit-recorder/extension.mjs", &stdout);
     try uninstallJsExtension(io, gpa, home, ".pi/agent/extensions/agit-recorder.js", &stdout);
 
     try stdout.flush();

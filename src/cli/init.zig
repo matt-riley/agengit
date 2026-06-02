@@ -4,6 +4,7 @@ const home_mod = @import("../util/home.zig");
 const fs_mod = @import("../util/fs.zig");
 const atomic_json_mod = @import("../util/atomic_json.zig");
 const help_mod = @import("help.zig");
+const copilot_extension = @import("copilot_extension.zig");
 const init_plan_mod = @import("init_plan.zig");
 const pi_extension = @import("pi_extension.zig");
 const specs = @import("specs.zig");
@@ -367,8 +368,6 @@ fn installAgent(
         try setCodexHooks(aa, &root.object, exe);
     } else if (std.mem.eql(u8, agent_plan.agent.id, "gemini")) {
         try setGeminiHooks(aa, &root.object, exe);
-    } else if (std.mem.eql(u8, agent_plan.agent.id, "copilot")) {
-        try setCopilotHooks(aa, &root.object, exe);
     } else {
         return error.UnknownAgent;
     }
@@ -385,8 +384,8 @@ fn installAgent(
     try stdout.interface.print("agit init: wrote {s} hooks to {s}\n", .{ agent_name, config_path });
 }
 
-/// Write a generated JS extension file for a JS-extension agent (Pi). The file
-/// is self-contained and embeds the agit binary path; it is always rewritten so
+/// Write a generated JS extension file for a JS-extension agent. The file is
+/// self-contained and embeds the agit binary path; it is always rewritten so
 /// reruns pick up a moved binary or updated template.
 fn installJsExtension(
     io: std.Io,
@@ -403,7 +402,12 @@ fn installJsExtension(
     defer arena.deinit();
     const aa = arena.allocator();
 
-    const source = try pi_extension.render(aa, exe);
+    const source = if (std.mem.eql(u8, agent_plan.agent.id, "pi"))
+        try pi_extension.render(aa, exe)
+    else if (std.mem.eql(u8, agent_plan.agent.id, "copilot"))
+        try copilot_extension.render(aa, exe)
+    else
+        return error.UnknownAgent;
 
     var af = std.Io.Dir.cwd().createFileAtomic(io, config_path, .{ .replace = true, .make_path = false }) catch |err| {
         try stdout.interface.print("agit init: failed to write {s} extension {s}: {s}\n", .{
@@ -541,48 +545,6 @@ fn makeGeminiHook(aa: std.mem.Allocator, exe: []const u8, subcmd: []const u8) !s
 
     var arr = std.json.Array.init(aa);
     try arr.append(std.json.Value{ .object = obj });
-    return std.json.Value{ .array = arr };
-}
-
-/// Merge agit-managed entries into Copilot CLI hooks.json.
-/// Copilot uses camelCase event keys with flat `{type, command, args}` entries.
-fn setCopilotHooks(aa: std.mem.Allocator, root: *std.json.ObjectMap, exe: []const u8) !void {
-    var hooks_obj = std.json.ObjectMap.empty;
-    try hooks_obj.put(aa, "userPromptSubmitted", try makeCopilotList(aa, exe, &.{"copilot-hook"}));
-    try hooks_obj.put(aa, "postToolUse", try makeCopilotList(aa, exe, &.{"copilot-hook"}));
-    try hooks_obj.put(aa, "agentStop", try makeCopilotList(aa, exe, &.{"copilot-hook"}));
-
-    if (root.get("hooks")) |existing| {
-        if (existing == .object) {
-            var it = existing.object.iterator();
-            while (it.next()) |entry| {
-                if (hooks_obj.get(entry.key_ptr.*) != null) continue;
-                try hooks_obj.put(aa, entry.key_ptr.*, entry.value_ptr.*);
-            }
-        }
-    }
-
-    try root.put(aa, "hooks", std.json.Value{ .object = hooks_obj });
-
-    var agit_meta = std.json.ObjectMap.empty;
-    try agit_meta.put(aa, "binary", std.json.Value{ .string = exe });
-    try root.put(aa, "_agit", std.json.Value{ .object = agit_meta });
-}
-
-/// Build a Copilot-format hook list: [{type: "command", command: exe, args: [...]}]
-fn makeCopilotList(aa: std.mem.Allocator, exe: []const u8, args: []const []const u8) !std.json.Value {
-    var entry_obj = std.json.ObjectMap.empty;
-    try entry_obj.put(aa, "type", std.json.Value{ .string = "command" });
-    try entry_obj.put(aa, "command", std.json.Value{ .string = exe });
-
-    var args_arr = std.json.Array.init(aa);
-    for (args) |arg| {
-        try args_arr.append(std.json.Value{ .string = arg });
-    }
-    try entry_obj.put(aa, "args", std.json.Value{ .array = args_arr });
-
-    var arr = std.json.Array.init(aa);
-    try arr.append(std.json.Value{ .object = entry_obj });
     return std.json.Value{ .array = arr };
 }
 

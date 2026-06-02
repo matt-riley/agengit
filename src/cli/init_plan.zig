@@ -43,8 +43,9 @@ pub const gemini = AgentMetadata{
 pub const copilot = AgentMetadata{
     .name = "Copilot CLI",
     .id = "copilot",
-    .config_path_rel = ".copilot/hooks.json",
-    .dir_path_rel = ".copilot",
+    .config_path_rel = ".copilot/extensions/agit-recorder/extension.mjs",
+    .dir_path_rel = ".copilot/extensions/agit-recorder",
+    .install_kind = .js_extension,
 };
 
 pub const pi = AgentMetadata{
