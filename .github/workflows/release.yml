@@ -6,8 +6,6 @@ on:
   workflow_dispatch:
 
 concurrency:
-  # Queue release runs so a newer push cannot cancel an in-flight publish
-  # before the Homebrew tap update lands.
   group: ${{ github.workflow }}:${{ github.ref }}
   cancel-in-progress: false
 
@@ -22,8 +20,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       is_release_commit: ${{ steps.detect.outputs.is_release_commit }}
-      version: ${{ steps.detect.outputs.version }}
-      tag_name: ${{ steps.detect.outputs.tag_name }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -34,20 +30,11 @@ jobs:
           set -euo pipefail
           subject="$(git show -s --format=%s HEAD)"
           if [[ "$subject" =~ ^chore\(main\):\ release\ ([0-9]+\.[0-9]+\.[0-9]+)(\ \(#[0-9]+\))?$ ]]; then
-            version="$(jq -r '."."' .release-please-manifest.json)"
-            if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-              echo "::error::Expected root version in .release-please-manifest.json, got: $version"
-              exit 1
-            fi
             echo "is_release_commit=true" >> "$GITHUB_OUTPUT"
-            echo "version=$version" >> "$GITHUB_OUTPUT"
-            echo "tag_name=v$version" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           echo "is_release_commit=false" >> "$GITHUB_OUTPUT"
-          echo "version=" >> "$GITHUB_OUTPUT"
-          echo "tag_name=" >> "$GITHUB_OUTPUT"
 
   release-please:
     needs: detect-release-commit
@@ -60,165 +47,3 @@ jobs:
           manifest-file: .release-please-manifest.json
           token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
           skip-github-release: true
-
-  prepare-release:
-    name: Prepare draft release
-    needs: detect-release-commit
-    if: needs.detect-release-commit.outputs.is_release_commit == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          ref: ${{ github.sha }}
-
-      - name: Extract release notes
-        env:
-          VERSION: ${{ needs.detect-release-commit.outputs.version }}
-        run: |
-          set -euo pipefail
-          awk -v version="$VERSION" '
-            BEGIN { printing = 0; found = 0 }
-            /^## \[/ {
-              if (printing) exit
-              if ($0 ~ ("^## \\[" version "\\]")) {
-                printing = 1
-                found = 1
-              }
-            }
-            printing { print }
-            END {
-              if (!found) exit 1
-            }
-          ' CHANGELOG.md > release-notes.md || {
-            echo "::error::Could not extract release notes for version ${VERSION} from CHANGELOG.md"
-            exit 1
-          }
-          if [[ ! -s release-notes.md ]]; then
-            echo "::error::release-notes.md was empty for version ${VERSION}"
-            exit 1
-          fi
-
-      - name: Create draft release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.detect-release-commit.outputs.tag_name }}
-        run: |
-          set -euo pipefail
-          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
-            echo "Release ${TAG} already exists; reusing it."
-            exit 0
-          fi
-          gh release create "$TAG" \
-            --repo "${{ github.repository }}" \
-            --target "${{ github.sha }}" \
-            --title "$TAG" \
-            --notes-file release-notes.md \
-            --draft
-
-  build:
-    name: Build (${{ matrix.target }})
-    needs: [detect-release-commit, prepare-release]
-    if: needs.detect-release-commit.outputs.is_release_commit == 'true'
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { target: x86_64-linux-musl, archive: agit-x86_64-linux.tar.gz }
-          - { target: aarch64-linux-musl, archive: agit-aarch64-linux.tar.gz }
-          - { target: aarch64-macos, archive: agit-aarch64-macos.tar.gz }
-          - { target: x86_64-macos, archive: agit-x86_64-macos.tar.gz }
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          ref: ${{ github.sha }}
-
-      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
-
-      - name: Install configured tools
-        run: mise install
-
-      - name: Build release archive
-        env:
-          TARGET: ${{ matrix.target }}
-          ARCHIVE: ${{ matrix.archive }}
-        run: mise run release-archive
-
-      - name: Upload to release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          ARCHIVE: ${{ matrix.archive }}
-          TAG: ${{ needs.detect-release-commit.outputs.tag_name }}
-        run: |
-          set -euo pipefail
-          if gh release view "$TAG" --repo "${{ github.repository }}" --json assets --jq '.assets[].name' | grep -Fxq "$ARCHIVE"; then
-            echo "Release asset ${ARCHIVE} already exists on ${TAG}; skipping upload."
-            exit 0
-          fi
-          if ! gh release upload "$TAG" "dist/${ARCHIVE}" --repo "${{ github.repository }}"; then
-            echo "::error::Failed to upload missing asset ${ARCHIVE}. If release ${TAG} is immutable, reruns cannot add missing assets; create a new release or remove immutability before retrying."
-            exit 1
-          fi
-
-  checksums:
-    name: Generate checksums
-    needs: [detect-release-commit, prepare-release, build]
-    if: needs.detect-release-commit.outputs.is_release_commit == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download archives and generate checksums
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.detect-release-commit.outputs.tag_name }}
-        run: |
-          set -euo pipefail
-          mkdir -p dist
-          gh release download "$TAG" \
-            --repo "${{ github.repository }}" \
-            --pattern "agit-*.tar.gz" \
-            --dir dist
-          cd dist
-          sha256sum * > checksums.txt
-          cat checksums.txt
-          if gh release view "$TAG" --repo "${{ github.repository }}" --json assets --jq '.assets[].name' | grep -Fxq "checksums.txt"; then
-            echo "Release asset checksums.txt already exists on ${TAG}; skipping upload."
-            exit 0
-          fi
-          if ! gh release upload "$TAG" checksums.txt --repo "${{ github.repository }}"; then
-            echo "::error::Failed to upload missing asset checksums.txt. If release ${TAG} is immutable, reruns cannot add missing assets; create a new release or remove immutability before retrying."
-            exit 1
-          fi
-
-  publish:
-    name: Publish release
-    needs: [detect-release-commit, prepare-release, checksums]
-    if: needs.detect-release-commit.outputs.is_release_commit == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Mark release as published
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release edit "${{ needs.detect-release-commit.outputs.tag_name }}" --draft=false \
-            --repo "${{ github.repository }}"
-
-  homebrew:
-    name: Update homebrew tap
-    needs: [detect-release-commit, prepare-release, build, checksums, publish]
-    if: needs.detect-release-commit.outputs.is_release_commit == 'true'
-    uses: matt-riley/matt-riley-ci/.github/workflows/homebrew-formula.yml@9558d9e0b4cf7ce0bd0786f7300f2aae0eab0683
-    with:
-      tag: ${{ needs.detect-release-commit.outputs.tag_name }}
-      tap-repo: matt-riley/homebrew-tools
-      formula-name: agit
-      class-name: Agit
-      desc: AI-agent version control
-      homepage: https://github.com/matt-riley/agengit
-      license: GPL-3.0-only
-      binary: agit
-      archive-x86_64-macos: agit-x86_64-macos.tar.gz
-      archive-aarch64-macos: agit-aarch64-macos.tar.gz
-      archive-x86_64-linux: agit-x86_64-linux.tar.gz
-      archive-aarch64-linux: agit-aarch64-linux.tar.gz
-    secrets:
-      homebrew-tap-token: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN || secrets.TAP_TOKEN }}
