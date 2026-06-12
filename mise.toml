@@ -19,6 +19,16 @@ run = "zig build check"
 description = "Run agit through the build graph"
 run = "zig build run --"
 
+[tasks.release-archive]
+description = "Build and archive a release artifact for TARGET"
+run = '''
+: "${TARGET:?TARGET is required}"
+export OPTIMIZE="${OPTIMIZE:-ReleaseSafe}"
+mise run build
+mkdir -p dist
+tar -czf "dist/${ARCHIVE:?ARCHIVE is required}" -C zig-out/bin agit
+'''
+
 [tasks.fuzz]
 description = "Run bounded hook payload fuzz harnesses"
 run = "zig build fuzz-hooks -- --time=${FUZZ_TIME:-60s} --crash-dir=${CRASH_DIR:-$PWD/dist/crash-corpus}"
