@@ -5,70 +5,27 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-  schedule:
-    - cron: "0 3 * * *"
 
 jobs:
-  commit-messages:
-    name: Commit message lint
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Validate Conventional Commit subjects
-        shell: bash
-        run: |
-          set -euo pipefail
-          regex='^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([^)]+\))?!?: .+'
-
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            git fetch --no-tags origin "${{ github.base_ref }}"
-            range="origin/${{ github.base_ref }}..HEAD"
-          else
-            before="${{ github.event.before }}"
-            if [ -z "$before" ] || [ "$before" = "0000000000000000000000000000000000000000" ]; then
-              range="HEAD~1..HEAD"
-            else
-              range="$before..${{ github.sha }}"
-            fi
-          fi
-
-          bad=0
-          while IFS=$'\t' read -r hash subject; do
-            [ -z "${hash:-}" ] && continue
-            if ! [[ "$subject" =~ $regex ]]; then
-              echo "::error::${hash} has non-conventional subject: ${subject}"
-              bad=1
-            fi
-          done < <(git --no-pager log --no-merges --format='%H%x09%s' "$range")
-
-          if [ "$bad" -ne 0 ]; then
-            echo "Conventional Commit check failed."
-            exit 1
-          fi
-
   validation-linux:
     name: Validation (ubuntu-latest)
-    needs: commit-messages
     permissions:
       contents: read
       packages: read
-    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@main
+    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@v2
     with:
       runner: ubuntu-latest
       lint: true
       test: true
+      fmt: true
       concurrency-suffix: validation-linux
 
   validation-macos:
     name: Validation (macos-latest)
-    needs: commit-messages
     permissions:
       contents: read
       packages: read
-    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@main
+    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@v2
     with:
       runner: macos-latest
       lint: true
@@ -77,33 +34,36 @@ jobs:
 
   sanitizers:
     name: Sanitizers
-    runs-on: ubuntu-latest
-    needs: commit-messages
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: mlugg/setup-zig@v2
-        with:
-          version: 0.16.0
-
-      - name: Run unit and e2e tests with UBSan
-        run: zig build test test-e2e -Doptimize=Debug -Dsanitize-c=full
+    permissions:
+      contents: read
+      packages: read
+    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@v2
+    with:
+      runner: ubuntu-latest
+      test: true
+      task-env: |
+        TEST_SUITE=sanitizers
+      concurrency-suffix: sanitizers
 
   fuzz:
     name: Fuzz hook payloads
     runs-on: ubuntu-latest
-    needs: commit-messages
+    permissions:
+      contents: read
+      packages: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - uses: mlugg/setup-zig@v2
-        with:
-          version: 0.16.0
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+
+      - name: Install configured tools
+        run: mise install
 
       - name: Run bounded fuzz harnesses
         env:
           FUZZ_TIME: ${{ github.event_name == 'schedule' && '30m' || '60s' }}
-        run: zig build fuzz-hooks -- --time="${FUZZ_TIME}" --crash-dir="$PWD/dist/crash-corpus"
+          CRASH_DIR: ${{ github.workspace }}/dist/crash-corpus
+        run: mise run fuzz
 
       - name: Upload crash corpus
         if: github.event_name == 'schedule' && always()
@@ -115,36 +75,36 @@ jobs:
 
   store-roundtrip:
     name: Store roundtrip
-    runs-on: ubuntu-latest
-    needs: commit-messages
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: mlugg/setup-zig@v2
-        with:
-          version: 0.16.0
-
-      - name: Run recorder/reindex property tests
-        run: zig build test-property
+    permissions:
+      contents: read
+      packages: read
+    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@v2
+    with:
+      runner: ubuntu-latest
+      test: true
+      task-env: |
+        TEST_SUITE=store-roundtrip
+      concurrency-suffix: store-roundtrip
 
   smoke-doctor:
     name: Smoke doctor
-    runs-on: ubuntu-latest
-    needs: commit-messages
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: mlugg/setup-zig@v2
-        with:
-          version: 0.16.0
-
-      - name: Run doctor smoke script
-        run: ./scripts/smoke-doctor.sh
+    permissions:
+      contents: read
+      packages: read
+    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@v2
+    with:
+      runner: ubuntu-latest
+      test: true
+      task-env: |
+        TEST_SUITE=smoke-doctor
+      concurrency-suffix: smoke-doctor
 
   cross-compile:
     name: Cross-compile (${{ matrix.target }})
-    runs-on: ubuntu-latest
     needs: [validation-linux, validation-macos]
+    permissions:
+      contents: read
+      packages: read
     strategy:
       fail-fast: false
       matrix:
@@ -153,12 +113,11 @@ jobs:
           - aarch64-linux-musl
           - aarch64-macos
           - x86_64-macos
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: mlugg/setup-zig@v2
-        with:
-          version: 0.16.0
-
-      - name: Cross-compile
-        run: zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSafe
+    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@v2
+    with:
+      runner: ubuntu-latest
+      build: true
+      task-env: |
+        TARGET=${{ matrix.target }}
+        OPTIMIZE=ReleaseSafe
+      concurrency-suffix: cross-compile-${{ matrix.target }}

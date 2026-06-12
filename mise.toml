@@ -3,7 +3,13 @@ zig = "0.16.0"
 
 [tasks.build]
 description = "Build agit"
-run = "zig build"
+run = '''
+if [ -n "${TARGET:-}" ]; then
+  mise run _build-target
+else
+  mise run _build-default
+fi
+'''
 
 [tasks.lint]
 description = "Run the canonical local validation command"
@@ -13,22 +19,74 @@ run = "zig build check"
 description = "Run agit through the build graph"
 run = "zig build run --"
 
+[tasks.fuzz]
+description = "Run bounded hook payload fuzz harnesses"
+run = "zig build fuzz-hooks -- --time=${FUZZ_TIME:-60s} --crash-dir=${CRASH_DIR:-$PWD/dist/crash-corpus}"
+
 [tasks.test]
-description = "Run end-to-end tests"
+description = "Run the configured test suite"
+run = '''
+case "${TEST_SUITE:-default}" in
+  default)
+    mise run _test-default
+    ;;
+  sanitizers)
+    mise run _test-sanitizers
+    ;;
+  store-roundtrip)
+    mise run _test-store-roundtrip
+    ;;
+  smoke-doctor)
+    mise run _test-smoke-doctor
+    ;;
+  *)
+    echo "Unknown TEST_SUITE: ${TEST_SUITE}" >&2
+    exit 1
+    ;;
+esac
+'''
+
+[tasks._build-default]
+description = "Build agit with the default host target"
+run = "zig build"
+hide = true
+
+[tasks._build-target]
+description = "Build agit for TARGET with optional OPTIMIZE override"
+run = "zig build -Dtarget=${TARGET:?TARGET is required} ${OPTIMIZE:+-Doptimize=$OPTIMIZE}"
+hide = true
+
+[tasks._test-default]
+depends = ['unit-test']
+description = "Run the default CI test suite"
 run = "zig build test-e2e"
+hide = true
+
+[tasks._test-sanitizers]
+description = "Run unit and end-to-end tests with C-family sanitizers enabled"
+run = "zig build test test-e2e -Doptimize=Debug -Dsanitize-c=full"
+hide = true
+
+[tasks._test-store-roundtrip]
+description = "Run recorder and reindex property tests"
+run = "zig build test-property"
+hide = true
+
+[tasks._test-smoke-doctor]
+description = "Run the doctor smoke script"
+run = "./scripts/smoke-doctor.sh"
+hide = true
 
 [tasks.unit-test]
 description = "Run unit tests"
 run = "zig build test"
 
-[tasks.check]
-description = "Run the canonical local validation command"
-run = "zig build check"
-
 [tasks.check-fmt]
 description = "Check formatting"
 run = "zig build check-fmt"
+hide = true
 
 [tasks.fmt]
+depends = ['check-fmt']
 description = "Format source files"
 run = "zig build fmt"
