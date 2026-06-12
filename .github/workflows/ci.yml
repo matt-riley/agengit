@@ -54,6 +54,7 @@ jobs:
     needs: commit-messages
     permissions:
       contents: read
+      packages: read
     uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@main
     with:
       runner: ubuntu-latest
@@ -66,6 +67,7 @@ jobs:
     needs: commit-messages
     permissions:
       contents: read
+      packages: read
     uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@main
     with:
       runner: macos-latest
