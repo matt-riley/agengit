@@ -7,8 +7,95 @@ on:
     branches: [main]
 
 jobs:
+  detect-changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      code_changed: ${{ steps.changes.outputs.code }}
+      workflow_changed: ${{ steps.changes.outputs.workflow }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - id: changes
+        uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+        with:
+          filters: |
+            workflow:
+              - '.github/workflows/**'
+            code:
+              - '!docs/**'
+              - '!README.md'
+              - '!AGENTS.md'
+              - '!CLAUDE.md'
+              - '!research.md'
+              - '!.github/'
+              - '**'
+
+  detect-release-commit:
+    name: Detect release commit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      is_release_commit: ${{ steps.detect.outputs.is_release_commit }}
+      version: ${{ steps.detect.outputs.version }}
+      tag_name: ${{ steps.detect.outputs.tag_name }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ github.sha }}
+
+      - id: detect
+        run: |
+          set -euo pipefail
+          subject="$(git show -s --format=%s HEAD)"
+          if [[ "${{ github.event_name }}" = "push" && "${{ github.ref }}" = "refs/heads/main" && "$subject" =~ ^chore\(main\):\ release\ ([0-9]+\.[0-9]+\.[0-9]+)(\ \(#[0-9]+\))?$ ]]; then
+            version="$(jq -r '."."' .release-please-manifest.json)"
+            if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::Expected root version in .release-please-manifest.json, got: $version"
+              exit 1
+            fi
+            echo "is_release_commit=true" >> "$GITHUB_OUTPUT"
+            echo "version=$version" >> "$GITHUB_OUTPUT"
+            echo "tag_name=v$version" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "is_release_commit=false" >> "$GITHUB_OUTPUT"
+          echo "version=" >> "$GITHUB_OUTPUT"
+          echo "tag_name=" >> "$GITHUB_OUTPUT"
+
+  workflow-validation:
+    name: Workflow validation
+    needs: [detect-changes]
+    if: ${{ needs.detect-changes.outputs.workflow_changed == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+        with:
+          go-version: "1.26.3"
+          cache: false
+
+      - name: Install actionlint
+        run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+
+      - name: Lint workflows
+        run: |
+          "$(go env GOPATH)/bin/actionlint" .github/workflows/*.yml
+
   validation-linux:
     name: Validation (ubuntu-latest)
+    needs: [detect-changes, detect-release-commit]
+    if: ${{ needs.detect-changes.outputs.code_changed == 'true' && needs.detect-release-commit.outputs.is_release_commit != 'true' }}
     permissions:
       contents: read
       packages: read
@@ -22,6 +109,8 @@ jobs:
 
   validation-macos:
     name: Validation (macos-latest)
+    needs: [detect-changes, detect-release-commit]
+    if: ${{ needs.detect-changes.outputs.code_changed == 'true' && needs.detect-release-commit.outputs.is_release_commit != 'true' }}
     permissions:
       contents: read
       packages: read
@@ -34,6 +123,8 @@ jobs:
 
   sanitizers:
     name: Sanitizers
+    needs: [detect-changes, detect-release-commit]
+    if: ${{ needs.detect-changes.outputs.code_changed == 'true' && needs.detect-release-commit.outputs.is_release_commit != 'true' }}
     permissions:
       contents: read
       packages: read
@@ -47,6 +138,8 @@ jobs:
 
   fuzz:
     name: Fuzz hook payloads
+    needs: [detect-changes, detect-release-commit]
+    if: ${{ needs.detect-changes.outputs.code_changed == 'true' && needs.detect-release-commit.outputs.is_release_commit != 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -66,7 +159,7 @@ jobs:
         run: mise run fuzz
 
       - name: Upload crash corpus
-        if: github.event_name == 'schedule' && always()
+        if: ${{ github.event_name == 'schedule' && always() }}
         uses: actions/upload-artifact@v4
         with:
           name: crash-corpus
@@ -75,6 +168,8 @@ jobs:
 
   store-roundtrip:
     name: Store roundtrip
+    needs: [detect-changes, detect-release-commit]
+    if: ${{ needs.detect-changes.outputs.code_changed == 'true' && needs.detect-release-commit.outputs.is_release_commit != 'true' }}
     permissions:
       contents: read
       packages: read
@@ -88,6 +183,8 @@ jobs:
 
   smoke-doctor:
     name: Smoke doctor
+    needs: [detect-changes, detect-release-commit]
+    if: ${{ needs.detect-changes.outputs.code_changed == 'true' && needs.detect-release-commit.outputs.is_release_commit != 'true' }}
     permissions:
       contents: read
       packages: read
@@ -101,23 +198,144 @@ jobs:
 
   cross-compile:
     name: Cross-compile (${{ matrix.target }})
-    needs: [validation-linux, validation-macos]
+    needs: [detect-changes, detect-release-commit]
+    if: ${{ needs.detect-changes.outputs.code_changed == 'true' || needs.detect-release-commit.outputs.is_release_commit == 'true' }}
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: read
     strategy:
       fail-fast: false
       matrix:
-        target:
-          - x86_64-linux-musl
-          - aarch64-linux-musl
-          - aarch64-macos
-          - x86_64-macos
-    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@v2
+        include:
+          - { target: x86_64-linux-musl, archive: agit-x86_64-linux.tar.gz }
+          - { target: aarch64-linux-musl, archive: agit-aarch64-linux.tar.gz }
+          - { target: aarch64-macos, archive: agit-aarch64-macos.tar.gz }
+          - { target: x86_64-macos, archive: agit-x86_64-macos.tar.gz }
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+
+      - name: Install configured tools
+        run: mise install
+
+      - name: Build cross-compile validation
+        if: ${{ needs.detect-release-commit.outputs.is_release_commit != 'true' }}
+        env:
+          TARGET: ${{ matrix.target }}
+          OPTIMIZE: ReleaseSafe
+        run: mise run build
+
+      - name: Build release archive
+        if: ${{ needs.detect-release-commit.outputs.is_release_commit == 'true' }}
+        env:
+          TARGET: ${{ matrix.target }}
+          ARCHIVE: ${{ matrix.archive }}
+        run: mise run release-archive
+
+      - name: Upload release archive
+        if: ${{ needs.detect-release-commit.outputs.is_release_commit == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: dist/${{ matrix.archive }}
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish release
+    needs: [detect-release-commit, cross-compile]
+    if: ${{ needs.detect-release-commit.outputs.is_release_commit == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Download release archives
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: dist
+
+      - name: Extract release notes
+        env:
+          VERSION: ${{ needs.detect-release-commit.outputs.version }}
+        run: |
+          set -euo pipefail
+          awk -v version="$VERSION" '
+            BEGIN { printing = 0; found = 0 }
+            /^## \[/ {
+              if (printing) exit
+              if ($0 ~ ("^## \\[" version "\\]")) {
+                printing = 1
+                found = 1
+              }
+            }
+            printing { print }
+            END {
+              if (!found) exit 1
+            }
+          ' CHANGELOG.md > release-notes.md || {
+            echo "::error::Could not extract release notes for version ${VERSION} from CHANGELOG.md"
+            exit 1
+          }
+          if [[ ! -s release-notes.md ]]; then
+            echo "::error::release-notes.md was empty for version ${VERSION}"
+            exit 1
+          fi
+
+      - name: Generate checksums
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum *.tar.gz > checksums.txt
+          cat checksums.txt
+
+      - name: Create or update draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.detect-release-commit.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            is_draft="$(gh release view "$TAG" --repo "${{ github.repository }}" --json isDraft --jq '.isDraft')"
+            if [ "$is_draft" != "true" ]; then
+              echo "Published release ${TAG} already exists; skipping release upload."
+              exit 0
+            fi
+          else
+            gh release create "$TAG" \
+              --repo "${{ github.repository }}" \
+              --target "${{ github.sha }}" \
+              --title "$TAG" \
+              --notes-file release-notes.md \
+              --draft
+          fi
+
+          gh release upload "$TAG" dist/* --repo "${{ github.repository }}" --clobber
+          gh release edit "$TAG" --draft=false --repo "${{ github.repository }}"
+
+  homebrew:
+    name: Update homebrew tap
+    needs: [detect-release-commit, publish-release]
+    if: ${{ needs.detect-release-commit.outputs.is_release_commit == 'true' }}
+    uses: matt-riley/matt-riley-ci/.github/workflows/homebrew-formula.yml@9558d9e0b4cf7ce0bd0786f7300f2aae0eab0683
     with:
-      runner: ubuntu-latest
-      build: true
-      task-env: |
-        TARGET=${{ matrix.target }}
-        OPTIMIZE=ReleaseSafe
-      concurrency-suffix: cross-compile-${{ matrix.target }}
+      tag: ${{ needs.detect-release-commit.outputs.tag_name }}
+      tap-repo: matt-riley/homebrew-tools
+      formula-name: agit
+      class-name: Agit
+      desc: AI-agent version control
+      homepage: https://github.com/matt-riley/agengit
+      license: GPL-3.0-only
+      binary: agit
+      archive-x86_64-macos: agit-x86_64-macos.tar.gz
+      archive-aarch64-macos: agit-aarch64-macos.tar.gz
+      archive-x86_64-linux: agit-x86_64-linux.tar.gz
+      archive-aarch64-linux: agit-aarch64-linux.tar.gz
+    secrets:
+      homebrew-tap-token: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN || secrets.TAP_TOKEN }}
