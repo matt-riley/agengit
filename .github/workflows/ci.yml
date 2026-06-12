@@ -49,26 +49,29 @@ jobs:
             exit 1
           fi
 
-  test:
-    name: Test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+  validation-linux:
+    name: Validation (ubuntu-latest)
     needs: commit-messages
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    steps:
-      - uses: actions/checkout@v4
+    permissions:
+      contents: read
+    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@main
+    with:
+      runner: ubuntu-latest
+      lint: true
+      test: true
+      concurrency-suffix: validation-linux
 
-      - uses: mlugg/setup-zig@v2
-        with:
-          version: 0.16.0
-
-      - name: Run local check suite
-        run: zig build check
-
-      - name: Run end-to-end tests
-        run: zig build test-e2e
+  validation-macos:
+    name: Validation (macos-latest)
+    needs: commit-messages
+    permissions:
+      contents: read
+    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@main
+    with:
+      runner: macos-latest
+      lint: true
+      test: true
+      concurrency-suffix: validation-macos
 
   sanitizers:
     name: Sanitizers
@@ -139,7 +142,7 @@ jobs:
   cross-compile:
     name: Cross-compile (${{ matrix.target }})
     runs-on: ubuntu-latest
-    needs: test
+    needs: [validation-linux, validation-macos]
     strategy:
       fail-fast: false
       matrix:

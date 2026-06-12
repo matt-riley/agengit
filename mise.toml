@@ -1,0 +1,34 @@
+[tools]
+zig = "0.16.0"
+
+[tasks.build]
+description = "Build agit"
+run = "zig build"
+
+[tasks.lint]
+description = "Run the canonical local validation command"
+run = "zig build check"
+
+[tasks.run]
+description = "Run agit through the build graph"
+run = "zig build run --"
+
+[tasks.test]
+description = "Run end-to-end tests"
+run = "zig build test-e2e"
+
+[tasks.unit-test]
+description = "Run unit tests"
+run = "zig build test"
+
+[tasks.check]
+description = "Run the canonical local validation command"
+run = "zig build check"
+
+[tasks.check-fmt]
+description = "Check formatting"
+run = "zig build check-fmt"
+
+[tasks.fmt]
+description = "Format source files"
+run = "zig build fmt"
