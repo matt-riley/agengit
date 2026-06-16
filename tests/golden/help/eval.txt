@@ -1,0 +1,41 @@
+USAGE:
+    agit eval [OPTIONS]
+
+DESCRIPTION:
+    Evaluate captured agent sessions using evidence-based quality signals.
+
+OPTIONS:
+    --json
+        Render eval results as structured JSON.
+    --origin <name>
+        Evaluate sessions recorded by the given origin.
+    --session <id>
+        Evaluate one session id, or pass origin/session-id to disambiguate.
+    --commit <REV>
+        Infer an evaluation scope from a git commit window.
+    --range <A..B>
+        Infer an evaluation scope from a git commit range.
+    --since <YYYY-MM-DD>
+        Attach the given lower date bound to the evaluation scope.
+    --until <YYYY-MM-DD>
+        Attach the given upper date bound to the evaluation scope.
+    --lookahead <DURATION>
+        Scan later captured evidence for follow-up failure signals, such as 24h or 7d. Defaults to 24h.
+    --no-lookahead
+        Disable follow-up signal scanning.
+    -h, --help
+        Display this help and exit.
+
+EXAMPLES:
+    # evaluate the most recent recorded session
+    agit eval
+    # evaluate one session as structured JSON
+    agit eval --json --session codex/session-abc
+    # evaluate activity inferred around a commit
+    agit eval --json --commit HEAD
+    # evaluate a session with later failure-signal lookahead
+    agit eval --session codex/session-abc --lookahead 24h
+
+NOTES:
+    Eval classifications are evidence-based signals from captured history, not proof of code correctness or production success.
+

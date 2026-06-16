@@ -13,6 +13,7 @@ def "nu-complete agit command" [] {
         { value: 'import', description: 'Import a portable bundle into the local store' }
         { value: 'status', description: 'Show the investigation dashboard' }
         { value: 'timeline', description: 'Show recent recorded steps' }
+        { value: 'eval', description: 'Evaluate captured agent sessions' }
         { value: 'sessions', description: 'List recorded agent sessions' }
         { value: 'log', description: 'Show step history for a session' }
         { value: 'restore', description: 'Restore files from a recorded snapshot' }
@@ -120,6 +121,19 @@ extern "agit timeline" [
     --limit: string
     --redacted
     --full
+    --help(-h)
+]
+
+extern "agit eval" [
+    --json
+    --origin: string
+    --session: string
+    --commit: string
+    --range: string
+    --since: string
+    --until: string
+    --lookahead: string
+    --no-lookahead
     --help(-h)
 ]
 

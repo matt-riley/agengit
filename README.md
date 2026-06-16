@@ -208,6 +208,18 @@ Show recent recorded steps across sessions in reverse chronological order.
 agit timeline
 ```
 
+### `agit eval`
+Evaluate captured agent sessions using evidence-based quality signals.
+
+**Synopsis:** `agit eval [OPTIONS]`
+
+```sh
+# evaluate the most recent recorded session
+agit eval
+```
+
+**Notes:** Eval classifications are evidence-based signals from captured history, not proof of code correctness or production success.
+
 ### `agit sessions`
 List recorded agent sessions from the index.
 

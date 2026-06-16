@@ -15,6 +15,7 @@ _agit() {
         'import:Import a portable bundle into the local store'
         'status:Show the investigation dashboard'
         'timeline:Show recent recorded steps'
+        'eval:Evaluate captured agent sessions'
         'sessions:List recorded agent sessions'
         'log:Show step history for a session'
         'restore:Restore files from a recorded snapshot'
@@ -126,6 +127,19 @@ _agit() {
                         '--limit[Show at most <N> steps. Defaults to 20.]:N' \
                         '--redacted[Redact obvious secrets in previews.]' \
                         '--full[Render full previews even when redaction is the repo default.]' \
+                        '--help[Display this help and exit.]'
+                    ;;
+                eval)
+                    _arguments \
+                        '--json[Render eval results as structured JSON.]' \
+                        '--origin[Evaluate sessions recorded by the given origin.]:name' \
+                        '--session[Evaluate one session id, or pass origin/session-id to disambiguate.]:id' \
+                        '--commit[Infer an evaluation scope from a git commit window.]:REV' \
+                        '--range[Infer an evaluation scope from a git commit range.]:A..B' \
+                        '--since[Attach the given lower date bound to the evaluation scope.]:YYYY-MM-DD' \
+                        '--until[Attach the given upper date bound to the evaluation scope.]:YYYY-MM-DD' \
+                        '--lookahead[Scan later captured evidence for follow-up failure signals, such as 24h or 7d. Defaults to 24h.]:DURATION' \
+                        '--no-lookahead[Disable follow-up signal scanning.]' \
                         '--help[Display this help and exit.]'
                     ;;
                 sessions)
