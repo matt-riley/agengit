@@ -249,6 +249,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      issues: write
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
@@ -318,6 +319,29 @@ jobs:
 
           gh release upload "$TAG" dist/* --repo "${{ github.repository }}" --clobber
           gh release edit "$TAG" --draft=false --repo "${{ github.repository }}"
+
+      - name: Mark release PR as tagged
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          subject="$(git show -s --format=%s HEAD)"
+          if [[ ! "$subject" =~ \(\#([0-9]+)\)$ ]]; then
+            echo "No release PR number found in commit subject: ${subject}"
+            exit 0
+          fi
+
+          pr_number="${BASH_REMATCH[1]}"
+          pending_label="$(jq -rn --arg label "autorelease: pending" '$label|@uri')"
+          gh api \
+            --method DELETE \
+            "repos/${GITHUB_REPOSITORY}/issues/${pr_number}/labels/${pending_label}" \
+            --silent || true
+          gh api \
+            --method POST \
+            "repos/${GITHUB_REPOSITORY}/issues/${pr_number}/labels" \
+            -f "labels[]=autorelease: tagged" \
+            --silent
 
   homebrew:
     name: Update homebrew tap
