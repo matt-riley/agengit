@@ -326,7 +326,7 @@ jobs:
 
       - name: Mark release PR as tagged
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
         run: |
           set -euo pipefail
           subject="$(git show -s --format=%s HEAD)"

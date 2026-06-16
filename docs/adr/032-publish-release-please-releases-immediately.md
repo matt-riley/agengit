@@ -51,7 +51,9 @@ its usual transition from `autorelease: pending` to `autorelease: tagged`.
 Without that transition, later Release Please runs treat the merged release PR
 as outstanding and abort before opening the next release PR. After publishing a
 release for a commit with a `(#NN)` release PR suffix, CI removes
-`autorelease: pending` from that PR and adds `autorelease: tagged`.
+`autorelease: pending` from that PR and adds `autorelease: tagged`. That label
+reconciliation uses the Release Please token when configured, falling back to
+the workflow token only when the repository does not provide one.
 
 ## Consequences
 
