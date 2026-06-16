@@ -44,6 +44,15 @@ Instead, `.github/workflows/release.yml` now:
 On ordinary commits to `main`, the workflow still runs Release Please to create
 or update the pending release PR.
 
+The CI release-publish path is also responsible for reconciling Release
+Please's bookkeeping labels after the GitHub release is published. Because the
+Release Please action runs with `skip-github-release: true`, it does not perform
+its usual transition from `autorelease: pending` to `autorelease: tagged`.
+Without that transition, later Release Please runs treat the merged release PR
+as outstanding and abort before opening the next release PR. After publishing a
+release for a commit with a `(#NN)` release PR suffix, CI removes
+`autorelease: pending` from that PR and adds `autorelease: tagged`.
+
 ## Consequences
 
 - Merged release commits no longer trigger the duplicate-PR path in Release
@@ -52,3 +61,5 @@ or update the pending release PR.
   until archives and checksums are attached.
 - Reruns stay idempotent: the workflow reuses an existing draft release for the
   tag and skips uploads for assets that are already present.
+- Release Please can continue proposing future releases because the separately
+  published release is reflected back into its PR labels.
