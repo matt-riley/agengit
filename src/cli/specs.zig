@@ -201,6 +201,31 @@ pub const timeline_usage = help_mod.UsageSpec{
     },
 };
 
+pub const eval_usage = help_mod.UsageSpec{
+    .name = "eval",
+    .synopsis = "[OPTIONS]",
+    .description = "Evaluate captured agent sessions using evidence-based quality signals.",
+    .options = &.{
+        .{ .long = "json", .description = "Render eval results as structured JSON." },
+        .{ .long = "origin", .value_name = "name", .description = "Evaluate sessions recorded by the given origin." },
+        .{ .long = "session", .value_name = "id", .description = "Evaluate one session id, or pass origin/session-id to disambiguate." },
+        .{ .long = "commit", .value_name = "REV", .description = "Infer an evaluation scope from a git commit window." },
+        .{ .long = "range", .value_name = "A..B", .description = "Infer an evaluation scope from a git commit range." },
+        .{ .long = "since", .value_name = "YYYY-MM-DD", .description = "Attach the given lower date bound to the evaluation scope." },
+        .{ .long = "until", .value_name = "YYYY-MM-DD", .description = "Attach the given upper date bound to the evaluation scope." },
+        .{ .long = "lookahead", .value_name = "DURATION", .description = "Scan later captured evidence for follow-up failure signals, such as 24h or 7d. Defaults to 24h." },
+        .{ .long = "no-lookahead", .description = "Disable follow-up signal scanning." },
+        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
+    },
+    .examples = &.{
+        .{ .description = "evaluate the most recent recorded session", .command = "" },
+        .{ .description = "evaluate one session as structured JSON", .command = "--json --session codex/session-abc" },
+        .{ .description = "evaluate activity inferred around a commit", .command = "--json --commit HEAD" },
+        .{ .description = "evaluate a session with later failure-signal lookahead", .command = "--session codex/session-abc --lookahead 24h" },
+    },
+    .notes = "Eval classifications are evidence-based signals from captured history, not proof of code correctness or production success.",
+};
+
 pub const sessions_usage = help_mod.UsageSpec{
     .name = "sessions",
     .synopsis = "[OPTIONS]",
@@ -482,6 +507,7 @@ pub const public_commands = [_]help_mod.CommandSpec{
     .{ .name = "import", .summary = "Import a portable bundle into the local store", .usage = &import_usage },
     .{ .name = "status", .summary = "Show the investigation dashboard", .usage = &status_usage },
     .{ .name = "timeline", .summary = "Show recent recorded steps", .usage = &timeline_usage },
+    .{ .name = "eval", .summary = "Evaluate captured agent sessions", .usage = &eval_usage },
     .{ .name = "sessions", .summary = "List recorded agent sessions", .usage = &sessions_usage },
     .{ .name = "log", .summary = "Show step history for a session", .usage = &log_usage },
     .{ .name = "restore", .summary = "Restore files from a recorded snapshot", .usage = &restore_usage },
