@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.21.0](https://github.com/matt-riley/agengit/compare/v1.20.1...v1.21.0) (2026-06-16)
+
+
+### Features
+
+* add evidence-based eval command ([f971141](https://github.com/matt-riley/agengit/commit/f9711415be6776afdf54c0087bacf8b4c56cfd1a))
+
+
+### Bug Fixes
+
+* **ci:** grant package read to shared workflow callers ([ac83b08](https://github.com/matt-riley/agengit/commit/ac83b0811cd90a958bcaba845af8885f0b4c8e83))
+* **ci:** satisfy workflow shell lint ([2e65f66](https://github.com/matt-riley/agengit/commit/2e65f667a1f194346f5d07dd09d39d81a1386b3d))
+* **release:** reconcile release-please labels ([1ad2819](https://github.com/matt-riley/agengit/commit/1ad2819b8322e1a0607cc6db8a4f34bca77046a3))
+* **release:** skip github release in release-please step ([a4fd199](https://github.com/matt-riley/agengit/commit/a4fd1991536b17e4aa2004dfd6be744a85195f20))
+
 ## [1.20.1](https://github.com/matt-riley/agengit/compare/v1.20.0...v1.20.1) (2026-06-02)
 
 
