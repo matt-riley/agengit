@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.21.1](https://github.com/matt-riley/agengit/compare/v1.21.0...v1.21.1) (2026-06-17)
+
+
+### Bug Fixes
+
+* **release:** use release-please token for label reconciliation ([432f524](https://github.com/matt-riley/agengit/commit/432f5246708f8d76354a3bb3438e60f2859edb5d))
+* versioning ([c6d14f3](https://github.com/matt-riley/agengit/commit/c6d14f3fc84681e0a37691a3236555c047718307))
+
 ## [1.21.0](https://github.com/matt-riley/agengit/compare/v1.20.1...v1.21.0) (2026-06-16)
 
 
