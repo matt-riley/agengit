@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.21.2](https://github.com/matt-riley/agengit/compare/v1.21.1...v1.21.2) (2026-06-17)
+
+
+### Bug Fixes
+
+* workflow issue with tokens ([1a022e5](https://github.com/matt-riley/agengit/commit/1a022e5a0956a5897cc8aa3e1a23cb715c6c0920))
+
 ## [1.21.1](https://github.com/matt-riley/agengit/compare/v1.21.0...v1.21.1) (2026-06-17)
 
 
