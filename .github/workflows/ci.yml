@@ -203,7 +203,7 @@ jobs:
   cross-compile:
     name: Cross-compile (${{ matrix.target }})
     needs: [detect-changes, detect-release-commit]
-    if: ${{ needs.detect-changes.outputs.code_changed == 'true' || needs.detect-release-commit.outputs.is_release_commit == 'true' }}
+    if: ${{ github.event_name != 'pull_request' && (needs.detect-changes.outputs.code_changed == 'true' || needs.detect-release-commit.outputs.is_release_commit == 'true') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
