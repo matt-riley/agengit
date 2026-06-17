@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.21.3](https://github.com/matt-riley/agengit/compare/v1.21.2...v1.21.3) (2026-06-17)
+
+
+### Bug Fixes
+
+* **ci:** use workflow token for release labels ([#63](https://github.com/matt-riley/agengit/issues/63)) ([0ebc771](https://github.com/matt-riley/agengit/commit/0ebc77149dc14eb184f4170cda3ce599d5323d04))
+
 ## [1.21.2](https://github.com/matt-riley/agengit/compare/v1.21.1...v1.21.2) (2026-06-17)
 
 
