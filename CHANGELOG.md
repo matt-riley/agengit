@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.21.5](https://github.com/matt-riley/agengit/compare/v1.21.4...v1.21.5) (2026-06-18)
+
+
+### Bug Fixes
+
+* tighten eval scope handling ([bae6a6c](https://github.com/matt-riley/agengit/commit/bae6a6cece26873673312fbb90f5e750e148340d))
+
 ## [1.21.4](https://github.com/matt-riley/agengit/compare/v1.21.3...v1.21.4) (2026-06-17)
 
 
