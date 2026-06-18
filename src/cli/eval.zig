@@ -1,6 +1,7 @@
 const std = @import("std");
 const date_util = @import("../util/date.zig");
 const eval_mod = @import("../store/eval.zig");
+const git_mod = @import("../util/git.zig");
 const store_mod = @import("../store/store.zig");
 const help_mod = @import("help.zig");
 const output_mod = @import("output.zig");
@@ -10,6 +11,7 @@ const status = @import("status.zig");
 pub const usage = specs.eval_usage;
 
 const default_lookahead_ms: i64 = 24 * 60 * 60 * 1000;
+const max_eval_steps: usize = 1000;
 
 const EvalOptions = struct {
     format: output_mod.Format = .human,
@@ -37,6 +39,8 @@ const Scope = struct {
     range: ?[]const u8 = null,
     since: ?[]const u8 = null,
     until: ?[]const u8 = null,
+    session_count: i64 = 0,
+    step_count: i64 = 0,
 };
 
 const CurrentAssessment = struct {
@@ -76,16 +80,15 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
     defer store.deinit(io);
 
     const resolved_scope = try resolveEvaluationScope(io, gpa, &store, options, &stdout);
-    const target = resolved_scope.target;
     defer {
-        gpa.free(target.origin);
-        gpa.free(target.session_id);
+        if (resolved_scope.target) |target| {
+            gpa.free(target.origin);
+            gpa.free(target.session_id);
+        }
+        store_mod.freeTimelineRows(gpa, resolved_scope.rows);
     }
 
-    const step_rows = try store.index.listSteps(gpa, target.origin, target.session_id);
-    defer store_mod.freeStepRows(gpa, step_rows);
-
-    const scoped_steps = try loadSessionSteps(io, gpa, &store, step_rows);
+    const scoped_steps = try loadTimelineSteps(io, gpa, &store, resolved_scope.rows);
     defer scoped_steps.deinit(gpa);
 
     if (scoped_steps.inputs.len == 0) {
@@ -101,7 +104,7 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
     defer in_scope.deinit(gpa);
 
     const last_timestamp = scoped_steps.inputs[scoped_steps.inputs.len - 1].timestamp;
-    const follow_up = try loadAndEvaluateFollowUp(io, gpa, &store, target.session_id, last_timestamp, options.lookahead_ms);
+    const follow_up = try loadAndEvaluateFollowUp(io, gpa, &store, last_timestamp, options.lookahead_ms);
     defer eval_mod.freeFollowUpAssessment(gpa, follow_up);
 
     const current = CurrentAssessment{
@@ -109,7 +112,12 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
         .confidence = if (follow_up.signals.len > 0) "high" else in_scope.confidence,
     };
 
-    const patterns = try eval_mod.patternAssociations(gpa, in_scope);
+    const pattern_rows = try rowsForTimelineScope(gpa, &store, null, null, null, null);
+    defer store_mod.freeTimelineRows(gpa, pattern_rows);
+    const pattern_steps = try loadTimelineSteps(io, gpa, &store, pattern_rows);
+    defer pattern_steps.deinit(gpa);
+
+    const patterns = try eval_mod.patternAssociations(gpa, pattern_steps.inputs, scoped_steps.inputs, in_scope);
     defer gpa.free(patterns);
 
     const scope = resolved_scope.scope;
@@ -129,7 +137,8 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
 }
 
 const ResolvedScope = struct {
-    target: SessionTarget,
+    target: ?SessionTarget = null,
+    rows: []const store_mod.TimelineRow,
     scope: Scope,
     association_confidence: []const u8,
 };
@@ -148,11 +157,11 @@ const LoadedSteps = struct {
     }
 };
 
-fn loadSessionSteps(
+fn loadTimelineSteps(
     io: std.Io,
     gpa: std.mem.Allocator,
     store: *store_mod.Store,
-    step_rows: []const store_mod.StepRow,
+    step_rows: []const store_mod.TimelineRow,
 ) !LoadedSteps {
     var parsed: std.ArrayList(std.json.Parsed(store_mod.Step)) = .empty;
     errdefer {
@@ -186,7 +195,6 @@ fn loadAndEvaluateFollowUp(
     io: std.Io,
     gpa: std.mem.Allocator,
     store: *store_mod.Store,
-    session_id: []const u8,
     last_timestamp: i64,
     lookahead_ms: i64,
 ) !eval_mod.FollowUpAssessment {
@@ -223,7 +231,7 @@ fn loadAndEvaluateFollowUp(
         });
     }
 
-    return eval_mod.detectFollowUpSignals(gpa, inputs.items, session_id, last_timestamp, lookahead_ms);
+    return eval_mod.detectFollowUpSignals(gpa, inputs.items, last_timestamp, lookahead_ms);
 }
 
 fn writeHuman(
@@ -334,30 +342,30 @@ fn resolveEvaluationScope(
     stdout: *std.Io.File.Writer,
 ) !ResolvedScope {
     if (options.commit_rev) |rev| {
-        const window = try commitWindow(io, gpa, rev);
-        const target = try resolveSessionForWindow(gpa, store, options.origin, window.since_ms, window.until_ms, stdout, options.format);
+        const rows = try rowsForCommit(io, gpa, store, options.origin, rev, stdout, options.format);
         return .{
-            .target = target,
+            .rows = rows,
             .scope = .{
                 .kind = "commit",
-                .origin = target.origin,
-                .session_id = target.session_id,
+                .origin = options.origin,
                 .rev = rev,
+                .session_count = countSessions(rows),
+                .step_count = @intCast(rows.len),
             },
             .association_confidence = "medium",
         };
     }
 
     if (options.range_spec) |range| {
-        const window = try rangeWindow(io, gpa, range);
-        const target = try resolveSessionForWindow(gpa, store, options.origin, window.since_ms, window.until_ms, stdout, options.format);
+        const rows = try rowsForRange(io, gpa, store, options.origin, range, stdout, options.format);
         return .{
-            .target = target,
+            .rows = rows,
             .scope = .{
                 .kind = "range",
-                .origin = target.origin,
-                .session_id = target.session_id,
+                .origin = options.origin,
                 .range = range,
+                .session_count = countSessions(rows),
+                .step_count = @intCast(rows.len),
             },
             .association_confidence = "medium",
         };
@@ -365,127 +373,218 @@ fn resolveEvaluationScope(
 
     if (options.session != null) {
         const target = try resolveSessionArg(gpa, store, options.session, options.origin, stdout, options.format);
+        errdefer {
+            gpa.free(target.origin);
+            gpa.free(target.session_id);
+        }
+        const rows = try rowsForTimelineScope(gpa, store, target.origin, target.session_id, options.since_ms, options.until_ms_exclusive);
         return .{
             .target = target,
+            .rows = rows,
             .scope = .{
                 .kind = "session",
                 .origin = target.origin,
                 .session_id = target.session_id,
                 .since = options.since_raw,
                 .until = options.until_raw,
+                .session_count = countSessions(rows),
+                .step_count = @intCast(rows.len),
             },
             .association_confidence = "high",
         };
     }
 
     if (options.since_ms != null or options.until_ms_exclusive != null) {
-        const target = try resolveSessionForWindow(gpa, store, options.origin, options.since_ms, options.until_ms_exclusive, stdout, options.format);
+        const rows = try rowsForTimelineScope(gpa, store, options.origin, null, options.since_ms, options.until_ms_exclusive);
         return .{
-            .target = target,
+            .rows = rows,
             .scope = .{
                 .kind = "window",
-                .origin = target.origin,
-                .session_id = target.session_id,
+                .origin = options.origin,
                 .since = options.since_raw,
                 .until = options.until_raw,
+                .session_count = countSessions(rows),
+                .step_count = @intCast(rows.len),
             },
             .association_confidence = "high",
         };
     }
 
     const target = try resolveSessionArg(gpa, store, options.session, options.origin, stdout, options.format);
+    errdefer {
+        gpa.free(target.origin);
+        gpa.free(target.session_id);
+    }
+    const rows = try rowsForTimelineScope(gpa, store, target.origin, target.session_id, null, null);
     return .{
         .target = target,
+        .rows = rows,
         .scope = .{
             .kind = "session",
             .origin = target.origin,
             .session_id = target.session_id,
             .since = options.since_raw,
             .until = options.until_raw,
+            .session_count = countSessions(rows),
+            .step_count = @intCast(rows.len),
         },
         .association_confidence = "high",
     };
 }
 
-const TimeWindow = struct {
-    since_ms: ?i64,
-    until_ms: ?i64,
-};
-
-fn commitWindow(io: std.Io, gpa: std.mem.Allocator, rev: []const u8) !TimeWindow {
-    const commit_secs = try gitCommitSeconds(io, gpa, rev);
-    const parent_rev = try std.fmt.allocPrint(gpa, "{s}^", .{rev});
-    defer gpa.free(parent_rev);
-    const since_ms: ?i64 = if (gitCommitSeconds(io, gpa, parent_rev)) |parent_secs| parent_secs * 1000 else |_| null;
-    return .{
-        .since_ms = since_ms,
-        .until_ms = commit_secs * 1000 + 1000,
-    };
-}
-
-fn rangeWindow(io: std.Io, gpa: std.mem.Allocator, range: []const u8) !TimeWindow {
-    const sep = std.mem.indexOf(u8, range, "..") orelse return error.InvalidArgument;
-    const start = range[0..sep];
-    const end = range[sep + 2 ..];
-    if (start.len == 0 or end.len == 0) return error.InvalidArgument;
-    const start_secs = try gitCommitSeconds(io, gpa, start);
-    const end_secs = try gitCommitSeconds(io, gpa, end);
-    return .{
-        .since_ms = start_secs * 1000,
-        .until_ms = end_secs * 1000 + 1000,
-    };
-}
-
-fn gitCommitSeconds(io: std.Io, gpa: std.mem.Allocator, rev: []const u8) !i64 {
-    const result = try std.process.run(gpa, io, .{
-        .argv = &.{ "/usr/bin/git", "show", "-s", "--format=%ct", rev },
-    });
-    defer gpa.free(result.stderr);
-    defer gpa.free(result.stdout);
-    if (result.term != .exited or result.term.exited != 0) return error.GitCommitNotFound;
-    const trimmed = std.mem.trim(u8, result.stdout, " \t\r\n");
-    return std.fmt.parseInt(i64, trimmed, 10);
-}
-
-fn resolveSessionForWindow(
+fn rowsForTimelineScope(
     gpa: std.mem.Allocator,
     store: *store_mod.Store,
-    origin_arg: ?[:0]const u8,
+    origin: ?[]const u8,
+    session_id: ?[]const u8,
     since_ms: ?i64,
-    until_ms: ?i64,
+    until_ms_exclusive: ?i64,
+) ![]const store_mod.TimelineRow {
+    const rows = try store.index.listRecentSteps(gpa, .{
+        .origin = origin,
+        .session_id = session_id,
+        .since_ms = since_ms,
+        .until_ms_exclusive = until_ms_exclusive,
+        .limit = max_eval_steps,
+    });
+    std.mem.sort(store_mod.TimelineRow, @constCast(rows), {}, lessByTimeThenHash);
+    return rows;
+}
+
+fn rowsForCommit(
+    io: std.Io,
+    gpa: std.mem.Allocator,
+    store: *store_mod.Store,
+    origin: ?[]const u8,
+    rev: []const u8,
     stdout: *std.Io.File.Writer,
     format: output_mod.Format,
-) !SessionTarget {
-    const row = try store.index.db.row(
-        \\select session_origin, session_id
-        \\from steps
-        \\where (? is null or session_origin = ?)
-        \\  and (? is null or timestamp >= ?)
-        \\  and (? is null or timestamp < ?)
-        \\group by session_origin, session_id
-        \\order by max(timestamp) desc
-        \\limit 1
-    , .{
-        origin_arg,
-        origin_arg,
-        since_ms,
-        since_ms,
-        until_ms,
-        until_ms,
-    }) orelse {
-        try status.writeDiagnostic(stdout, format, usage.name, .{
-            .code = "scope_not_found",
-            .message = "No captured session activity matched the selected evaluation scope.",
-            .hint = "Try --session, a wider --since/--until window, or evaluate after recording agent activity.",
-        });
+) ![]const store_mod.TimelineRow {
+    const git_cwd = std.Io.Dir.cwd();
+    const commit = try git_mod.resolveRevision(io, gpa, git_cwd, rev) orelse {
+        try writeScopeDiagnostic(stdout, format, "git_revision_not_found", "Could not resolve the requested git revision.");
         try stdout.flush();
         std.process.exit(1);
     };
-    defer row.deinit();
-    return .{
-        .origin = try gpa.dupe(u8, row.get([]const u8, 0)),
-        .session_id = try gpa.dupe(u8, row.get([]const u8, 1)),
+    defer gpa.free(commit);
+
+    const parent_rev = try std.fmt.allocPrint(gpa, "{s}^", .{rev});
+    defer gpa.free(parent_rev);
+    const parent = try git_mod.resolveRevision(io, gpa, git_cwd, parent_rev);
+    defer if (parent) |value| gpa.free(value);
+
+    var list: std.ArrayList(store_mod.TimelineRow) = .empty;
+    errdefer {
+        for (list.items) |row| store_mod.freeTimelineRow(gpa, row);
+        list.deinit(gpa);
+    }
+
+    if (parent) |value| try appendRowsForCommit(gpa, store, &list, origin, value);
+    try appendRowsForCommit(gpa, store, &list, origin, commit);
+    std.mem.sort(store_mod.TimelineRow, list.items, {}, lessByTimeThenHash);
+    return try list.toOwnedSlice(gpa);
+}
+
+fn rowsForRange(
+    io: std.Io,
+    gpa: std.mem.Allocator,
+    store: *store_mod.Store,
+    origin: ?[]const u8,
+    range: []const u8,
+    stdout: *std.Io.File.Writer,
+    format: output_mod.Format,
+) ![]const store_mod.TimelineRow {
+    const sep = std.mem.indexOf(u8, range, "..") orelse {
+        try writeScopeDiagnostic(stdout, format, "invalid_argument", "Invalid --range value; use A..B.");
+        try stdout.flush();
+        std.process.exit(1);
     };
+    const start = range[0..sep];
+    const end = range[sep + 2 ..];
+    if (start.len == 0 or end.len == 0) {
+        try writeScopeDiagnostic(stdout, format, "invalid_argument", "Invalid --range value; use A..B.");
+        try stdout.flush();
+        std.process.exit(1);
+    }
+
+    const git_cwd = std.Io.Dir.cwd();
+    const start_resolved = try git_mod.resolveRevision(io, gpa, git_cwd, start) orelse {
+        try writeScopeDiagnostic(stdout, format, "git_revision_not_found", "Could not resolve the range start revision.");
+        try stdout.flush();
+        std.process.exit(1);
+    };
+    defer gpa.free(start_resolved);
+    const end_resolved = try git_mod.resolveRevision(io, gpa, git_cwd, end) orelse {
+        try writeScopeDiagnostic(stdout, format, "git_revision_not_found", "Could not resolve the range end revision.");
+        try stdout.flush();
+        std.process.exit(1);
+    };
+    defer gpa.free(end_resolved);
+
+    const commits = try git_mod.listRangeCommits(io, gpa, git_cwd, start_resolved, end_resolved) orelse {
+        try writeScopeDiagnostic(stdout, format, "range_lookup_failed", "Could not list commits in the requested range.");
+        try stdout.flush();
+        std.process.exit(1);
+    };
+    defer git_mod.freeCommitList(gpa, commits);
+
+    var list: std.ArrayList(store_mod.TimelineRow) = .empty;
+    errdefer {
+        for (list.items) |row| store_mod.freeTimelineRow(gpa, row);
+        list.deinit(gpa);
+    }
+
+    try appendRowsForCommit(gpa, store, &list, origin, start_resolved);
+    for (commits) |commit| try appendRowsForCommit(gpa, store, &list, origin, commit);
+    std.mem.sort(store_mod.TimelineRow, list.items, {}, lessByTimeThenHash);
+    return try list.toOwnedSlice(gpa);
+}
+
+fn appendRowsForCommit(
+    gpa: std.mem.Allocator,
+    store: *store_mod.Store,
+    list: *std.ArrayList(store_mod.TimelineRow),
+    origin: ?[]const u8,
+    commit: []const u8,
+) !void {
+    const rows = try store.index.listStepsByGitCommit(gpa, commit);
+    defer gpa.free(rows);
+    for (rows) |row| {
+        if (origin) |expected| {
+            if (!std.mem.eql(u8, expected, row.origin)) {
+                store_mod.freeTimelineRow(gpa, row);
+                continue;
+            }
+        }
+        try list.append(gpa, row);
+    }
+}
+
+fn lessByTimeThenHash(_: void, a: store_mod.TimelineRow, b: store_mod.TimelineRow) bool {
+    if (a.timestamp != b.timestamp) return a.timestamp < b.timestamp;
+    return std.mem.lessThan(u8, a.hash, b.hash);
+}
+
+fn countSessions(rows: []const store_mod.TimelineRow) i64 {
+    var count: i64 = 0;
+    for (rows, 0..) |row, i| {
+        var seen = false;
+        for (rows[0..i]) |prev| {
+            if (std.mem.eql(u8, row.origin, prev.origin) and std.mem.eql(u8, row.session_id, prev.session_id)) {
+                seen = true;
+                break;
+            }
+        }
+        if (!seen) count += 1;
+    }
+    return count;
+}
+
+fn writeScopeDiagnostic(stdout: *std.Io.File.Writer, format: output_mod.Format, code: []const u8, message: []const u8) !void {
+    try status.writeDiagnostic(stdout, format, usage.name, .{
+        .code = code,
+        .message = message,
+    });
 }
 
 fn parseOptions(iter: *std.process.Args.Iterator, stdout: *std.Io.File.Writer) !EvalOptions {

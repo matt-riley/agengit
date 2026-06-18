@@ -132,7 +132,6 @@ pub fn evaluateSession(gpa: std.mem.Allocator, steps: []const SessionStep) !Asse
 pub fn detectFollowUpSignals(
     gpa: std.mem.Allocator,
     rows: []const SessionStep,
-    scoped_session_id: []const u8,
     scoped_last_timestamp: i64,
     lookahead_ms: i64,
 ) !FollowUpAssessment {
@@ -147,7 +146,6 @@ pub fn detectFollowUpSignals(
 
     const until = scoped_last_timestamp + lookahead_ms;
     for (rows) |row| {
-        if (std.mem.eql(u8, row.step.session_id, scoped_session_id)) continue;
         if (row.timestamp <= scoped_last_timestamp or row.timestamp > until) continue;
         if (findFollowUpPhrase(row.step)) |phrase| {
             const owned_session_id = try gpa.dupe(u8, row.step.session_id);
@@ -170,20 +168,42 @@ pub fn detectFollowUpSignals(
     };
 }
 
-pub fn patternAssociations(gpa: std.mem.Allocator, assessment: Assessment) ![]const PatternAssociation {
-    if (std.mem.eql(u8, assessment.dimensions.verification.rating, "good")) {
-        const result = try gpa.alloc(PatternAssociation, 1);
-        result[0] = .{
-            .phrase = "run tests",
-            .source = "user_prompt",
+pub fn patternAssociations(
+    gpa: std.mem.Allocator,
+    baseline_steps: []const SessionStep,
+    scoped_steps: []const SessionStep,
+    assessment: Assessment,
+) ![]const PatternAssociation {
+    var list: std.ArrayList(PatternAssociation) = .empty;
+    errdefer list.deinit(gpa);
+
+    const scoped_verification_support = countVerificationEvidence(scoped_steps);
+    if (scoped_verification_support > 0 and std.mem.eql(u8, assessment.dimensions.verification.rating, "good")) {
+        const baseline_support = try countBaselineVerificationSupport(gpa, baseline_steps);
+        try list.append(gpa, .{
+            .phrase = "verification command",
+            .source = "tool_args",
             .association = "higher_rated_sessions",
             .dimension = "verification",
-            .support = assessment.dimensions.verification.signals.verification_commands,
-            .confidence = "low",
-        };
-        return result;
+            .support = baseline_support,
+            .confidence = if (baseline_support >= 3) "medium" else "low",
+        });
     }
-    return try gpa.alloc(PatternAssociation, 0);
+
+    const scoped_repeated_failure_support = assessment.dimensions.failure_recovery.signals.repeated_failures;
+    if (scoped_repeated_failure_support > 0 and std.mem.eql(u8, assessment.dimensions.failure_recovery.rating, "bad")) {
+        const baseline_support = try countBaselineRepeatedFailureSupport(gpa, baseline_steps);
+        try list.append(gpa, .{
+            .phrase = "repeated failure output",
+            .source = "tool_result",
+            .association = "lower_rated_sessions",
+            .dimension = "failure_recovery",
+            .support = baseline_support,
+            .confidence = if (baseline_support >= 3) "medium" else "low",
+        });
+    }
+
+    return try list.toOwnedSlice(gpa);
 }
 
 fn freeDimension(gpa: std.mem.Allocator, report: DimensionReport) void {
@@ -214,8 +234,8 @@ fn collectSignals(steps: []const SessionStep) CollectedSignals {
 
         for (row.step.tool_calls) |tool_call| {
             out.counts.tool_calls += 1;
-            if (containsAny(tool_call.args, &verification_terms)) out.counts.verification_commands += 1;
-            if (containsAny(tool_call.args, &promptRelatedTerms(out.first_user))) out.counts.related_tool_calls += 1;
+            if (isVerificationCommand(tool_call.args)) out.counts.verification_commands += 1;
+            if (toolRelatedToPrompt(tool_call.tool_name, tool_call.args, out.first_user)) out.counts.related_tool_calls += 1;
             if (std.mem.eql(u8, previous_command, tool_call.args)) out.counts.repeated_commands += 1;
             previous_command = tool_call.args;
 
@@ -344,8 +364,115 @@ fn containsIgnoreCase(haystack: []const u8, needle: []const u8) bool {
     return false;
 }
 
-fn promptRelatedTerms(prompt: []const u8) [6][]const u8 {
-    return .{ "test", "build", "workflow", "eval", "json", if (containsIgnoreCase(prompt, "zig")) "zig" else "" };
+fn isVerificationCommand(value: []const u8) bool {
+    return containsAny(value, &verification_terms);
+}
+
+fn countVerificationEvidence(steps: []const SessionStep) i64 {
+    var count: i64 = 0;
+    for (steps) |row| {
+        for (row.step.tool_calls) |tool_call| {
+            if (isVerificationCommand(tool_call.args)) count += 1;
+        }
+    }
+    return count;
+}
+
+fn countBaselineVerificationSupport(gpa: std.mem.Allocator, steps: []const SessionStep) !i64 {
+    var count: i64 = 0;
+    for (steps, 0..) |row, i| {
+        if (hasEarlierSession(steps[0..i], row.step.origin, row.step.session_id)) continue;
+        var report = try evaluateOneSessionFromBaseline(gpa, steps, row.step.origin, row.step.session_id);
+        defer report.assessment.deinit(gpa);
+        defer report.steps.deinit(gpa);
+        if (countVerificationEvidence(report.steps.items) > 0 and std.mem.eql(u8, report.assessment.dimensions.verification.rating, "good")) {
+            count += 1;
+        }
+    }
+    return count;
+}
+
+fn countBaselineRepeatedFailureSupport(gpa: std.mem.Allocator, steps: []const SessionStep) !i64 {
+    var count: i64 = 0;
+    for (steps, 0..) |row, i| {
+        if (hasEarlierSession(steps[0..i], row.step.origin, row.step.session_id)) continue;
+        var report = try evaluateOneSessionFromBaseline(gpa, steps, row.step.origin, row.step.session_id);
+        defer report.assessment.deinit(gpa);
+        defer report.steps.deinit(gpa);
+        if (report.assessment.dimensions.failure_recovery.signals.repeated_failures > 0 and std.mem.eql(u8, report.assessment.dimensions.failure_recovery.rating, "bad")) {
+            count += 1;
+        }
+    }
+    return count;
+}
+
+const BaselineSessionReport = struct {
+    steps: std.ArrayList(SessionStep),
+    assessment: Assessment,
+};
+
+fn evaluateOneSessionFromBaseline(
+    gpa: std.mem.Allocator,
+    steps: []const SessionStep,
+    origin: []const u8,
+    session_id: []const u8,
+) !BaselineSessionReport {
+    var session_steps: std.ArrayList(SessionStep) = .empty;
+    errdefer session_steps.deinit(gpa);
+    for (steps) |row| {
+        if (std.mem.eql(u8, row.step.origin, origin) and std.mem.eql(u8, row.step.session_id, session_id)) {
+            try session_steps.append(gpa, row);
+        }
+    }
+    const assessment = try evaluateSession(gpa, session_steps.items);
+    errdefer assessment.deinit(gpa);
+    return .{
+        .steps = session_steps,
+        .assessment = assessment,
+    };
+}
+
+fn hasEarlierSession(steps: []const SessionStep, origin: []const u8, session_id: []const u8) bool {
+    for (steps) |row| {
+        if (std.mem.eql(u8, row.step.origin, origin) and std.mem.eql(u8, row.step.session_id, session_id)) return true;
+    }
+    return false;
+}
+
+fn toolRelatedToPrompt(tool_name: []const u8, args: []const u8, prompt: []const u8) bool {
+    var it = std.mem.tokenizeAny(u8, prompt, " \t\r\n,.;:!?()[]{}<>\"'`/\\|+-=*&#");
+    while (it.next()) |token| {
+        if (token.len < 3 or isPromptStopword(token)) continue;
+        if (containsIgnoreCase(tool_name, token) or containsIgnoreCase(args, token)) return true;
+    }
+    return false;
+}
+
+fn isPromptStopword(token: []const u8) bool {
+    const stopwords = [_][]const u8{
+        "the",
+        "and",
+        "for",
+        "that",
+        "this",
+        "with",
+        "from",
+        "into",
+        "when",
+        "then",
+        "than",
+        "run",
+        "use",
+        "add",
+        "fix",
+        "make",
+        "should",
+        "must",
+    };
+    for (stopwords) |word| {
+        if (std.ascii.eqlIgnoreCase(token, word)) return true;
+    }
+    return false;
 }
 
 fn findFollowUpPhrase(step: object.Step) ?[]const u8 {
@@ -434,4 +561,9 @@ const follow_up_terms = [_][]const u8{
 
 test "containsIgnoreCase finds mixed-case terms" {
     try std.testing.expect(containsIgnoreCase("The Workflow FAILED", "workflow failed"));
+}
+
+test "toolRelatedToPrompt compares meaningful prompt terms against tool activity" {
+    try std.testing.expect(toolRelatedToPrompt("bash", "sed -n '1,80p' src/store/eval.zig", "Improve the eval scoring"));
+    try std.testing.expect(!toolRelatedToPrompt("bash", "zig build test", "Improve the recall command"));
 }
