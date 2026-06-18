@@ -155,8 +155,111 @@ test "eval/json supports inferred git commit scope" {
     const scope = scope_value.object;
     try std.testing.expectEqualStrings("commit", scope.get("kind").?.string);
     try std.testing.expectEqualStrings("HEAD", scope.get("rev").?.string);
+    try std.testing.expectEqual(@as(i64, 1), scope.get("step_count").?.integer);
+    try std.testing.expectEqual(@as(i64, 1), scope.get("session_count").?.integer);
     try std.testing.expectEqualStrings("medium", data.get("association_confidence").?.string);
     try std.testing.expectEqualStrings("good", data.get("current_assessment").?.object.get("classification").?.string);
+}
+
+test "eval/json applies date filters to explicit session scopes" {
+    var sandbox = try harness.Sandbox.init(std.testing.allocator);
+    defer sandbox.deinit();
+
+    try sandbox.writeRepoFile(".agit/.keep", "");
+    try recordCodexTurn(
+        &sandbox,
+        "eval-filtered",
+        "turn-1",
+        "Add JSON output and run zig build test",
+        "bash",
+        "zig build test",
+        "All tests passed",
+        "Implemented JSON output and verified tests passed.",
+    );
+
+    var result = try sandbox.run(&.{ "eval", "--json", "--session", "codex/eval-filtered", "--until", "1970-01-01", "--no-lookahead" }, null);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(u8, 0), result.exit_code);
+
+    var parsed = try parseJson(result.stdout);
+    defer parsed.deinit();
+    try expectEnvelope(parsed.value, "eval");
+
+    const diagnostic = parsed.value.object.get("data").?.object.get("diagnostic").?.object;
+    try std.testing.expectEqualStrings("session_not_found", diagnostic.get("code").?.string);
+}
+
+test "eval/json window scopes include multiple matching sessions" {
+    var sandbox = try harness.Sandbox.init(std.testing.allocator);
+    defer sandbox.deinit();
+
+    try sandbox.writeRepoFile(".agit/.keep", "");
+    try recordCodexTurn(
+        &sandbox,
+        "eval-window-a",
+        "turn-1",
+        "Add JSON output and run zig build test",
+        "bash",
+        "zig build test",
+        "All tests passed",
+        "Implemented JSON output and verified tests passed.",
+    );
+    try recordCodexTurn(
+        &sandbox,
+        "eval-window-b",
+        "turn-1",
+        "Fix eval scoring and run zig build test",
+        "bash",
+        "zig build test",
+        "All tests passed",
+        "Fixed eval scoring and verified tests passed.",
+    );
+
+    var result = try sandbox.run(&.{ "eval", "--json", "--since", "1970-01-01", "--no-lookahead" }, null);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(u8, 0), result.exit_code);
+
+    var parsed = try parseJson(result.stdout);
+    defer parsed.deinit();
+    try expectEnvelope(parsed.value, "eval");
+
+    const data = parsed.value.object.get("data").?.object;
+    const scope = data.get("scope").?.object;
+    try std.testing.expectEqualStrings("window", scope.get("kind").?.string);
+    try std.testing.expectEqual(@as(i64, 2), scope.get("step_count").?.integer);
+    try std.testing.expectEqual(@as(i64, 2), scope.get("session_count").?.integer);
+    try std.testing.expectEqualStrings("good", data.get("current_assessment").?.object.get("classification").?.string);
+}
+
+test "eval/json pattern associations come from scoped evidence" {
+    var sandbox = try harness.Sandbox.init(std.testing.allocator);
+    defer sandbox.deinit();
+
+    try sandbox.writeRepoFile(".agit/.keep", "");
+    try recordCodexTurn(
+        &sandbox,
+        "eval-pattern",
+        "turn-1",
+        "Add eval JSON and run zig build test",
+        "bash",
+        "zig build test",
+        "All tests passed",
+        "Implemented eval JSON and verified tests passed.",
+    );
+
+    var result = try sandbox.run(&.{ "eval", "--json", "--session", "codex/eval-pattern", "--no-lookahead" }, null);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(u8, 0), result.exit_code);
+
+    var parsed = try parseJson(result.stdout);
+    defer parsed.deinit();
+    try expectEnvelope(parsed.value, "eval");
+
+    const patterns = parsed.value.object.get("data").?.object.get("patterns").?.array.items;
+    try std.testing.expect(patterns.len >= 1);
+    try std.testing.expectEqualStrings("verification command", patterns[0].object.get("phrase").?.string);
+    try std.testing.expectEqualStrings("tool_args", patterns[0].object.get("source").?.string);
+    try std.testing.expectEqual(@as(i64, 1), patterns[0].object.get("support").?.integer);
 }
 
 fn recordCodexTurn(
