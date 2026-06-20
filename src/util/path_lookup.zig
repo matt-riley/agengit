@@ -41,12 +41,12 @@ test "hasExecutableInPath resolves executables from PATH segments" {
     defer file.close(io);
     try file.writeStreamingAll(io, "echo ok\n");
 
-    var env_map = std.process.EnvMap.init(gpa);
-    defer env_map.deinit();
-    try env_map.put("PATH", bin_path);
-
-    const environ = try std.process.Environ.init(gpa, &env_map);
-    defer environ.deinit(gpa);
+    const path_env_raw = try std.fmt.allocPrint(gpa, "PATH={s}", .{bin_path});
+    defer gpa.free(path_env_raw);
+    const path_env = try gpa.dupeZ(u8, path_env_raw);
+    defer gpa.free(path_env);
+    const env_entries = [_:null]?[*:0]const u8{path_env.ptr};
+    const environ = std.process.Environ{ .block = .{ .slice = &env_entries } };
 
     try std.testing.expect(hasExecutableInPath(io, gpa, environ, "codex-test-bin"));
     try std.testing.expect(!hasExecutableInPath(io, gpa, environ, "does-not-exist"));

@@ -37,7 +37,7 @@ pub fn run(
 
     const home = try home_mod.getAlloc(gpa, environ);
     defer gpa.free(home);
-    const exe = try exe_path_mod.getAlloc(io, gpa);
+    const exe = try exe_path_mod.getHookBinaryAlloc(io, gpa, environ);
     defer gpa.free(exe);
 
     if (options.json) {

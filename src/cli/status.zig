@@ -244,7 +244,7 @@ fn collectConfiguredAgents(io: std.Io, gpa: std.mem.Allocator, environ: std.proc
     };
     defer gpa.free(home);
 
-    const exe = exe_path_mod.getAlloc(io, gpa) catch |err| {
+    const exe = exe_path_mod.getHookBinaryAlloc(io, gpa, environ) catch |err| {
         return .{
             .unavailable_reason = try gpa.dupe(u8, @errorName(err)),
         };
