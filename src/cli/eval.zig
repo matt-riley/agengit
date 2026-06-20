@@ -679,3 +679,38 @@ fn parseLookahead(value: []const u8) !i64 {
         else => error.InvalidArgument,
     };
 }
+
+test "parseLookahead: parses hours" {
+    try std.testing.expectEqual(@as(i64, 3600000), try parseLookahead("1h"));
+    try std.testing.expectEqual(@as(i64, 7200000), try parseLookahead("2h"));
+}
+
+test "parseLookahead: parses days" {
+    try std.testing.expectEqual(@as(i64, 86400000), try parseLookahead("1d"));
+    try std.testing.expectEqual(@as(i64, 172800000), try parseLookahead("2d"));
+}
+
+test "parseLookahead: zero is valid" {
+    try std.testing.expectEqual(@as(i64, 0), try parseLookahead("0"));
+}
+
+test "parseLookahead: rejects invalid input" {
+    try std.testing.expectError(error.InvalidCharacter, parseLookahead("abc"));
+    try std.testing.expectError(error.InvalidArgument, parseLookahead("-1h"));
+    try std.testing.expectError(error.InvalidArgument, parseLookahead("3x"));
+    try std.testing.expectError(error.InvalidArgument, parseLookahead(""));
+}
+
+test "countSessions: counts unique sessions only" {
+    const rows = [_]store_mod.TimelineRow{
+        .{ .origin = "a", .session_id = "s1", .turn_id = "t1", .hash = "h1", .timestamp = 1 },
+        .{ .origin = "a", .session_id = "s1", .turn_id = "t2", .hash = "h2", .timestamp = 2 },
+        .{ .origin = "a", .session_id = "s2", .turn_id = "t1", .hash = "h3", .timestamp = 3 },
+    };
+    try std.testing.expectEqual(@as(i64, 2), countSessions(&rows));
+}
+
+test "countSessions: empty slice returns 0" {
+    const rows = [_]store_mod.TimelineRow{};
+    try std.testing.expectEqual(@as(i64, 0), countSessions(&rows));
+}

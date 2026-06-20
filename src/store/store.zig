@@ -1592,3 +1592,95 @@ test "recordStepBlame marks reindex when prior blame object is missing" {
     try std.testing.expect(after != null);
     try std.testing.expectEqualStrings(&h1_hex, &after.?.step_hash);
 }
+
+test "store write and read tree" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = std.testing.io;
+
+    var s = try Store.open(io, tmp.dir, std.testing.allocator);
+    defer s.deinit(io);
+
+    const blob_data = "tree leaf content";
+    const blob_h = try s.writeBlob(io, blob_data);
+    const blob_hex = blob_h.toHex();
+
+    const tree = Tree{
+        .entries = &.{
+            .{
+                .path = "hello.txt",
+                .blob = &blob_hex,
+                .mode = "100644",
+                .size = blob_data.len,
+            },
+        },
+    };
+    const h = try s.writeTree(io, std.testing.allocator, tree);
+    var parsed = try s.readTree(io, std.testing.allocator, h);
+    defer parsed.deinit();
+
+    try std.testing.expectEqual(@as(usize, 1), parsed.value.entries.len);
+    try std.testing.expectEqualStrings("hello.txt", parsed.value.entries[0].path);
+    try std.testing.expectEqualStrings(&blob_hex, parsed.value.entries[0].blob);
+    try std.testing.expectEqualStrings("100644", parsed.value.entries[0].mode);
+    try std.testing.expectEqual(@as(u64, blob_data.len), parsed.value.entries[0].size);
+}
+
+test "store write and read step" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = std.testing.io;
+
+    var s = try Store.open(io, tmp.dir, std.testing.allocator);
+    defer s.deinit(io);
+
+    const step = Step{
+        .parent = null,
+        .tree = "a" ** 64,
+        .session_id = "sess-roundtrip",
+        .origin = "test-origin",
+        .turn_id = "turn-1",
+        .causes = &.{},
+        .timestamp = 1234567890,
+        .messages = &.{},
+        .tool_calls = &.{},
+    };
+    const h = try s.writeStep(io, std.testing.allocator, step);
+    var parsed = try s.readStep(io, std.testing.allocator, h);
+    defer parsed.deinit();
+
+    try std.testing.expectEqualStrings("sess-roundtrip", parsed.value.session_id);
+    try std.testing.expectEqualStrings("test-origin", parsed.value.origin);
+    try std.testing.expectEqualStrings("turn-1", parsed.value.turn_id);
+    try std.testing.expectEqual(@as(i64, 1234567890), parsed.value.timestamp);
+    try std.testing.expectEqualStrings("a" ** 64, parsed.value.tree);
+    try std.testing.expect(parsed.value.parent == null);
+}
+
+test "store resolvePrefix finds unique hash" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = std.testing.io;
+
+    var s = try Store.open(io, tmp.dir, std.testing.allocator);
+    defer s.deinit(io);
+
+    const data = "unique content for prefix test";
+    const hash = try s.writeBlob(io, data);
+    const hex = hash.toHex();
+
+    const resolved = try s.resolvePrefix(io, std.testing.allocator, &hex);
+    try std.testing.expect(hash.eql(resolved.unique));
+}
+
+test "store resolvePrefix returns not_found for unknown prefix" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = std.testing.io;
+
+    var s = try Store.open(io, tmp.dir, std.testing.allocator);
+    defer s.deinit(io);
+
+    const resolved = try s.resolvePrefix(io, std.testing.allocator, "0000000000000000");
+    try std.testing.expect(resolved == .not_found);
+}

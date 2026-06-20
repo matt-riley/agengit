@@ -174,6 +174,7 @@ fn openResolvedWorkspaceDir(
     gpa: std.mem.Allocator,
     workspace_cwd: []const u8,
 ) ?std.Io.Dir {
+    if (std.fs.path.isAbsolute(workspace_cwd)) return null;
     const resolved = std.fs.path.resolve(gpa, &.{ ".", workspace_cwd }) catch return null;
     defer gpa.free(resolved);
     return std.Io.Dir.cwd().openDir(io, resolved, .{}) catch null;
@@ -454,31 +455,44 @@ test "requireEvent reports unknown event names" {
 test "openResolvedWorkspaceDir normalizes parent segments" {
     const io = std.testing.io;
     const gpa = std.testing.allocator;
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
 
-    try tmp.dir.createDirPath(io, "sub");
+    // Verify that a path with parent segments resolves to the same
+    // directory as the plain cwd reference.
+    const dir1_opt = openResolvedWorkspaceDir(io, gpa, ".");
+    try std.testing.expect(dir1_opt != null);
+    var dir1 = dir1_opt.?;
+    defer dir1.close(io);
 
-    var tmp_path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const tmp_len = try tmp.dir.realPath(io, &tmp_path_buf);
-    const tmp_path = tmp_path_buf[0..tmp_len];
+    const dir2_opt = openResolvedWorkspaceDir(io, gpa, "sub/..");
+    try std.testing.expect(dir2_opt != null);
+    var dir2 = dir2_opt.?;
+    defer dir2.close(io);
 
-    const workspace_cwd = try std.fmt.allocPrint(gpa, "{s}/sub/..", .{tmp_path});
-    defer gpa.free(workspace_cwd);
-
-    const dir_opt = openResolvedWorkspaceDir(io, gpa, workspace_cwd);
-    try std.testing.expect(dir_opt != null);
-    var dir = dir_opt.?;
-    defer dir.close(io);
-
-    var dir_path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const dir_len = try dir.realPath(io, &dir_path_buf);
-    const dir_path = dir_path_buf[0..dir_len];
-    try std.testing.expectEqualStrings(tmp_path, dir_path);
+    var buf1: [std.fs.max_path_bytes]u8 = undefined;
+    const len1 = try dir1.realPath(io, &buf1);
+    var buf2: [std.fs.max_path_bytes]u8 = undefined;
+    const len2 = try dir2.realPath(io, &buf2);
+    try std.testing.expectEqualStrings(buf1[0..len1], buf2[0..len2]);
 }
 
 test "openResolvedWorkspaceDir returns null for invalid cwd" {
     const io = std.testing.io;
     const gpa = std.testing.allocator;
     try std.testing.expect(openResolvedWorkspaceDir(io, gpa, "\x00bad") == null);
+}
+
+test "openResolvedWorkspaceDir rejects absolute paths" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var tmp_path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const tmp_len = try tmp.dir.realPath(io, &tmp_path_buf);
+    const tmp_path = tmp_path_buf[0..tmp_len];
+
+    const workspace_cwd = try std.fmt.allocPrint(gpa, "{s}/dummy", .{tmp_path});
+    defer gpa.free(workspace_cwd);
+
+    try std.testing.expect(openResolvedWorkspaceDir(io, gpa, workspace_cwd) == null);
 }

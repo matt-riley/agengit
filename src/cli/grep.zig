@@ -409,3 +409,47 @@ fn shouldUseRedaction(mode: RedactionMode, redacted_by_default: bool) bool {
         .full => false,
     };
 }
+
+test "buildMatchQuery: single token becomes quoted" {
+    const gpa = std.testing.allocator;
+    const result = try buildMatchQuery(gpa, "hello");
+    defer gpa.free(result);
+    try std.testing.expectEqualStrings("\"hello\"", result);
+}
+
+test "buildMatchQuery: multiple tokens joined with AND" {
+    const gpa = std.testing.allocator;
+    const result = try buildMatchQuery(gpa, "hello world");
+    defer gpa.free(result);
+    try std.testing.expectEqualStrings("\"hello\" AND \"world\"", result);
+}
+
+test "buildMatchQuery: empty string returns InvalidArgument" {
+    const gpa = std.testing.allocator;
+    try std.testing.expectError(error.InvalidArgument, buildMatchQuery(gpa, ""));
+}
+
+test "appendQuotedToken: escapes embedded quotes" {
+    const gpa = std.testing.allocator;
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(gpa);
+    try appendQuotedToken(&out, gpa, "a\"b");
+    const result = try out.toOwnedSlice(gpa);
+    defer gpa.free(result);
+    try std.testing.expectEqualStrings("\"a\"\"b\"", result);
+}
+
+test "describeEntry: maps known entry kinds" {
+    try std.testing.expectEqualStrings("message", describeEntry("message", "ignored"));
+    try std.testing.expectEqualStrings("message assistant", describeEntry("message", "assistant"));
+    try std.testing.expectEqualStrings("message user", describeEntry("message", "user"));
+    try std.testing.expectEqualStrings("tool args", describeEntry("tool_args", "ignored"));
+    try std.testing.expectEqualStrings("tool result", describeEntry("tool_result", "ignored"));
+    try std.testing.expectEqualStrings("unknown", describeEntry("unknown", "fallback"));
+}
+
+test "formatEntryLabel: formats entry kind with label" {
+    var buf: [128]u8 = undefined;
+    try std.testing.expectEqualStrings("message", formatEntryLabel(&buf, "message", "ignored"));
+    try std.testing.expectEqualStrings("tree ignored", formatEntryLabel(&buf, "tree", "ignored"));
+}

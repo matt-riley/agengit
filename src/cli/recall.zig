@@ -525,3 +525,15 @@ fn shouldUseRedaction(mode: RedactionMode, redacted_by_default: bool) bool {
         .full => false,
     };
 }
+
+test "outcomeRank: orders failure < unknown < success" {
+    try std.testing.expect(outcomeRank("failure") < outcomeRank("success"));
+    try std.testing.expect(outcomeRank("failure") < outcomeRank("unknown"));
+    try std.testing.expect(outcomeRank("unknown") < outcomeRank("success"));
+}
+
+test "outcomeLabel: returns human-readable labels" {
+    try std.testing.expectEqualStrings("failure", outcomeLabel("failure"));
+    try std.testing.expectEqualStrings("unknown", outcomeLabel("unknown"));
+    try std.testing.expectEqualStrings("success", outcomeLabel("success"));
+}
