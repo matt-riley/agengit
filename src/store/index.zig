@@ -392,6 +392,7 @@ pub const Index = struct {
         try self.db.execNoArgs("delete from blame_maps");
         try self.db.execNoArgs("delete from packed_objects");
         try self.db.execNoArgs("delete from objects");
+        try self.db.execNoArgs("delete from meta");
         try self.db.commit();
     }
 
@@ -755,6 +756,12 @@ pub const Index = struct {
         ) orelse return 0;
         defer row.deinit();
         return row.get(i64, 0);
+    }
+
+    pub fn maxStepTimestamp(self: Index) !?i64 {
+        const row = try self.db.row("select max(timestamp) from steps", .{}) orelse return null;
+        defer row.deinit();
+        return row.get(?i64, 0);
     }
 
     pub fn metaSet(self: Index, key: []const u8, value: []const u8) !void {
@@ -1816,6 +1823,29 @@ test "index truncate" {
     const search_row = try idx.db.row("select count(*) from search_entries", .{});
     defer search_row.?.deinit();
     try std.testing.expectEqual(@as(i64, 0), search_row.?.get(i64, 0));
+}
+
+test "truncate clears meta" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const n = try tmp.dir.realPath(io, &path_buf);
+    var db_path_buf: [std.fs.max_path_bytes + 12]u8 = undefined;
+    const db_path = try std.fmt.bufPrintZ(&db_path_buf, "{s}/index.db", .{path_buf[0..n]});
+
+    const idx = try Index.open(db_path);
+    defer idx.close();
+    try idx.migrate();
+
+    try idx.metaSet("session::s1::last_ref_hash", "abc");
+    try idx.truncate();
+
+    const value = try idx.metaGet(gpa, "session::s1::last_ref_hash");
+    try std.testing.expect(value == null);
+    if (value) |v| gpa.free(v);
 }
 
 test "index meta round trip" {
