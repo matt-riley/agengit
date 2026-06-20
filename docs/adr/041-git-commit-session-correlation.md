@@ -1,4 +1,4 @@
-# ADR 033: Git commit and session correlation
+# ADR 041: Git commit and session correlation
 
 **Status:** Implemented
 **Date:** 2026-05-31
