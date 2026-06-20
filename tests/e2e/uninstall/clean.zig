@@ -9,6 +9,7 @@ test "uninstall/clean" {
     try sandbox.createFakeAgent("codex");
     try sandbox.createFakeAgent("gemini");
     try sandbox.createFakeAgent("copilot");
+    try sandbox.createFakeAgent("pi");
 
     var init_result = try sandbox.run(&.{"init"}, null);
     defer init_result.deinit(std.testing.allocator);
@@ -31,6 +32,10 @@ test "uninstall/clean" {
     const copilot_ext = try readHomeOptional(&sandbox, ".copilot/extensions/agit-recorder/extension.mjs");
     defer if (copilot_ext) |text| std.testing.allocator.free(text);
     try std.testing.expect(copilot_ext == null);
+
+    const pi_ext = try readHomeOptional(&sandbox, ".pi/agent/extensions/agit-recorder.js");
+    defer if (pi_ext) |text| std.testing.allocator.free(text);
+    try std.testing.expect(pi_ext == null);
 }
 
 fn readHome(sandbox: *harness.Sandbox, rel_path: []const u8) ![]u8 {
