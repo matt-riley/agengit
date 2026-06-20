@@ -276,11 +276,10 @@ pub const Store = struct {
     };
 
     pub fn auditObjectIndex(self: *Store, io: std.Io, gpa: std.mem.Allocator) !ObjectIndexAudit {
-        const loose_count = try countObjectFiles(io, gpa, self.root);
-        const pack_count = try pack_mod.countEntries(io, self.root, gpa);
-        const disk_count = loose_count + pack_count;
         const indexed_count: usize = @intCast(try self.index.countObjects());
         var missing_rows: usize = 0;
+        var disk_hashes = std.AutoHashMap([hash_mod.hex_len]u8, void).init(gpa);
+        defer disk_hashes.deinit();
 
         var obj_dir = self.root.openDir(io, "objects", .{ .iterate = true }) catch |err| switch (err) {
             error.FileNotFound, error.NotDir => return .{
@@ -301,7 +300,10 @@ pub const Store = struct {
             var hex_buf: [64]u8 = undefined;
             @memcpy(hex_buf[0..2], entry.path[0..2]);
             @memcpy(hex_buf[2..64], entry.path[3..65]);
-            if (!try self.index.hasObject(&hex_buf)) missing_rows += 1;
+            if (!disk_hashes.contains(hex_buf)) {
+                try disk_hashes.put(hex_buf, {});
+                if (!try self.index.hasObject(&hex_buf)) missing_rows += 1;
+            }
         }
 
         const pack_files = try pack_mod.listPackFiles(io, self.root, gpa);
@@ -311,13 +313,16 @@ pub const Store = struct {
             defer pack_mod.freeParsedEntries(gpa, entries);
             for (entries) |entry| {
                 const hex = entry.meta.hash.toHex();
-                if (!try self.index.hasObject(&hex)) missing_rows += 1;
+                if (!disk_hashes.contains(hex)) {
+                    try disk_hashes.put(hex, {});
+                    if (!try self.index.hasObject(&hex)) missing_rows += 1;
+                }
             }
         }
 
         return .{
             .indexed_complete = (try self.index.getObjectsComplete()) orelse false,
-            .disk_count = disk_count,
+            .disk_count = disk_hashes.count(),
             .indexed_count = indexed_count,
             .missing_rows = missing_rows,
         };

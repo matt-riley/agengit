@@ -245,6 +245,7 @@ fn runJson(
             .code = "staging_pending",
             .status = .info,
             .message = try std.fmt.allocPrint(aa, ".agit/tmp contains {d} pending capture file(s).", .{staging.pending_json}),
+            .hint = "Run `agit gc` to prune abandoned staging files after the grace period.",
             .path = ".agit/tmp",
         });
     } else {
@@ -500,7 +501,7 @@ fn checkStaging(
         );
     } else if (diag.pending_json > 0) {
         try stdout.interface.print(
-            "  - .agit/tmp staging: {d} pending capture file{s}\n",
+            "  - .agit/tmp staging: {d} pending capture file{s}; run `agit gc` to prune abandoned staging after the grace period\n",
             .{ diag.pending_json, if (diag.pending_json == 1) "" else "s" },
         );
     } else {
@@ -621,22 +622,20 @@ fn collectStagingDiagnostics(
     };
     defer tmp_dir.close(io);
 
-    var walker = try tmp_dir.walk(gpa);
-    defer walker.deinit();
-
     var diag: StagingDiagnostics = .{};
-    while (try walker.next(io)) |entry| {
+    var iter = tmp_dir.iterate();
+    while (try iter.next(io)) |entry| {
         if (entry.kind != .file) continue;
-        if (std.mem.endsWith(u8, entry.path, ".json.lock")) continue;
-        if (std.mem.endsWith(u8, entry.path, ".json.corrupt") or
-            std.mem.endsWith(u8, entry.path, ".corrupt"))
+        if (std.mem.endsWith(u8, entry.name, ".json.lock")) continue;
+        if (std.mem.endsWith(u8, entry.name, ".json.corrupt") or
+            std.mem.endsWith(u8, entry.name, ".corrupt"))
         {
             diag.quarantined += 1;
             continue;
         }
-        if (!std.mem.endsWith(u8, entry.path, ".json")) continue;
+        if (!std.mem.endsWith(u8, entry.name, ".json")) continue;
 
-        const data = tmp_dir.readFileAlloc(io, entry.path, gpa, .unlimited) catch {
+        const data = tmp_dir.readFileAlloc(io, entry.name, gpa, .unlimited) catch {
             diag.unreadable += 1;
             continue;
         };
@@ -1195,6 +1194,7 @@ test "collectStagingDiagnostics counts pending corrupt and quarantined files" {
     try writeTestFile(io, tmp.dir, "tmp/bad.json", "{not-json");
     try writeTestFile(io, tmp.dir, "tmp/old.json.corrupt", "{not-json");
     try writeTestFile(io, tmp.dir, "tmp/good.json.lock", "");
+    try writeTestFile(io, tmp.dir, "tmp/turns/state.json", "{}");
 
     const diag = try collectStagingDiagnostics(io, gpa, tmp.dir);
     try std.testing.expectEqual(@as(usize, 1), diag.pending_json);
