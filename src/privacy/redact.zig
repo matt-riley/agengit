@@ -76,6 +76,7 @@ pub fn scanAlloc(gpa: std.mem.Allocator, text: []const u8, options: Options) ![]
     try scanBearerTokens(gpa, text, &findings);
     try scanGitHubTokens(gpa, text, &findings);
     try scanAwsAccessKeys(gpa, text, &findings);
+    try scanAwsSecretAccessKeys(gpa, text, &findings);
     try scanPrivateKeys(gpa, text, &findings);
     try scanPlatformTokens(gpa, text, &findings);
     try scanJwtTokens(gpa, text, &findings);
@@ -244,6 +245,30 @@ fn scanAwsAccessKeys(
             .end = i + 20,
         });
         i += 19;
+    }
+}
+
+fn scanAwsSecretAccessKeys(
+    gpa: std.mem.Allocator,
+    text: []const u8,
+    findings: *std.ArrayList(Finding),
+) !void {
+    var i: usize = 0;
+    while (i + 40 <= text.len) : (i += 1) {
+        const candidate = text[i .. i + 40];
+        if (!allAwsSecretChars(candidate)) continue;
+        if (!containsAlphaAndDigit(candidate)) continue;
+        if (!hasNearbyAwsAccessKeyId(text, i, 256)) continue;
+        if (i > 0 and isIdentifierChar(text[i - 1])) continue;
+        if (i + 40 < text.len and isIdentifierChar(text[i + 40])) continue;
+
+        try appendFinding(gpa, findings, .{
+            .rule = "aws_secret_access_key",
+            .severity = .@"error",
+            .start = i,
+            .end = i + 40,
+        });
+        i += 39;
     }
 }
 
@@ -517,6 +542,39 @@ fn allUpperAlphaNum(text: []const u8) bool {
     return true;
 }
 
+fn allAwsSecretChars(text: []const u8) bool {
+    for (text) |c| {
+        if (std.ascii.isAlphabetic(c) or std.ascii.isDigit(c) or c == '/' or c == '+' or c == '=') continue;
+        return false;
+    }
+    return true;
+}
+
+fn containsAlphaAndDigit(text: []const u8) bool {
+    var has_alpha = false;
+    var has_digit = false;
+    for (text) |c| {
+        if (std.ascii.isAlphabetic(c)) has_alpha = true;
+        if (std.ascii.isDigit(c)) has_digit = true;
+    }
+    return has_alpha and has_digit;
+}
+
+fn hasNearbyAwsAccessKeyId(text: []const u8, secret_start: usize, window: usize) bool {
+    const from = secret_start -| window;
+    const until = @min(text.len, secret_start + 40 + window);
+    var i = from;
+    while (i + 20 <= until) : (i += 1) {
+        const candidate = text[i .. i + 20];
+        if (!(std.mem.startsWith(u8, candidate, "AKIA") or std.mem.startsWith(u8, candidate, "ASIA"))) continue;
+        if (!allUpperAlphaNum(candidate[4..])) continue;
+        if (i > 0 and isIdentifierChar(text[i - 1])) continue;
+        if (i + 20 < text.len and isIdentifierChar(text[i + 20])) continue;
+        return true;
+    }
+    return false;
+}
+
 fn isIdentifierChar(c: u8) bool {
     return std.ascii.isAlphabetic(c) or std.ascii.isDigit(c) or c == '_' or c == '-';
 }
@@ -569,6 +627,32 @@ test "scanAlloc finds GitHub and AWS tokens" {
     const findings = try scanAlloc(std.testing.allocator, input, .{});
     defer std.testing.allocator.free(findings);
     try std.testing.expect(findings.len >= 2);
+}
+
+test "scanAlloc finds AWS secret keys near access key IDs" {
+    const input =
+        ("AK" ++ "IAIOSFODNN7EXAMPLE") ++ "\n" ++
+        "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
+    const findings = try scanAlloc(std.testing.allocator, input, .{});
+    defer std.testing.allocator.free(findings);
+
+    var found_secret = false;
+    for (findings) |finding| {
+        if (std.mem.eql(u8, finding.rule, "aws_secret_access_key")) found_secret = true;
+    }
+    try std.testing.expect(found_secret);
+}
+
+test "scanAlloc does not flag standalone AWS secret-like tokens" {
+    const input = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
+    const findings = try scanAlloc(std.testing.allocator, input, .{});
+    defer std.testing.allocator.free(findings);
+
+    var found_secret = false;
+    for (findings) |finding| {
+        if (std.mem.eql(u8, finding.rule, "aws_secret_access_key")) found_secret = true;
+    }
+    try std.testing.expect(!found_secret);
 }
 
 test "scanAlloc finds Slack tokens" {
