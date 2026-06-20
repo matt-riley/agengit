@@ -1039,24 +1039,22 @@ fn inspectStaging(
     };
     defer tmp_dir.close(io);
 
-    var walker = try tmp_dir.walk(gpa);
-    defer walker.deinit();
-
     var corrupt_json: usize = 0;
     var unreadable: usize = 0;
     var quarantined: usize = 0;
     var pending_json: usize = 0;
 
-    while (try walker.next(io)) |entry| {
+    var iter = tmp_dir.iterate();
+    while (try iter.next(io)) |entry| {
         if (entry.kind != .file) continue;
-        if (std.mem.endsWith(u8, entry.path, ".json.lock")) continue;
-        if (std.mem.endsWith(u8, entry.path, ".json.corrupt") or std.mem.endsWith(u8, entry.path, ".corrupt")) {
+        if (std.mem.endsWith(u8, entry.name, ".json.lock")) continue;
+        if (std.mem.endsWith(u8, entry.name, ".json.corrupt") or std.mem.endsWith(u8, entry.name, ".corrupt")) {
             quarantined += 1;
             continue;
         }
-        if (!std.mem.endsWith(u8, entry.path, ".json")) continue;
+        if (!std.mem.endsWith(u8, entry.name, ".json")) continue;
 
-        const raw = tmp_dir.readFileAlloc(io, entry.path, gpa, .unlimited) catch {
+        const raw = tmp_dir.readFileAlloc(io, entry.name, gpa, .unlimited) catch {
             unreadable += 1;
             continue;
         };
@@ -1090,6 +1088,7 @@ fn inspectStaging(
         try appendFinding(aa, findings, stats, categories, .info, .mutable, .{
             .code = "staging_pending",
             .message = try std.fmt.allocPrint(aa, "Mutable staging area contains {d} pending capture file(s).", .{pending_json}),
+            .hint = "Run `agit gc` to prune abandoned staging files after the grace period.",
             .path = ".agit/tmp",
         });
     }

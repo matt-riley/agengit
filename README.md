@@ -426,6 +426,11 @@ long-running repositories.
 
 If `agit doctor` reports that the object index cache is not backfilled after an
 upgrade, run `agit reindex` once to repopulate it from `.agit/objects/`.
+If `doctor` reports pending capture files under `.agit/tmp`, those are
+top-level staging files from turns that have not finalized yet. Fresh files are
+usually an active turn; abandoned files older than the grace period are pruned
+by `agit gc`. Internal turn-state files under `.agit/tmp/turns/` are not counted
+as pending captures.
 
 ## Snapshot and privacy notes
 

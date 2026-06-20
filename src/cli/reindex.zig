@@ -638,6 +638,9 @@ test "reindex rebuilds packed object metadata from packfiles" {
     const stats = try reindex(io, gpa, &store);
     try std.testing.expectEqual(@as(usize, 1), stats.sessions);
     try std.testing.expectEqual(@as(usize, 2), stats.steps);
+    const audit = try store.auditObjectIndex(io, gpa);
+    try std.testing.expectEqual(audit.disk_count, audit.indexed_count);
+    try std.testing.expectEqual(@as(usize, 0), audit.missing_rows);
 
     const blob2_hex = blob2.toHex();
     var packed_row = try store.index.lookupPackedObject(gpa, &blob2_hex);
