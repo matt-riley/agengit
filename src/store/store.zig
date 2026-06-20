@@ -427,7 +427,10 @@ pub const Store = struct {
             }
 
             const new_blob_hash = try Hash.fromHex(entry.blob);
-            const new_blob = self.readBlob(io, arena, new_blob_hash) catch continue;
+            const new_blob = self.readBlob(io, arena, new_blob_hash) catch |err| {
+                try self.setBlameNeedsReindex(true);
+                return err;
+            };
             if (new_blob.len > input.max_file_bytes) continue;
             if (snapshot_mod.isBinary(new_blob)) continue;
             if (snapshot_mod.isSnapshotPlaceholder(new_blob)) continue;
@@ -437,12 +440,17 @@ pub const Store = struct {
             var old_lines: []const []const u8 = &.{};
             var old_blame: ?BlameMap = null;
             if (latest) |prior| {
-                if (self.loadPriorBlame(io, arena, prior)) |loaded| {
-                    if (loaded.lines.len == loaded.blame.lines.len) {
-                        old_lines = loaded.lines;
-                        old_blame = loaded.blame;
-                    }
-                } else |_| {}
+                const loaded = self.loadPriorBlame(io, arena, prior) catch |err| {
+                    try self.setBlameNeedsReindex(true);
+                    return err;
+                };
+                if (loaded.lines.len == loaded.blame.lines.len) {
+                    old_lines = loaded.lines;
+                    old_blame = loaded.blame;
+                } else {
+                    try self.setBlameNeedsReindex(true);
+                    return error.BlameLengthMismatch;
+                }
             }
 
             const bm = try blame_mod.computeBlame(arena, entry.path, old_lines, new_lines, old_blame, input.step_hash);
@@ -1423,4 +1431,164 @@ test "reconcile reports index ahead of ref without mutation" {
 
     const step_hex = h.toHex();
     try std.testing.expect(try s.index.hasStep(&step_hex));
+}
+
+fn removeObjectFile(root: std.Io.Dir, io: std.Io, hash_hex: []const u8) !void {
+    var path_buf: [128]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "objects/{s}/{s}", .{ hash_hex[0..2], hash_hex[2..] });
+    try root.deleteFile(io, path);
+}
+
+test "recordStepBlame still computes incremental blame when prior state exists" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+
+    var s = try Store.open(io, tmp.dir, gpa);
+    defer s.deinit(io);
+
+    const blob1 = try s.writeBlob(io, "line one\nline two\n");
+    const tree1 = Tree{ .entries = &.{
+        .{ .path = "src/file.txt", .blob = &blob1.toHex(), .mode = "file", .size = 18 },
+    } };
+    const tree1_hash = try s.writeTree(io, gpa, tree1);
+
+    const step1 = Step{
+        .parent = null,
+        .tree = &tree1_hash.toHex(),
+        .session_id = "blame-ok",
+        .origin = "github.com/u/r",
+        .turn_id = "t1",
+        .causes = &.{},
+        .timestamp = 1000,
+    };
+    const h1 = try s.writeStep(io, gpa, step1);
+    try std.testing.expect(try s.casRef(io, gpa, step1.origin, step1.session_id, null, h1, &step1, step1.messages, step1.tool_calls));
+
+    const h1_hex = h1.toHex();
+    try s.recordStepBlame(io, gpa, .{
+        .step_hash = &h1_hex,
+        .tree_hash = &tree1_hash.toHex(),
+        .session_origin = step1.origin,
+        .session_id = step1.session_id,
+        .timestamp = step1.timestamp,
+    });
+
+    const first = try s.index.queryLatestBlame("src/file.txt");
+    try std.testing.expect(first != null);
+    try std.testing.expectEqualStrings(&h1_hex, &first.?.step_hash);
+
+    const blob2 = try s.writeBlob(io, "line one\nchanged two\n");
+    const tree2 = Tree{ .entries = &.{
+        .{ .path = "src/file.txt", .blob = &blob2.toHex(), .mode = "file", .size = 21 },
+    } };
+    const tree2_hash = try s.writeTree(io, gpa, tree2);
+
+    const step2 = Step{
+        .parent = &h1_hex,
+        .tree = &tree2_hash.toHex(),
+        .session_id = "blame-ok",
+        .origin = "github.com/u/r",
+        .turn_id = "t2",
+        .causes = &.{},
+        .timestamp = 1001,
+    };
+    const h2 = try s.writeStep(io, gpa, step2);
+    try std.testing.expect(try s.casRef(io, gpa, step2.origin, step2.session_id, h1, h2, &step2, step2.messages, step2.tool_calls));
+
+    const h2_hex = h2.toHex();
+    try s.recordStepBlame(io, gpa, .{
+        .step_hash = &h2_hex,
+        .tree_hash = &tree2_hash.toHex(),
+        .session_origin = step2.origin,
+        .session_id = step2.session_id,
+        .timestamp = step2.timestamp,
+    });
+
+    try std.testing.expect(!try s.blameNeedsReindex());
+    const latest = try s.index.queryLatestBlame("src/file.txt");
+    try std.testing.expect(latest != null);
+    try std.testing.expectEqualStrings(&h2_hex, &latest.?.step_hash);
+}
+
+test "recordStepBlame marks reindex when prior blame object is missing" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+
+    var s = try Store.open(io, tmp.dir, gpa);
+    defer s.deinit(io);
+
+    const blob1 = try s.writeBlob(io, "line one\nline two\n");
+    const tree1 = Tree{ .entries = &.{
+        .{ .path = "src/file.txt", .blob = &blob1.toHex(), .mode = "file", .size = 18 },
+    } };
+    const tree1_hash = try s.writeTree(io, gpa, tree1);
+
+    const step1 = Step{
+        .parent = null,
+        .tree = &tree1_hash.toHex(),
+        .session_id = "blame-missing",
+        .origin = "github.com/u/r",
+        .turn_id = "t1",
+        .causes = &.{},
+        .timestamp = 1000,
+    };
+    const h1 = try s.writeStep(io, gpa, step1);
+    try std.testing.expect(try s.casRef(io, gpa, step1.origin, step1.session_id, null, h1, &step1, step1.messages, step1.tool_calls));
+
+    const h1_hex = h1.toHex();
+    try s.recordStepBlame(io, gpa, .{
+        .step_hash = &h1_hex,
+        .tree_hash = &tree1_hash.toHex(),
+        .session_origin = step1.origin,
+        .session_id = step1.session_id,
+        .timestamp = step1.timestamp,
+    });
+
+    const before = try s.index.queryLatestBlame("src/file.txt");
+    try std.testing.expect(before != null);
+    const blame_hex = before.?.blame_hash;
+
+    // Remove the prior blame object so the second step cannot load it.
+    try removeObjectFile(s.root, io, &blame_hex);
+
+    const blob2 = try s.writeBlob(io, "line one\nchanged two\n");
+    const tree2 = Tree{ .entries = &.{
+        .{ .path = "src/file.txt", .blob = &blob2.toHex(), .mode = "file", .size = 21 },
+    } };
+    const tree2_hash = try s.writeTree(io, gpa, tree2);
+
+    const step2 = Step{
+        .parent = &h1_hex,
+        .tree = &tree2_hash.toHex(),
+        .session_id = "blame-missing",
+        .origin = "github.com/u/r",
+        .turn_id = "t2",
+        .causes = &.{},
+        .timestamp = 1001,
+    };
+    const h2 = try s.writeStep(io, gpa, step2);
+    try std.testing.expect(try s.casRef(io, gpa, step2.origin, step2.session_id, h1, h2, &step2, step2.messages, step2.tool_calls));
+
+    const h2_hex = h2.toHex();
+    var failed = false;
+    s.recordStepBlame(io, gpa, .{
+        .step_hash = &h2_hex,
+        .tree_hash = &tree2_hash.toHex(),
+        .session_origin = step2.origin,
+        .session_id = step2.session_id,
+        .timestamp = step2.timestamp,
+    }) catch |err| {
+        try std.testing.expectEqual(error.FileNotFound, err);
+        failed = true;
+    };
+    try std.testing.expect(failed);
+    try std.testing.expect(try s.blameNeedsReindex());
+
+    const after = try s.index.queryLatestBlame("src/file.txt");
+    try std.testing.expect(after != null);
+    try std.testing.expectEqualStrings(&h1_hex, &after.?.step_hash);
 }
