@@ -110,11 +110,11 @@ fn startWatch(
     defer sandbox.gpa.free(stderr_path);
 
     var stdout_file = try std.Io.Dir.cwd().createFile(sandbox.io, stdout_path, .{ .truncate = true });
-    defer stdout_file.close(sandbox.io);
+    errdefer stdout_file.close(sandbox.io);
     var stderr_file = try std.Io.Dir.cwd().createFile(sandbox.io, stderr_path, .{ .truncate = true });
-    defer stderr_file.close(sandbox.io);
+    errdefer stderr_file.close(sandbox.io);
 
-    return try std.process.spawn(sandbox.io, .{
+    const child = try std.process.spawn(sandbox.io, .{
         .argv = child_argv.items,
         .cwd = .{ .path = sandbox.cwd },
         .stdin = .ignore,
@@ -122,6 +122,9 @@ fn startWatch(
         .stderr = .{ .file = stderr_file },
         .create_no_window = true,
     });
+
+    // Keep files open - they're owned by the child process now and will be closed when child exits.
+    return child;
 }
 
 fn interruptAndWait(sandbox: *harness.Sandbox, child: *std.process.Child) !std.process.Child.Term {
