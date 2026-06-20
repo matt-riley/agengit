@@ -7,7 +7,7 @@ pub fn stringifyValue(gpa: std.mem.Allocator, value: std.json.Value) ![]const u8
 
 pub fn stringOrJson(gpa: std.mem.Allocator, value: std.json.Value) ![]const u8 {
     return switch (value) {
-        .string => |s| s,
+        .string => |s| try gpa.dupe(u8, s),
         else => try stringifyValue(gpa, value),
     };
 }
@@ -74,4 +74,36 @@ test "toolUseFromObject keeps malformed tool payloads observable" {
     defer gpa.free(tool.args);
     try std.testing.expectEqualStrings("unknown", tool.tool_name);
     try std.testing.expectEqualStrings("missing tool_name", tool.result);
+}
+
+test "toolUseFromObject allocates string tool results" {
+    const gpa = std.testing.allocator;
+    var parsed = try std.json.parseFromSlice(std.json.Value, gpa,
+        \\{"tool_name":"bash","tool_input":{"command":"true"},"tool_response":"ok"}
+    , .{
+        .allocate = .alloc_always,
+    });
+    defer parsed.deinit();
+
+    const tool = try toolUseFromObject(gpa, parsed.value.object, parsed.value);
+    defer gpa.free(tool.args);
+    defer gpa.free(tool.result);
+    try std.testing.expectEqualStrings("bash", tool.tool_name);
+    try std.testing.expectEqualStrings("ok", tool.result);
+}
+
+test "toolUseFromObject allocates json tool results" {
+    const gpa = std.testing.allocator;
+    var parsed = try std.json.parseFromSlice(std.json.Value, gpa,
+        \\{"tool_name":"bash","tool_input":{"command":"true"},"tool_response":{"status":"ok"}}
+    , .{
+        .allocate = .alloc_always,
+    });
+    defer parsed.deinit();
+
+    const tool = try toolUseFromObject(gpa, parsed.value.object, parsed.value);
+    defer gpa.free(tool.args);
+    defer gpa.free(tool.result);
+    try std.testing.expectEqualStrings("bash", tool.tool_name);
+    try std.testing.expectEqualStrings("{\"status\":\"ok\"}", tool.result);
 }

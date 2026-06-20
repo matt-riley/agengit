@@ -441,6 +441,13 @@ Use `.agit/config.json` to tune capture levels for prompts, assistant messages,
 tool arguments/results, and snapshots; disable origins; add custom literal
 redactions; and make `show`/`cat` default to redacted output.
 
+`.redacted` snapshot capture is best-effort, not a guarantee. For highly
+sensitive repositories, prefer `.metadata_only` or `.disabled` snapshot capture.
+Current detector coverage includes: bearer tokens, GitHub tokens, AWS access-key
+IDs, AWS secret-access-key values near access-key IDs, private-key blocks,
+Slack/Google/Stripe/OpenAI/npm token formats, JWTs, sensitive-key assignments,
+and custom literals.
+
 Run `agit privacy scan` before sharing store content. It reports sensitive-data
 findings without printing the matched secret values and exits non-zero when
 findings are present.

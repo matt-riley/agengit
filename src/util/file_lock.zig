@@ -130,6 +130,23 @@ pub const LockRecord = struct {
     hostname: []const u8,
 };
 
+const OwnedLockRecord = struct {
+    pid: OsPid,
+    started_at: i64,
+    exe_path_buf: [std.fs.max_path_bytes]u8 = undefined,
+    exe_path_len: usize = 0,
+    hostname_buf: [std.posix.HOST_NAME_MAX]u8 = undefined,
+    hostname_len: usize = 0,
+
+    fn exePath(self: *const OwnedLockRecord) []const u8 {
+        return self.exe_path_buf[0..self.exe_path_len];
+    }
+
+    fn hostName(self: *const OwnedLockRecord) []const u8 {
+        return self.hostname_buf[0..self.hostname_len];
+    }
+};
+
 const TryResult = union(enum) {
     acquired,
     contended,
@@ -167,27 +184,25 @@ fn tryAcquireOnce(io: std.Io, dir: std.Io.Dir, sub_path: []const u8) LockFile.Ac
 fn shouldReclaimStale(io: std.Io, dir: std.Io.Dir, sub_path: []const u8, stale_after_ms: i64) LockFile.AcquireError!bool {
     const maybe_record = try readLockRecord(io, dir, sub_path);
     if (maybe_record == null) return true;
-    var parsed = maybe_record.?;
-    defer parsed.deinit();
-    const record = parsed.value;
+    const record = maybe_record.?;
 
     if (!isProcessAlive(record.pid)) return true;
 
     var host_buf: [std.posix.HOST_NAME_MAX]u8 = undefined;
-    if (!std.mem.eql(u8, record.hostname, currentHostNameInto(&host_buf))) return true;
+    if (!std.mem.eql(u8, record.hostName(), currentHostNameInto(&host_buf))) return true;
 
     const age_ms = std.Io.Timestamp.now(io, .real).toMilliseconds() - record.started_at;
     if (age_ms > stale_after_ms) return true;
 
     if (builtin.os.tag == .linux or builtin.os.tag == .macos) {
-        const ours = isProcessOurs(io, record.pid, record.exe_path);
+        const ours = isProcessOurs(io, record.pid, record.exePath());
         if (!ours) return true;
     }
 
     return false;
 }
 
-fn readLockRecord(io: std.Io, dir: std.Io.Dir, sub_path: []const u8) LockFile.AcquireError!?std.json.Parsed(LockRecord) {
+fn readLockRecord(io: std.Io, dir: std.Io.Dir, sub_path: []const u8) LockFile.AcquireError!?OwnedLockRecord {
     var content_buf: [4096]u8 = undefined;
     const file = dir.openFile(io, sub_path, .{}) catch |err| switch (err) {
         error.FileNotFound => return null,
@@ -197,11 +212,26 @@ fn readLockRecord(io: std.Io, dir: std.Io.Dir, sub_path: []const u8) LockFile.Ac
     const n = try file.readPositionalAll(io, &content_buf, 0);
     const text = std.mem.trim(u8, content_buf[0..n], "\n\r ");
 
-    const gpa = std.heap.page_allocator;
-    return std.json.parseFromSlice(LockRecord, gpa, text, .{
+    var parse_buf: [4096]u8 = undefined;
+    var parse_fba = std.heap.FixedBufferAllocator.init(&parse_buf);
+    var parsed = std.json.parseFromSlice(LockRecord, parse_fba.allocator(), text, .{
         .allocate = .alloc_always,
         .ignore_unknown_fields = true,
-    }) catch null;
+    }) catch return null;
+    defer parsed.deinit();
+
+    if (parsed.value.exe_path.len > std.fs.max_path_bytes) return null;
+    if (parsed.value.hostname.len > std.posix.HOST_NAME_MAX) return null;
+
+    var record: OwnedLockRecord = .{
+        .pid = parsed.value.pid,
+        .started_at = parsed.value.started_at,
+        .exe_path_len = parsed.value.exe_path.len,
+        .hostname_len = parsed.value.hostname.len,
+    };
+    @memcpy(record.exe_path_buf[0..record.exe_path_len], parsed.value.exe_path);
+    @memcpy(record.hostname_buf[0..record.hostname_len], parsed.value.hostname);
+    return record;
 }
 
 fn currentPid() OsPid {

@@ -354,7 +354,9 @@ pub const Recorder = struct {
         try all_causes.appendSlice(self.gpa, staging_val.causes);
         try all_causes.appendSlice(self.gpa, causes);
 
-        // Idempotency guard: if this turn is already committed, re-insert rows and exit.
+        // Fast-path idempotency optimization via the index cache. The authoritative
+        // deduplication guard remains commitFinalizedStep() returning .duplicate_turn.
+        // If the index is stale and misses a committed turn, CAS still resolves it.
         if (try self.store.index.queryStepHash(meta.origin, meta.session_id, turn_id)) |existing_hex| {
             for (msgs.items, 0..) |msg, i| {
                 try self.store.index.insertMessage(&existing_hex, @intCast(i), msg.role, msg.content);
