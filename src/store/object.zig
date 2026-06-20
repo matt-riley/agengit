@@ -115,10 +115,21 @@ pub fn read(io: std.Io, root: std.Io.Dir, gpa: std.mem.Allocator, h: Hash) ![]u8
     return root.readFileAlloc(io, obj_path, gpa, .unlimited);
 }
 
+fn jsonTopLevelTypeIs(data: []const u8, expected: []const u8) bool {
+    const gpa = std.heap.page_allocator;
+    var parsed = std.json.parseFromSlice(struct { type: ?[]const u8 = null }, gpa, data, .{
+        .allocate = .alloc_if_needed,
+        .ignore_unknown_fields = true,
+    }) catch return false;
+    defer parsed.deinit();
+    const t = parsed.value.type orelse return false;
+    return std.mem.eql(u8, t, expected);
+}
+
 pub fn detectKind(data: []const u8) []const u8 {
-    if (std.mem.indexOf(u8, data, "\"type\":\"tree\"") != null) return "tree";
-    if (std.mem.indexOf(u8, data, "\"type\":\"step\"") != null) return "step";
-    if (std.mem.indexOf(u8, data, "\"type\":\"blame\"") != null) return "blame";
+    if (std.mem.indexOf(u8, data, "\"type\":\"tree\"") != null and jsonTopLevelTypeIs(data, "tree")) return "tree";
+    if (std.mem.indexOf(u8, data, "\"type\":\"step\"") != null and jsonTopLevelTypeIs(data, "step")) return "step";
+    if (std.mem.indexOf(u8, data, "\"type\":\"blame\"") != null and jsonTopLevelTypeIs(data, "blame")) return "blame";
     return "blob";
 }
 
@@ -376,5 +387,12 @@ test "detectKind classifies structured and raw objects" {
     try std.testing.expectEqualStrings("tree", detectKind("{\"type\":\"tree\"}"));
     try std.testing.expectEqualStrings("step", detectKind("{\"type\":\"step\"}"));
     try std.testing.expectEqualStrings("blame", detectKind("{\"type\":\"blame\"}"));
+    try std.testing.expectEqualStrings("step", detectKind("{\"type\":\"step\",\"timestamp\":1}"));
+    try std.testing.expectEqualStrings("blame", detectKind("{\"type\":\"blame\",\"lines\":[]}"));
     try std.testing.expectEqualStrings("blob", detectKind("plain text"));
+}
+
+test "detectKind ignores literal type string inside a blob" {
+    const blob = "// hook payload contains \"type\":\"step\" for routing\nfunction record() {}";
+    try std.testing.expectEqualStrings("blob", detectKind(blob));
 }
