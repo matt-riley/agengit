@@ -22,7 +22,11 @@ Those files may already contain carefully arranged user settings. A recorder tha
 - fail loudly if that backup or the final config write fails;
 - refuse malformed or non-object existing JSON unless the user explicitly chooses the repair path;
 - write the absolute path to the current `agit` binary;
-- add `_agit` metadata so `doctor` and `uninstall` can recognize managed config;
+- add `_agit` metadata where the agent schema permits extra top-level keys so
+  `doctor` and `uninstall` can recognize managed config;
+- do not add `_agit` to Codex `hooks.json`, because Codex validates the file
+  against a strict top-level schema; identify managed Codex hooks by their
+  `agit codex-hook` command handlers instead;
 - preserve unrelated user-owned config keys;
 - be safe to run more than once;
 - emit each agent's native hook schema. In particular, Codex `hooks.json`
@@ -31,7 +35,7 @@ Those files may already contain carefully arranged user settings. A recorder tha
 `agit uninstall` must:
 
 - remove only hooks that match the recorded `agit` binary metadata;
-- remove `_agit` metadata when managed hooks are gone;
+- remove `_agit` metadata when managed hooks are gone, when that metadata exists;
 - preserve user-owned settings and hooks;
 - understand both the current Codex matcher-group shape and the older
   object-valued Codex/Gemini command shape;

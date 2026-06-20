@@ -37,10 +37,10 @@ pub fn run(
     defer gpa.free(exe);
     const crash_after_tmp_write = shouldCrashAfterTmpWrite(environ);
 
-    try uninstallAgent(io, gpa, home, exe, ".claude/settings.json", crash_after_tmp_write, &stdout, removeClaude);
-    try uninstallAgent(io, gpa, home, exe, ".codex/hooks.json", crash_after_tmp_write, &stdout, removeSimpleHooks);
-    try uninstallAgent(io, gpa, home, exe, ".gemini/settings.json", crash_after_tmp_write, &stdout, removeSimpleHooks);
-    try uninstallAgent(io, gpa, home, exe, ".copilot/hooks.json", crash_after_tmp_write, &stdout, removeSimpleHooks);
+    try uninstallAgent(io, gpa, home, exe, ".claude/settings.json", crash_after_tmp_write, &stdout, removeClaude, false);
+    try uninstallAgent(io, gpa, home, exe, ".codex/hooks.json", crash_after_tmp_write, &stdout, removeSimpleHooks, true);
+    try uninstallAgent(io, gpa, home, exe, ".gemini/settings.json", crash_after_tmp_write, &stdout, removeSimpleHooks, false);
+    try uninstallAgent(io, gpa, home, exe, ".copilot/hooks.json", crash_after_tmp_write, &stdout, removeSimpleHooks, false);
     try uninstallJsExtension(io, gpa, home, ".copilot/extensions/agit-recorder/extension.mjs", &stdout);
     try uninstallJsExtension(io, gpa, home, ".pi/agent/extensions/agit-recorder.js", &stdout);
 
@@ -95,6 +95,7 @@ fn uninstallAgent(
     crash_after_tmp_write: bool,
     stdout: *std.Io.File.Writer,
     removeFn: RemoveFn,
+    allow_current_binary_without_meta: bool,
 ) !void {
     const config_path = try std.mem.concat(gpa, u8, &.{ home, "/", rel_config });
     defer gpa.free(config_path);
@@ -122,14 +123,15 @@ fn uninstallAgent(
 
     // Identify the stored binary that was installed.
     const stored_binary: []const u8 = blk: {
-        const agit = root.get("_agit") orelse return; // not agit-managed
+        const agit = root.get("_agit") orelse {
+            if (allow_current_binary_without_meta) break :blk exe;
+            return; // not agit-managed
+        };
         if (agit != .object) return;
         const bin = agit.object.get("binary") orelse return;
         if (bin != .string) return;
         break :blk bin.string;
     };
-    _ = exe; // use stored binary for matching; exe may differ if binary moved
-
     const changed = try removeFn(aa, &root, stored_binary);
     _ = root.swapRemove("_agit");
 
