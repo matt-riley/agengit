@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.22.3](https://github.com/matt-riley/agengit/compare/v1.22.2...v1.22.3) (2026-06-20)
+
+
+### Bug Fixes
+
+* correct store diagnostics ([8a2e8c7](https://github.com/matt-riley/agengit/commit/8a2e8c7b14956c830efb9ce55d3b420368729903))
+* something? ([dc0d2d0](https://github.com/matt-riley/agengit/commit/dc0d2d0390e92478b45334d757de80ba8de17ecf))
+
 ## [1.22.2](https://github.com/matt-riley/agengit/compare/v1.22.1...v1.22.2) (2026-06-20)
 
 
