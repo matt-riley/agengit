@@ -491,10 +491,7 @@ fn setCodexHooks(aa: std.mem.Allocator, root: *std.json.ObjectMap, exe: []const 
     }
 
     try root.put(aa, "hooks", std.json.Value{ .object = hooks_obj });
-
-    var agit_meta = std.json.ObjectMap.empty;
-    try agit_meta.put(aa, "binary", std.json.Value{ .string = exe });
-    try root.put(aa, "_agit", std.json.Value{ .object = agit_meta });
+    _ = root.swapRemove("_agit");
 }
 
 fn makeCodexList(aa: std.mem.Allocator, exe: []const u8, subcmd: []const u8) !std.json.Value {
@@ -634,7 +631,7 @@ test "setCodexHooks installs all managed events on empty root" {
     try std.testing.expect(handler == .object);
     try std.testing.expectEqualStrings("command", handler.object.get("type").?.string);
     try std.testing.expectEqualStrings("/bin/agit codex-hook", handler.object.get("command").?.string);
-    try std.testing.expectEqualStrings("/bin/agit", root.get("_agit").?.object.get("binary").?.string);
+    try std.testing.expect(root.get("_agit") == null);
 }
 
 test "setCodexHooks preserves user hooks on other event names" {
@@ -656,6 +653,23 @@ test "setCodexHooks preserves user hooks on other event names" {
     const hooks = root.get("hooks").?.object;
     try std.testing.expect(hooks.get("UserPromptSubmit") != null);
     try std.testing.expect(hooks.get("SessionStart") != null);
+}
+
+test "setCodexHooks removes legacy agit metadata" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const aa = arena.allocator();
+
+    var meta = std.json.ObjectMap.empty;
+    try meta.put(aa, "binary", std.json.Value{ .string = "/old/agit" });
+    var root = std.json.ObjectMap.empty;
+    try root.put(aa, "_agit", std.json.Value{ .object = meta });
+
+    try setCodexHooks(aa, &root, "/bin/agit");
+
+    try std.testing.expect(root.get("_agit") == null);
+    try std.testing.expect(root.get("hooks") != null);
 }
 
 test "setGeminiHooks installs all managed events on empty root" {

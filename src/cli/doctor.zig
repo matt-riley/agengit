@@ -771,6 +771,24 @@ fn collectAgentCheck(
         };
     }
 
+    if (std.mem.eql(u8, agent_name, "codex")) {
+        if (hasCodexHooksForBinary(root_val.object, exe)) {
+            return .{
+                .code = "agent_hooks_configured",
+                .status = .ok,
+                .message = try std.fmt.allocPrint(aa, "{s} hooks configured for the current agit binary.", .{agent_name}),
+                .path = try aa.dupe(u8, config_path),
+            };
+        }
+        return .{
+            .code = "agent_binary_mismatch",
+            .status = .@"error",
+            .message = try std.fmt.allocPrint(aa, "{s} hooks are missing or point at a different agit binary.", .{agent_name}),
+            .hint = try std.fmt.allocPrint(aa, "current={s}", .{exe}),
+            .path = try aa.dupe(u8, config_path),
+        };
+    }
+
     const agit = root_val.object.get("_agit");
     if (agit == null or agit.? != .object) {
         return .{
@@ -955,6 +973,18 @@ fn checkAgent(
         return false;
     }
 
+    if (std.mem.eql(u8, agent_name, "codex")) {
+        if (hasCodexHooksForBinary(root_val.object, exe)) {
+            try stdout.interface.print("  ✓ {s}: hooks configured (binary matches)\n", .{agent_name});
+            return true;
+        }
+        try stdout.interface.print(
+            "  ✗ {s}: hooks missing or binary mismatch (current is {s})\n",
+            .{ agent_name, exe },
+        );
+        return false;
+    }
+
     const agit = root_val.object.get("_agit");
     if (agit == null or agit.? != .object) {
         try stdout.interface.print("  ✗ {s}: agit not initialized (no _agit metadata)\n", .{agent_name});
@@ -978,6 +1008,41 @@ fn checkAgent(
         );
         return false;
     }
+}
+
+fn hasCodexHooksForBinary(root: std.json.ObjectMap, exe: []const u8) bool {
+    return hasCodexEventForBinary(root, "UserPromptSubmit", exe) and
+        hasCodexEventForBinary(root, "PostToolUse", exe) and
+        hasCodexEventForBinary(root, "Stop", exe);
+}
+
+fn hasCodexEventForBinary(root: std.json.ObjectMap, event_name: []const u8, exe: []const u8) bool {
+    const hooks_val = root.get("hooks") orelse return false;
+    if (hooks_val != .object) return false;
+    const event_val = hooks_val.object.get(event_name) orelse return false;
+    if (event_val != .array) return false;
+
+    for (event_val.array.items) |group| {
+        if (group != .object) continue;
+        const handlers_val = group.object.get("hooks") orelse continue;
+        if (handlers_val != .array) continue;
+        for (handlers_val.array.items) |handler| {
+            if (handler != .object) continue;
+            const typ = handler.object.get("type") orelse continue;
+            if (typ != .string or !std.mem.eql(u8, typ.string, "command")) continue;
+            const command = handler.object.get("command") orelse continue;
+            if (command != .string) continue;
+            if (isCodexCommandForBinary(command.string, exe)) return true;
+        }
+    }
+    return false;
+}
+
+fn isCodexCommandForBinary(command: []const u8, exe: []const u8) bool {
+    const suffix = " codex-hook";
+    return command.len == exe.len + suffix.len and
+        std.mem.startsWith(u8, command, exe) and
+        std.mem.eql(u8, command[exe.len..], suffix);
 }
 
 fn checkJsExtensionAgent(

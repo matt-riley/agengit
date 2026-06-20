@@ -33,6 +33,7 @@ test "init/fresh" {
     try expectContains(claude, "\"Stop\"");
     try expectContains(codex, "\"PostToolUse\"");
     try expectContains(codex, "\"Stop\"");
+    try expectDoesNotContain(codex, "\"_agit\"");
     try expectCodexEventShape(codex, "UserPromptSubmit");
     try expectCodexEventShape(codex, "PostToolUse");
     try expectCodexEventShape(codex, "Stop");
@@ -53,6 +54,10 @@ fn readHomeConfig(sandbox: *harness.Sandbox, rel_path: []const u8) ![]u8 {
 
 fn expectContains(haystack: []const u8, needle: []const u8) !void {
     try std.testing.expect(std.mem.indexOf(u8, haystack, needle) != null);
+}
+
+fn expectDoesNotContain(haystack: []const u8, needle: []const u8) !void {
+    try std.testing.expect(std.mem.indexOf(u8, haystack, needle) == null);
 }
 
 fn expectCodexEventShape(config: []const u8, event_name: []const u8) !void {
