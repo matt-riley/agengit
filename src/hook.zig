@@ -169,6 +169,16 @@ fn logError(io: std.Io, context: []const u8, msg: []const u8) void {
     w.flush() catch {};
 }
 
+fn openResolvedWorkspaceDir(
+    io: std.Io,
+    gpa: std.mem.Allocator,
+    workspace_cwd: []const u8,
+) ?std.Io.Dir {
+    const resolved = std.fs.path.resolve(gpa, &.{ ".", workspace_cwd }) catch return null;
+    defer gpa.free(resolved);
+    return std.Io.Dir.cwd().openDir(io, resolved, .{}) catch null;
+}
+
 /// Best-effort structured hook failure logging.
 ///
 /// Writes a durable JSONL entry into `.agit/log/hook-error.log` when the current
@@ -201,7 +211,7 @@ pub fn reportFailure(io: std.Io, gpa: std.mem.Allocator, ctx: FailureContext) vo
     } else null;
 
     if (ctx.workspace_cwd) |workspace_cwd| {
-        const dir = std.Io.Dir.cwd().openDir(io, workspace_cwd, .{}) catch {
+        const dir = openResolvedWorkspaceDir(io, gpa, workspace_cwd) orelse {
             recorder_mod.logHookFailureFromCwd(io, gpa, ctx.agent, ctx.err, .{
                 .agent = ctx.agent,
                 .code = ctx.diagnostic.code,
@@ -439,4 +449,36 @@ test "requireEvent reports unknown event names" {
     var diagnostic: Diagnostic = .{};
     try std.testing.expectError(error.UnknownEventName, requireEvent("Mystery", "Known", &diagnostic));
     try std.testing.expectEqualStrings("unknown_event_name", diagnostic.code);
+}
+
+test "openResolvedWorkspaceDir normalizes parent segments" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.createDirPath(io, "sub");
+
+    var tmp_path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const tmp_len = try tmp.dir.realPath(io, &tmp_path_buf);
+    const tmp_path = tmp_path_buf[0..tmp_len];
+
+    const workspace_cwd = try std.fmt.allocPrint(gpa, "{s}/sub/..", .{tmp_path});
+    defer gpa.free(workspace_cwd);
+
+    const dir_opt = openResolvedWorkspaceDir(io, gpa, workspace_cwd);
+    try std.testing.expect(dir_opt != null);
+    var dir = dir_opt.?;
+    defer dir.close(io);
+
+    var dir_path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir_len = try dir.realPath(io, &dir_path_buf);
+    const dir_path = dir_path_buf[0..dir_len];
+    try std.testing.expectEqualStrings(tmp_path, dir_path);
+}
+
+test "openResolvedWorkspaceDir returns null for invalid cwd" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    try std.testing.expect(openResolvedWorkspaceDir(io, gpa, "\x00bad") == null);
 }
