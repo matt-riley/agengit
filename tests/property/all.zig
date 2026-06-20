@@ -277,7 +277,10 @@ fn captureMeta(gpa: std.mem.Allocator, store: *store_mod.Store) ![]u8 {
     var aw: std.Io.Writer.Allocating = .init(gpa);
     defer aw.deinit();
 
-    var rows = try store.index.db.rows("select key, value from meta order by key", .{});
+    var rows = try store.index.db.rows(
+        "select key, value from meta where key not like 'metrics.%' order by key",
+        .{},
+    );
     defer rows.deinit();
     while (rows.next()) |row| {
         try aw.writer.print("{s}\t{s}\n", .{
