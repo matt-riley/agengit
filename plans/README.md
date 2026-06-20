@@ -18,11 +18,17 @@ honor its STOP conditions, and update your row when done.
 | 008 | Add pi extension init to e2e test coverage | P2 | S | — | done |
 | 009 | De-duplicate js_extension_marker across modules | P2 | S | — | done |
 | 010 | Auto-detect stale pi extension binary path on init | P3 | S | — | done |
+| 011 | Add CAS round-trip unit tests to the store layer | P2 | M | — | done |
+| 012 | Add unit tests for CLI investigation command helpers | P2 | M | — | done |
+| 013 | Reject absolute paths in hook payload workspace cwd | P1 | S | — | done |
+| 014 | Add e2e test coverage for grep and recall commands | P2 | M | — | REJECTED (e2e coverage already exists at `tests/e2e/grep/search.zig` and `tests/e2e/recall/path_recall.zig` |
 
 ## Dependency notes
 
-- Plans 006–010 are independent of one another.
-- Plan 006 is the lowest-effort, highest-visibility improvement.
+- Plans 001–010 are independent and were completed in a prior session.
+- Plans 011–013 are independent of one another and of the prior batch.
+- Plan 013 (security fix) was highest priority and executed first.
+- Plan 014 was rejected after discovery that e2e tests already exist.
 
 ## Findings considered and rejected
 
@@ -32,3 +38,4 @@ honor its STOP conditions, and update your row when done.
 - **Recall FTS index missing**: FTS5 index (`search_entries`) already exists via migration 6 and is used by both `agit grep` and `agit recall`.
 - **Privacy scan dedup by rule name**: Each `appendTextFindings` call creates a fresh HashMap; findings from different sources are counted independently. Not a bug.
 - **Backup overwrite on --force re-runs**: The `.agit.bak` backup is a convenience; users can recover configs via git.
+- **CLI `catch {}` swallowing BrokenPipe on stdout diagnostics**: The `catch {}` pattern in diagnostic paths is intentional — it prevents a stack trace when the user pipes output to `head` or another early-terminating consumer. Replacing it with stderr fallbacks improves UX marginally but adds complexity and is not worth the plan overhead.
