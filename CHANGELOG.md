@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.22.0](https://github.com/matt-riley/agengit/compare/v1.21.5...v1.22.0) (2026-06-20)
+
+
+### Features
+
+* execute plans 006 007 009 and 010 ([98ea006](https://github.com/matt-riley/agengit/commit/98ea00620bd5efdb8d4f5eeae1bfbd6bbb59d159))
+
+
+### Bug Fixes
+
+* close file handles correctly in watch e2e test ([b2d0213](https://github.com/matt-riley/agengit/commit/b2d0213bb92d6534a649fdee57b0e1c6e4f5c412))
+* emit valid Codex hooks config ([07fffa1](https://github.com/matt-riley/agengit/commit/07fffa15f4063ecaa348ba5b72fc21d820f8c7a9))
+* failing test ([989ce06](https://github.com/matt-riley/agengit/commit/989ce0697aef8d10cc79a00954e13a08815b3237))
+* replace brittle substring-based object kind detection ([2992a14](https://github.com/matt-riley/agengit/commit/2992a1415639d6dcf63398994c2bf91b4de76b87))
+* stop silently overwriting blame when prior state is unavailable ([d92ea40](https://github.com/matt-riley/agengit/commit/d92ea409f621c6dee45b3d0c8eae04bd8fde9dbf))
+* sync reindex with blame timestamp counter and clear stale meta ([cea6ee8](https://github.com/matt-riley/agengit/commit/cea6ee8b0c4b09cdd7f72c7856e2cfa2204c522b))
+* validate and normalize hook failure workspace path ([b1fd786](https://github.com/matt-riley/agengit/commit/b1fd786eeca8f5df68c8b5961e25966849247590))
+
 ## [1.21.5](https://github.com/matt-riley/agengit/compare/v1.21.4...v1.21.5) (2026-06-18)
 
 
