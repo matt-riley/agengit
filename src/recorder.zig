@@ -15,41 +15,23 @@ pub const Cause = object.Cause;
 pub const StepMessage = object.StepMessage;
 pub const StepToolCall = object.StepToolCall;
 
-pub const HookFailureDetails = struct {
-    agent: ?[]const u8 = null,
-    code: []const u8 = "hook_error",
-    message: []const u8 = "hook failed",
-    session_id: ?[]const u8 = null,
-    event_name: ?[]const u8 = null,
-    field: ?[]const u8 = null,
-    payload_bytes: ?usize = null,
-    payload_snippet: ?[]const u8 = null,
-    parse_path: ?[]const u8 = null,
-    parse_offset: ?usize = null,
-    parse_line: ?usize = null,
-    parse_column: ?usize = null,
-    max_payload_bytes: ?usize = null,
-    staging_key: ?[]const u8 = null,
-    quarantine_path: ?[]const u8 = null,
-};
-
-const HookFailureLogEntry = struct {
-    ts: i64,
+pub const HookFailureLogEntry = struct {
+    ts: i64 = 0,
     level: []const u8 = "error",
-    agent: []const u8,
-    context: []const u8,
+    agent: ?[]const u8 = null,
+    context: []const u8 = "",
     event: ?[]const u8 = null,
     session_id: ?[]const u8 = null,
-    error_kind: []const u8,
-    error_msg: []const u8,
+    error_kind: []const u8 = "unknown",
+    error_msg: []const u8 = "",
     payload_size: ?usize = null,
     payload_snippet: ?[]const u8 = null,
     parse_path: ?[]const u8 = null,
     parse_offset: ?usize = null,
     parse_line: ?usize = null,
     parse_column: ?usize = null,
-    code: []const u8,
-    message: []const u8,
+    code: []const u8 = "hook_error",
+    message: []const u8 = "hook failed",
     event_name: ?[]const u8 = null,
     field: ?[]const u8 = null,
     payload_bytes: ?usize = null,
@@ -57,6 +39,8 @@ const HookFailureLogEntry = struct {
     staging_key: ?[]const u8 = null,
     quarantine_path: ?[]const u8 = null,
 };
+
+pub const HookFailureDetails = HookFailureLogEntry;
 
 pub fn logHookFailureFromCwd(
     io: std.Io,
@@ -521,36 +505,20 @@ pub const Recorder = struct {
         err: anyerror,
         details: HookFailureDetails,
     ) void {
+        var entry = details;
+        entry.ts = std.Io.Timestamp.now(io, .real).toMilliseconds();
+        entry.level = "error";
+        entry.agent = details.agent orelse context;
+        entry.context = context;
+        entry.error_kind = @as([]const u8, @errorName(err));
+        entry.event = details.event_name;
+        entry.error_msg = details.message;
+        entry.payload_size = details.payload_bytes;
+
         var aw: std.Io.Writer.Allocating = .init(self.gpa);
         defer aw.deinit();
 
-        std.json.Stringify.value(
-            HookFailureLogEntry{
-                .ts = std.Io.Timestamp.now(io, .real).toMilliseconds(),
-                .agent = details.agent orelse context,
-                .context = context,
-                .event = details.event_name,
-                .session_id = details.session_id,
-                .error_kind = @as([]const u8, @errorName(err)),
-                .error_msg = details.message,
-                .payload_size = details.payload_bytes,
-                .payload_snippet = details.payload_snippet,
-                .parse_path = details.parse_path,
-                .parse_offset = details.parse_offset,
-                .parse_line = details.parse_line,
-                .parse_column = details.parse_column,
-                .code = details.code,
-                .message = details.message,
-                .event_name = details.event_name,
-                .field = details.field,
-                .payload_bytes = details.payload_bytes,
-                .max_payload_bytes = details.max_payload_bytes,
-                .staging_key = details.staging_key,
-                .quarantine_path = details.quarantine_path,
-            },
-            .{},
-            &aw.writer,
-        ) catch return;
+        std.json.Stringify.value(entry, .{}, &aw.writer) catch return;
         const entry_json = aw.writer.buffered();
 
         self.appendHookLog(io, entry_json) catch return;

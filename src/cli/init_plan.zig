@@ -272,10 +272,7 @@ test "isValidId recognizes all agents" {
 
 test "Builder.selectAgent validates agent names" {
     const gpa = std.testing.allocator;
-    var env_map = std.process.EnvMap.init(gpa);
-    defer env_map.deinit();
-    const environ = try std.process.Environ.init(gpa, &env_map);
-    defer environ.deinit(gpa);
+    const environ = std.process.Environ.empty;
 
     var builder = Builder.init(gpa, undefined, environ, "/tmp", "/bin/agit", false, false);
     defer builder.deinit();
