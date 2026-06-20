@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.22.1](https://github.com/matt-riley/agengit/compare/v1.22.0...v1.22.1) (2026-06-20)
+
+
+### Bug Fixes
+
+* reject absolute cwd in hook payload ([2bbaf68](https://github.com/matt-riley/agengit/commit/2bbaf6883501f82a1ae791999620b8633c3420bf))
+
 ## [1.22.0](https://github.com/matt-riley/agengit/compare/v1.21.5...v1.22.0) (2026-06-20)
 
 
