@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.22.2](https://github.com/matt-riley/agengit/compare/v1.22.1...v1.22.2) (2026-06-20)
+
+
+### Bug Fixes
+
+* resolve issues [#67](https://github.com/matt-riley/agengit/issues/67)-[#70](https://github.com/matt-riley/agengit/issues/70) ([f1ba783](https://github.com/matt-riley/agengit/commit/f1ba7837f18632b10f7f229e1bbc07cf44a14025))
+
 ## [1.22.1](https://github.com/matt-riley/agengit/compare/v1.22.0...v1.22.1) (2026-06-20)
 
 
