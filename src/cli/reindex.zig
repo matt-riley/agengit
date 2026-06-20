@@ -183,6 +183,12 @@ fn rebuildBlame(io: std.Io, gpa: std.mem.Allocator, store: *store_mod.Store) !vo
         };
     }
 
+    if (try store.index.maxStepTimestamp()) |max_ts| {
+        try store.advanceBlameTimestamp(max_ts);
+    } else {
+        try store.index.metaDelete(store_mod.blame_last_timestamp_key);
+    }
+
     // Clear the dirty flag only if the entire chain rebuilt cleanly; otherwise
     // leave it set so finalize stays conservative and a later reindex retries.
     if (!any_failed) try store.setBlameNeedsReindex(false);
@@ -641,4 +647,35 @@ test "reindex rebuilds packed object metadata from packfiles" {
     const pack_files = try pack_mod.listPackFiles(io, store.root, gpa);
     defer pack_mod.freePackFiles(gpa, pack_files);
     try std.testing.expect(pack_files.len > 0);
+}
+
+test "reindex advances blame timestamp counter" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+
+    var store = try store_mod.Store.open(io, tmp.dir, gpa);
+    defer store.deinit(io);
+
+    const tree = store_mod.Tree{ .entries = &.{} };
+    const tree_hash = try store.writeTree(io, gpa, tree);
+
+    _ = try store.commitFinalizedStep(io, gpa, .{
+        .origin = "github.com/u/r",
+        .session_id = "ts-session",
+        .turn_id = "t1",
+        .tree_hash = &tree_hash.toHex(),
+        .timestamp = 5000,
+        .causes = &.{},
+        .messages = &.{},
+        .tool_calls = &.{},
+        .expected_parent = null,
+    });
+
+    try store.index.truncate();
+    _ = try reindex(io, gpa, &store);
+
+    const next_ts = try store.monotonicTimestamp(1000);
+    try std.testing.expectEqual(@as(i64, 5001), next_ts);
 }
