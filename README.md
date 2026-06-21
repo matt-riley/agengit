@@ -297,7 +297,7 @@ agit recall --path src/main.zig
 **Notes:** Recall is agent-initiated pull memory. Pass a query, a --path filter, or both.
 
 ### `agit grep`
-Search recorded messages and tool activity across all sessions.
+Search recorded messages, tool activity, and captured file content across all sessions.
 
 **Synopsis:** `agit grep [OPTIONS] <QUERY>`
 

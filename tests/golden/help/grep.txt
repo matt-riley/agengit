@@ -2,7 +2,7 @@ USAGE:
     agit grep [OPTIONS] <QUERY>
 
 DESCRIPTION:
-    Search recorded messages and tool activity across all sessions.
+    Search recorded messages, tool activity, and captured file content across all sessions.
 
 OPTIONS:
     --json
@@ -23,6 +23,8 @@ OPTIONS:
         Redact obvious secrets in rendered snippets.
     --full
         Render full snippets even when redaction is the repo default.
+    --content
+        Search captured workspace file content instead of agent messages and tool activity.
     -h, --help
         Display this help and exit.
 
@@ -33,4 +35,6 @@ EXAMPLES:
     agit grep --origin claude --since 2026-05-01 --until 2026-05-31 factorial
     # search a specific session
     agit grep --session claude/session-abc123 token
+    # search captured file content for a term
+    agit grep --content factorial
 

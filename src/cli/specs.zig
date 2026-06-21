@@ -349,7 +349,7 @@ pub const recall_usage = help_mod.UsageSpec{
 pub const grep_usage = help_mod.UsageSpec{
     .name = "grep",
     .synopsis = "[OPTIONS] <QUERY>",
-    .description = "Search recorded messages and tool activity across all sessions.",
+    .description = "Search recorded messages, tool activity, and captured file content across all sessions.",
     .options = &.{
         .{ .long = "json", .description = "Render grep matches as structured JSON." },
         .{ .long = "origin", .value_name = "name", .description = "Only search matches recorded by the given origin." },
@@ -360,12 +360,14 @@ pub const grep_usage = help_mod.UsageSpec{
         .{ .long = "context", .value_name = "N", .description = "Use <N> snippet tokens around each match. Defaults to 12." },
         .{ .long = "redacted", .description = "Redact obvious secrets in rendered snippets." },
         .{ .long = "full", .description = "Render full snippets even when redaction is the repo default." },
+        .{ .long = "content", .description = "Search captured workspace file content instead of agent messages and tool activity." },
         .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
     },
     .examples = &.{
         .{ .description = "search all recorded sessions for a term", .command = "factorial" },
         .{ .description = "filter matches to one origin and date range", .command = "--origin claude --since 2026-05-01 --until 2026-05-31 factorial" },
         .{ .description = "search a specific session", .command = "--session claude/session-abc123 token" },
+        .{ .description = "search captured file content for a term", .command = "--content factorial" },
     },
 };
 
@@ -515,7 +517,7 @@ pub const public_commands = [_]help_mod.CommandSpec{
     .{ .name = "diff", .summary = "Show captured file diffs", .usage = &diff_usage },
     .{ .name = "between", .summary = "Show steps recorded between Git revisions", .usage = &between_usage },
     .{ .name = "recall", .summary = "Retrieve prior recorded steps", .usage = &recall_usage },
-    .{ .name = "grep", .summary = "Search recorded messages and tool activity", .usage = &grep_usage },
+    .{ .name = "grep", .summary = "Search recorded messages, tool activity, and captured file content", .usage = &grep_usage },
     .{ .name = "blame", .summary = "Show per-line step attribution for a file", .usage = &blame_usage },
     .{ .name = "watch", .summary = "Follow newly recorded steps", .usage = &watch_usage },
     .{ .name = "stats", .summary = "Summarize recorded activity", .usage = &stats_usage },
