@@ -174,6 +174,23 @@ fn buildFileTally(
     const steps = try store.index.listStatsSteps(gpa, options, file_tally_step_cap);
     defer store_mod.freeStepRows(gpa, steps);
 
+    // Build a step hash → tree_hash lookup map for O(1) parent tree hash access.
+    var step_tree_hashes = std.StringHashMap([]const u8).init(gpa);
+    defer step_tree_hashes.deinit();
+    for (steps) |step| {
+        try step_tree_hashes.putNoClobber(step.hash, step.tree_hash);
+    }
+
+    // Cache parsed trees by hash to avoid re-reading the same tree multiple times.
+    var tree_cache = std.StringHashMap(std.json.Parsed(store_mod.Tree)).init(gpa);
+    defer {
+        var cache_it = tree_cache.valueIterator();
+        while (cache_it.next()) |parsed_tree| {
+            parsed_tree.deinit();
+        }
+        tree_cache.deinit();
+    }
+
     var counts = std.StringHashMap(usize).init(gpa);
     defer {
         var it = counts.keyIterator();
@@ -182,22 +199,25 @@ fn buildFileTally(
     }
 
     for (steps) |step| {
-        var current_tree = try readTreeOrExit(io, gpa, store, step.tree_hash);
-        defer current_tree.deinit();
-
-        var parent_step: ?std.json.Parsed(store_mod.Step) = null;
-        defer if (parent_step) |*parsed| parsed.deinit();
-        var parent_tree: ?std.json.Parsed(store_mod.Tree) = null;
-        defer if (parent_tree) |*parsed| parsed.deinit();
+        const current_tree = try getOrReadTree(io, gpa, store, &tree_cache, step.tree_hash);
 
         const old_entries: []const store_mod.TreeEntry = if (step.parent_hash) |parent_hash_hex| blk: {
-            const parent_hash = try store_mod.Hash.fromHex(parent_hash_hex);
-            parent_step = try store.readStep(io, gpa, parent_hash);
-            parent_tree = try readTreeOrExit(io, gpa, store, parent_step.?.value.tree);
-            break :blk parent_tree.?.value.entries;
+            // Try to find parent's tree_hash directly from the steps list.
+            if (step_tree_hashes.get(parent_hash_hex)) |parent_tree_hash| {
+                // Parent is in the steps window; use cached tree directly.
+                const parent_tree = try getOrReadTree(io, gpa, store, &tree_cache, parent_tree_hash);
+                break :blk parent_tree.entries;
+            } else {
+                // Parent falls outside the steps window; read the parent Step object.
+                const parent_hash = try store_mod.Hash.fromHex(parent_hash_hex);
+                const parent_step_parsed = try store.readStep(io, gpa, parent_hash);
+                defer parent_step_parsed.deinit();
+                const parent_tree = try getOrReadTree(io, gpa, store, &tree_cache, parent_step_parsed.value.tree);
+                break :blk parent_tree.entries;
+            }
         } else &.{};
 
-        var comparison = try inspect_mod.compareTreeEntries(gpa, old_entries, current_tree.value.entries);
+        var comparison = try inspect_mod.compareTreeEntries(gpa, old_entries, current_tree.entries);
         defer comparison.deinit(gpa);
         for (comparison.entries) |entry| {
             if (entry.kind == .unchanged) continue;
@@ -247,6 +267,24 @@ fn readTreeOrExit(
 ) !std.json.Parsed(store_mod.Tree) {
     const tree_hash = try store_mod.Hash.fromHex(tree_hash_hex);
     return store.readTree(io, gpa, tree_hash);
+}
+
+fn getOrReadTree(
+    io: std.Io,
+    gpa: std.mem.Allocator,
+    store: *store_mod.Store,
+    tree_cache: *std.StringHashMap(std.json.Parsed(store_mod.Tree)),
+    tree_hash_hex: []const u8,
+) !*const store_mod.Tree {
+    // Check if already cached.
+    if (tree_cache.getPtr(tree_hash_hex)) |parsed| {
+        return &parsed.value;
+    }
+
+    // Read from store and cache.
+    const parsed_tree = try readTreeOrExit(io, gpa, store, tree_hash_hex);
+    try tree_cache.putNoClobber(tree_hash_hex, parsed_tree);
+    return &tree_cache.getPtr(tree_hash_hex).?.value;
 }
 
 fn parseOptions(iter: *std.process.Args.Iterator, stdout: *std.Io.File.Writer) !StatsOptions {
