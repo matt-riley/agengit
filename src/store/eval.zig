@@ -649,7 +649,7 @@ test "makeStep builds a SessionStep with allocated messages and tool_calls" {
     try std.testing.expect(step.step.tool_calls[0].result != null);
 }
 
-test "scoreGoalClarity thresholds: bad/mixed/good at 25 and 55" {
+test "scoreGoalClarity thresholds: bad/mixed(30)/good(60) with 15/20 per-signal steps" {
     const gpa = std.testing.allocator;
     {
         const signals = CollectedSignals{ .counts = .{ .concrete_terms = 0, .success_criteria_phrases = 0 } };
@@ -669,7 +669,15 @@ test "scoreGoalClarity thresholds: bad/mixed/good at 25 and 55" {
         try std.testing.expect(report.reasons.len > 0);
     }
     {
-        // 4*15 = 60 -> at/above 55 good band.
+        // 1*15 + 2*20 = 55 -> exactly at the good band threshold (>= 55).
+        const signals = CollectedSignals{ .counts = .{ .concrete_terms = 1, .success_criteria_phrases = 2 } };
+        const report = try scoreGoalClarity(gpa, signals);
+        defer freeDimension(gpa, report);
+        try std.testing.expectEqualStrings("good", report.rating);
+        try std.testing.expectEqual(@as(i64, 55), report.score);
+        try std.testing.expect(report.reasons.len > 0);
+    }
+    {
         const signals = CollectedSignals{ .counts = .{ .concrete_terms = 4, .success_criteria_phrases = 0 } };
         const report = try scoreGoalClarity(gpa, signals);
         defer freeDimension(gpa, report);
@@ -679,7 +687,7 @@ test "scoreGoalClarity thresholds: bad/mixed/good at 25 and 55" {
     }
 }
 
-test "scoreExecutionFocus thresholds: unknown/good/mixed at 50 percent" {
+test "scoreExecutionFocus thresholds: unknown/good(50)/mixed(30)" {
     const gpa = std.testing.allocator;
     {
         const signals = CollectedSignals{ .counts = .{ .tool_calls = 0 } };
@@ -690,7 +698,15 @@ test "scoreExecutionFocus thresholds: unknown/good/mixed at 50 percent" {
         try std.testing.expect(report.reasons.len > 0);
     }
     {
-        // 6/10 = 60 -> good.
+        // 5/10 = 50 -> exactly at the good band threshold (>= 50).
+        const signals = CollectedSignals{ .counts = .{ .tool_calls = 10, .related_tool_calls = 5 } };
+        const report = try scoreExecutionFocus(gpa, signals);
+        defer freeDimension(gpa, report);
+        try std.testing.expectEqualStrings("good", report.rating);
+        try std.testing.expectEqual(@as(i64, 50), report.score);
+        try std.testing.expect(report.reasons.len > 0);
+    }
+    {
         const signals = CollectedSignals{ .counts = .{ .tool_calls = 10, .related_tool_calls = 6 } };
         const report = try scoreExecutionFocus(gpa, signals);
         defer freeDimension(gpa, report);
@@ -831,6 +847,8 @@ test "evaluateSession composes six dimensions and classifies the session" {
     const gpa = std.testing.allocator;
     const steps = try gpa.alloc(SessionStep, 2);
     errdefer gpa.free(steps);
+    var created: usize = 0;
+    errdefer for (steps[0..created]) |*step| freeStep(gpa, step.*);
     steps[0] = try makeStep(
         gpa,
         "h1",
@@ -841,6 +859,7 @@ test "evaluateSession composes six dimensions and classifies the session" {
             .{ .name = "bash", .args = "sed test", .result = "error: not found" },
         },
     );
+    created += 1;
     steps[1] = try makeStep(
         gpa,
         "h2",
