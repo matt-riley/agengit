@@ -17,6 +17,8 @@ OPTIONS:
         Only return steps with outcome success, failure, or unknown.
     --limit <N>
         Return at most <N> recall matches. Defaults to 20.
+    --judged <kind>
+        Only return steps from sessions whose latest eval classification is good, bad, or mixed.
     --redacted
         Redact obvious secrets in rendered previews.
     --full
@@ -31,6 +33,8 @@ EXAMPLES:
     agit recall --path src/main.zig --outcome failure
     # search for prior token-related work in one session
     agit recall --session codex/session-abc123 token
+    # show only sessions with good evaluations
+    agit recall --judged good
 
 NOTES:
     Recall is agent-initiated pull memory. Pass a query, a --path filter, or both.
