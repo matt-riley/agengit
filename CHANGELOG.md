@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.24.0](https://github.com/matt-riley/agengit/compare/v1.23.0...v1.24.0) (2026-06-21)
+
+
+### Features
+
+* add blob-body content search to grep ([#86](https://github.com/matt-riley/agengit/issues/86)) ([a5e4377](https://github.com/matt-riley/agengit/commit/a5e43777c80185bbe721740ec11abe3d7b160779))
+* add experimental jsonl observer source ([#79](https://github.com/matt-riley/agengit/issues/79)) ([9c431f3](https://github.com/matt-riley/agengit/commit/9c431f31eefc2cb1a8a1354fc1fe801dbf9e19cc))
+* persist session evaluation reports as eval objects ([#84](https://github.com/matt-riley/agengit/issues/84)) ([9e30a37](https://github.com/matt-riley/agengit/commit/9e30a37ce4a53e0fa1290217b8b1a20d14bbcb8e))
+
+
+### Bug Fixes
+
+* harden recording-path cwd with .agit/ ancestry check ([#87](https://github.com/matt-riley/agengit/issues/87)) ([5eeb60d](https://github.com/matt-riley/agengit/commit/5eeb60d54f7f4ecc9f6d57b232125a2fd498b0d9))
+* isolate openWorkspaceDir fallback tests from repo's own .agit ancestor ([9a97bc2](https://github.com/matt-riley/agengit/commit/9a97bc2757315d12db718297286f86781757d705))
+* keep e2e hook fixtures inside test package ([f70ff13](https://github.com/matt-riley/agengit/commit/f70ff13ae2eed07f6dc01f1675a1134b604be043))
+
+
+### Performance Improvements
+
+* append-only staging file for recorder turns ([#76](https://github.com/matt-riley/agengit/issues/76)) ([4308779](https://github.com/matt-riley/agengit/commit/4308779946551a0450fbf025779a755b1f2665c5))
+* batch blame step-meta lookups and hashmap dedup ([#78](https://github.com/matt-riley/agengit/issues/78)) ([2d51172](https://github.com/matt-riley/agengit/commit/2d51172c127a5df93a2b0a1ff30a582677e4bc0f))
+* cache parsed trees and reuse step-row tree hashes in agit stats file tally ([8e3107a](https://github.com/matt-riley/agengit/commit/8e3107a6d09857d5028eaf0fd081a71a74fb051c))
+* serve timeline/watch/recall previews from the index ([#77](https://github.com/matt-riley/agengit/issues/77)) ([fec1e5f](https://github.com/matt-riley/agengit/commit/fec1e5f39e6f1616a454fc3d7fd0013bb622dc91))
+
 ## [1.23.0](https://github.com/matt-riley/agengit/compare/v1.22.3...v1.23.0) (2026-06-21)
 
 
