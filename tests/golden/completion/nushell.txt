@@ -184,6 +184,7 @@ extern "agit recall" [
     --session: string
     --outcome: string
     --limit: string
+    --judged: string
     --redacted
     --full
     --help(-h)

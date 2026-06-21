@@ -26,6 +26,10 @@ test "eval/json reports dimension ratings for a verified session" {
     try expectEnvelope(parsed.value, "eval");
 
     const data = parsed.value.object.get("data").?.object;
+    // eval_hash must be present and a 64-char hex string
+    const eval_hash = data.get("eval_hash").?.string;
+    try std.testing.expectEqual(@as(usize, 64), eval_hash.len);
+
     try std.testing.expectEqualStrings("good", data.get("current_assessment").?.object.get("classification").?.string);
 
     const dimensions = data.get("in_scope_assessment").?.object.get("dimensions").?.object;
@@ -69,6 +73,10 @@ test "eval/json flags repeated failures and churn risk" {
     try expectEnvelope(parsed.value, "eval");
 
     const data = parsed.value.object.get("data").?.object;
+    // eval_hash must be present and a 64-char hex string
+    const eval_hash = data.get("eval_hash").?.string;
+    try std.testing.expectEqual(@as(usize, 64), eval_hash.len);
+
     const dimensions = data.get("in_scope_assessment").?.object.get("dimensions").?.object;
     try std.testing.expectEqualStrings("bad", dimensions.get("goal_clarity").?.object.get("rating").?.string);
     try std.testing.expectEqualStrings("bad", dimensions.get("failure_recovery").?.object.get("rating").?.string);
@@ -110,6 +118,10 @@ test "eval/json lookahead downgrades an earlier good-looking session" {
     try expectEnvelope(parsed.value, "eval");
 
     const data = parsed.value.object.get("data").?.object;
+    // eval_hash must be present and a 64-char hex string
+    const eval_hash = data.get("eval_hash").?.string;
+    try std.testing.expectEqual(@as(usize, 64), eval_hash.len);
+
     try std.testing.expectEqualStrings("downgrade", data.get("follow_up_assessment").?.object.get("classification_delta").?.string);
     try std.testing.expect(data.get("follow_up_assessment").?.object.get("signals").?.array.items.len >= 1);
     try std.testing.expectEqualStrings("mixed", data.get("current_assessment").?.object.get("classification").?.string);
@@ -151,6 +163,10 @@ test "eval/json supports inferred git commit scope" {
     try expectEnvelope(parsed.value, "eval");
 
     const data = parsed.value.object.get("data").?.object;
+    // eval_hash must be present and a 64-char hex string
+    const eval_hash = data.get("eval_hash").?.string;
+    try std.testing.expectEqual(@as(usize, 64), eval_hash.len);
+
     const scope_value = data.get("scope") orelse return error.TestUnexpectedResult;
     const scope = scope_value.object;
     try std.testing.expectEqualStrings("commit", scope.get("kind").?.string);
@@ -224,6 +240,10 @@ test "eval/json window scopes include multiple matching sessions" {
     try expectEnvelope(parsed.value, "eval");
 
     const data = parsed.value.object.get("data").?.object;
+    // eval_hash must be present and a 64-char hex string
+    const eval_hash = data.get("eval_hash").?.string;
+    try std.testing.expectEqual(@as(usize, 64), eval_hash.len);
+
     const scope = data.get("scope").?.object;
     try std.testing.expectEqualStrings("window", scope.get("kind").?.string);
     try std.testing.expectEqual(@as(i64, 2), scope.get("step_count").?.integer);

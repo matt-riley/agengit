@@ -334,6 +334,7 @@ pub const recall_usage = help_mod.UsageSpec{
         .{ .long = "session", .value_name = "id", .description = "Only return steps from one session id, or pass origin/session-id to disambiguate." },
         .{ .long = "outcome", .value_name = "kind", .description = "Only return steps with outcome success, failure, or unknown." },
         .{ .long = "limit", .value_name = "N", .description = "Return at most <N> recall matches. Defaults to 20." },
+        .{ .long = "judged", .value_name = "kind", .description = "Only return steps from sessions whose latest eval classification is good, bad, or mixed." },
         .{ .long = "redacted", .description = "Redact obvious secrets in rendered previews." },
         .{ .long = "full", .description = "Render full previews even when redaction is the repo default." },
         .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
@@ -342,6 +343,7 @@ pub const recall_usage = help_mod.UsageSpec{
         .{ .description = "show recent prior work on one file", .command = "--path src/main.zig" },
         .{ .description = "show only failed prior attempts for a file", .command = "--path src/main.zig --outcome failure" },
         .{ .description = "search for prior token-related work in one session", .command = "--session codex/session-abc123 token" },
+        .{ .description = "show only sessions with good evaluations", .command = "--judged good" },
     },
     .notes = "Recall is agent-initiated pull memory. Pass a query, a --path filter, or both.",
 };

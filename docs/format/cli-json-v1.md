@@ -83,3 +83,10 @@ List-view row payloads emitted by the envelope (e.g. `between --json`, and the
   time via their own privacy config. `null` only for steps recorded before this
   column was added until `agit reindex` backfills them.
 
+## Eval hash
+
+`agit eval --json` includes an `eval_hash` field in `data` — the 64-char hex
+BLAKE3 hash of the persisted eval object written to `.agit/objects/`.
+
+`agit recall --json` supports `--judged good|bad|mixed` to filter results
+to sessions whose latest eval classification matches.

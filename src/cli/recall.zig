@@ -32,6 +32,7 @@ const RecallOptions = struct {
     outcome: ?[:0]const u8 = null,
     limit: usize = default_limit,
     query: ?[:0]const u8 = null,
+    judged: ?[:0]const u8 = null,
     redaction_mode: RedactionMode = .auto,
 };
 
@@ -86,6 +87,7 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
 
     const session_filter = try resolveSessionFilter(&stdout, options);
     const outcome_filter = try parseOutcomeFilter(&stdout, options);
+    const judged_filter = try parseJudgedFilter(&stdout, options);
 
     var store = try status.openStoreOrExit(io, gpa, &stdout, options.format, usage.name);
     defer store.deinit(io);
@@ -159,6 +161,41 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
         }
     }
 
+    if (judged_filter) |classification| {
+        const judged_scope_keys = try store.index.listSessionScopeKeysByEvalClass(gpa, classification, options.limit * search_candidate_multiplier);
+        defer {
+            for (judged_scope_keys) |key| gpa.free(key);
+            gpa.free(judged_scope_keys);
+        }
+        var judged_set = std.StringHashMap(void).init(gpa);
+        defer judged_set.deinit();
+        for (judged_scope_keys) |key| {
+            try judged_set.put(key, {});
+        }
+
+        // Rebuild matches with only the kept ones
+        var filtered: std.ArrayList(RecallMatch) = .empty;
+        errdefer {
+            for (filtered.items) |*m| m.deinit(gpa);
+            filtered.deinit(gpa);
+        }
+        for (matches.items) |*match| {
+            const scope_key = std.fmt.allocPrint(gpa, "{s}/{s}", .{ match.row.origin, match.row.session_id }) catch continue;
+            defer gpa.free(scope_key);
+            if (judged_set.contains(scope_key)) {
+                try filtered.append(gpa, match.*);
+                // Clear the source so it's not double-freed
+                match.row.hash = &.{};
+            }
+        }
+        // Free match items that weren't moved
+        for (matches.items) |*match| {
+            if (match.row.hash.len > 0) match.deinit(gpa);
+        }
+        matches.deinit(gpa);
+        matches = filtered;
+    }
+
     std.mem.sort(RecallMatch, matches.items, {}, lessRecallMatch);
     if (matches.items.len > options.limit) {
         for (matches.items[options.limit..]) |*match| match.deinit(gpa);
@@ -193,6 +230,7 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
                 .origin = session_filter.origin,
                 .session = session_filter.session_id,
                 .outcome = outcome_filter,
+                .judged = judged_filter,
                 .limit = options.limit,
                 .redacted = use_redaction,
                 .matches = json_matches,
@@ -361,6 +399,11 @@ fn parseOptions(iter: *std.process.Args.Iterator, stdout: *std.Io.File.Writer) !
                 try arg_parse.invalidArg(stdout, options.format, usage, "--outcome requires success, failure, or unknown.");
                 return error.InvalidArgument;
             };
+        } else if (std.mem.eql(u8, arg, "--judged")) {
+            options.judged = iter.next() orelse {
+                try arg_parse.invalidArg(stdout, options.format, usage, "--judged requires good, bad, or mixed.");
+                return error.InvalidArgument;
+            };
         } else if (std.mem.eql(u8, arg, "--limit")) {
             const value = iter.next() orelse {
                 try arg_parse.invalidArg(stdout, options.format, usage, "--limit requires an integer value.");
@@ -419,6 +462,15 @@ fn resolveSessionFilter(stdout: *std.Io.File.Writer, options: RecallOptions) !Se
         }
     }
     return filter;
+}
+
+fn parseJudgedFilter(stdout: *std.Io.File.Writer, options: RecallOptions) !?[]const u8 {
+    const raw = options.judged orelse return null;
+    if (std.mem.eql(u8, raw, "good")) return "good";
+    if (std.mem.eql(u8, raw, "bad")) return "bad";
+    if (std.mem.eql(u8, raw, "mixed")) return "mixed";
+    try arg_parse.invalidArg(stdout, options.format, usage, "Invalid --judged value; use good, bad, or mixed.");
+    return error.InvalidArgument;
 }
 
 fn parseOutcomeFilter(stdout: *std.Io.File.Writer, options: RecallOptions) !?[]const u8 {

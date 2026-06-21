@@ -4,6 +4,7 @@ const gc_mod = @import("../store/gc.zig");
 const object = @import("../store/object.zig");
 const hash_mod = @import("../store/hash.zig");
 const pack_mod = @import("../store/pack.zig");
+const eval_mod = @import("../store/eval.zig");
 const help_mod = @import("help.zig");
 const specs = @import("specs.zig");
 const preview_mod = @import("../store/preview.zig");
@@ -221,6 +222,7 @@ fn reindexLooseObjects(
 
         try store.index.insertObject(&h_hex, object.detectKind(data), data.len);
         try indexStepData(store, gpa, seen_sessions, stats, &h_hex, data);
+        try indexEvalData(store, gpa, &h_hex, data);
     }
 }
 
@@ -259,6 +261,7 @@ fn reindexPackedObjects(
                 entry.meta.crc32,
             );
             try indexStepData(store, gpa, seen_sessions, stats, &h_hex, entry.raw);
+            try indexEvalData(store, gpa, &h_hex, entry.raw);
         }
     }
 }
@@ -317,6 +320,39 @@ fn indexStepData(
         try store.index.insertToolCall(object_hex, @intCast(i), tc.tool_name, tc.args, tc.result);
     }
     stats.steps += 1;
+}
+
+fn indexEvalData(
+    store: *store_mod.Store,
+    gpa: std.mem.Allocator,
+    object_hex: []const u8,
+    data: []const u8,
+) !void {
+    if (std.mem.indexOf(u8, data, "\"type\":\"eval\"") == null) return;
+
+    const parsed = std.json.parseFromSlice(
+        eval_mod.EvalObject,
+        gpa,
+        data,
+        .{ .allocate = .alloc_always },
+    ) catch return;
+    defer parsed.deinit();
+
+    const eval_obj = parsed.value;
+    if (!std.mem.eql(u8, eval_obj.type, "eval")) return;
+
+    // Build scope_key.
+    const scope_key = try store_mod.evalScopeKeyPublic(gpa, eval_obj.evaluation_scope);
+    defer gpa.free(scope_key);
+
+    try store.index.insertEvaluation(
+        object_hex,
+        eval_obj.evaluation_scope.kind,
+        scope_key,
+        eval_obj.assessment.classification,
+        eval_obj.captured_evidence_hash,
+        eval_obj.evaluated_at,
+    );
 }
 
 pub fn reindexFrom(
