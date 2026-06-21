@@ -397,7 +397,7 @@ pub const Store = struct {
         return reconcile_mod.reconcile(self, io, gpa, mode);
     }
 
-    pub fn metaKeyAlloc(gpa: std.mem.Allocator, origin: []const u8, session_id: []const u8, field: []const u8) ![]u8 {
+    fn metaKeyAlloc(gpa: std.mem.Allocator, origin: []const u8, session_id: []const u8, field: []const u8) ![]u8 {
         return std.fmt.allocPrint(gpa, "session::{x}:{x}::{s}", .{ origin, session_id, field });
     }
 

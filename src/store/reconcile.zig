@@ -2,7 +2,6 @@ const std = @import("std");
 const store_mod = @import("store.zig");
 const file_lock = @import("../util/file_lock.zig");
 const ref = @import("ref.zig");
-const index_mod = @import("index.zig");
 const preview_mod = @import("preview.zig");
 
 const Store = store_mod.Store;

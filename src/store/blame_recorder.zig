@@ -102,7 +102,7 @@ pub fn recordStepBlame(self: *Store, io: std.Io, gpa: std.mem.Allocator, input: 
     try self.index.db.commit();
 }
 
-pub fn loadPriorBlame(self: *Store, io: std.Io, arena: std.mem.Allocator, prior: index_mod.Index.BlameRow) !LoadedPriorBlame {
+fn loadPriorBlame(self: *Store, io: std.Io, arena: std.mem.Allocator, prior: index_mod.Index.BlameRow) !LoadedPriorBlame {
     const blob_hash = try Hash.fromHex(prior.blob_hash[0..]);
     const blob = try self.readBlob(io, arena, blob_hash);
     if (snapshot_mod.isBinary(blob) or snapshot_mod.isSnapshotPlaceholder(blob)) return error.PriorBlobNotText;
