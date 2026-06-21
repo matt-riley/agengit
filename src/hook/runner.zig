@@ -127,10 +127,14 @@ fn processPayload(
     defer normalized.deinit(io, gpa);
 
     if (workspace.used_fallback) {
+        const message = switch (workspace.fallback_reason orelse .open_failed) {
+            .open_failed => "payload cwd could not be used; used hook process cwd fallback",
+            .no_store_ancestor => "payload cwd had no .agit ancestor; used hook process cwd fallback",
+        };
         rec.logHookFailure(io, adapter.name, error.InvalidCwd, .{
             .agent = adapter.name,
             .code = "workspace_cwd_fallback",
-            .message = "payload cwd could not be opened; used hook process cwd fallback",
+            .message = message,
             .session_id = normalized.session_id,
             .event_name = normalized.event_name,
         });

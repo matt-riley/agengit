@@ -124,7 +124,7 @@ fn stagingKey(origin: []const u8, session_id: []const u8, turn_id: []const u8) [
 
 /// Walk up from `start` until a directory containing `.agit/` is found.
 /// Returns an owned `std.Io.Dir` for that repository root.
-fn findStoreRoot(io: std.Io, start: std.Io.Dir) !std.Io.Dir {
+pub fn findStoreRoot(io: std.Io, start: std.Io.Dir) !std.Io.Dir {
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
     var parent_buf: [std.fs.max_path_bytes]u8 = undefined;
 
