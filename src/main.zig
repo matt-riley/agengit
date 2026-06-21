@@ -274,6 +274,7 @@ test {
     _ = @import("store/gc.zig");
     _ = @import("store/remote.zig");
     _ = @import("store/bundle.zig");
+    _ = @import("store/index_test.zig");
     _ = @import("privacy/redact.zig");
     _ = @import("privacy/scan.zig");
 }
