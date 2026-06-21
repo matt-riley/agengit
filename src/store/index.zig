@@ -731,6 +731,99 @@ pub const Index = struct {
         };
     }
 
+    /// Look up step meta for a set of distinct step hashes in one query.
+    /// Returns a map keyed by the 64-char lowercase hex step hash, mirroring
+    /// queryStepMeta exactly (including the blame_maps fallback) just batched
+    /// into one round trip per chunk instead of one per hash.
+    // Note: chunked into 500 placeholders so we stay far under
+    // SQLITE_MAX_VARIABLE_NUMBER (32766); raise chunk size if profiling shows it.
+    pub fn queryStepMetaBatch(
+        self: Index,
+        arena: std.mem.Allocator,
+        step_hashes: []const []const u8,
+    ) !std.StringHashMap(StepMeta) {
+        var map = std.StringHashMap(StepMeta).init(arena);
+        errdefer map.deinit();
+        if (step_hashes.len == 0) return map;
+
+        const chunk_size: usize = 500;
+
+        // First pass: steps table.
+        var i: usize = 0;
+        while (i < step_hashes.len) : (i += chunk_size) {
+            const end = @min(i + chunk_size, step_hashes.len);
+            const chunk = step_hashes[i..end];
+
+            var placeholders: std.ArrayList(u8) = .empty;
+            try placeholders.appendSlice(arena, "?");
+            for (chunk[1..]) |_| try placeholders.appendSlice(arena, ", ?");
+
+            const sql = try std.fmt.allocPrint(
+                arena,
+                "select hash, session_origin, model, timestamp from steps where hash in ({s})",
+                .{placeholders.items},
+            );
+
+            const stmt = try self.db.prepare(sql);
+            defer stmt.deinit();
+            for (chunk, 0..) |h, idx| try stmt.bindValue(h, idx);
+            while (try stmt.step()) {
+                const step_hex = try arena.dupe(u8, stmt.text(0));
+                const meta = StepMeta{
+                    .origin = try arena.dupe(u8, stmt.text(1)),
+                    .model = blk: {
+                        if (stmt.nullableText(2)) |value| break :blk try arena.dupe(u8, value);
+                        break :blk null;
+                    },
+                    .timestamp = stmt.int(3),
+                };
+                try map.put(step_hex, meta);
+            }
+        }
+
+        // Fallback pass: any hashes absent from steps come from blame_maps.
+        // Note: each step's blame_maps rows share origin/timestamp (one
+        // recording produces them), so first-seen-per-hash matches queryStepMeta's
+        // `limit 1` arbitrary pick; keep that with the contains() guard.
+        var missing: std.ArrayList([]const u8) = .empty;
+        for (step_hashes) |h| {
+            if (!map.contains(h)) try missing.append(arena, h);
+        }
+        if (missing.items.len == 0) return map;
+
+        var j: usize = 0;
+        while (j < missing.items.len) : (j += chunk_size) {
+            const end = @min(j + chunk_size, missing.items.len);
+            const chunk = missing.items[j..end];
+
+            var placeholders: std.ArrayList(u8) = .empty;
+            try placeholders.appendSlice(arena, "?");
+            for (chunk[1..]) |_| try placeholders.appendSlice(arena, ", ?");
+
+            const sql = try std.fmt.allocPrint(
+                arena,
+                "select step_hash, session_origin, timestamp from blame_maps where step_hash in ({s})",
+                .{placeholders.items},
+            );
+
+            const stmt = try self.db.prepare(sql);
+            defer stmt.deinit();
+            for (chunk, 0..) |h, idx| try stmt.bindValue(h, idx);
+            while (try stmt.step()) {
+                const step_hex = try arena.dupe(u8, stmt.text(0));
+                if (map.contains(step_hex)) continue;
+                const meta = StepMeta{
+                    .origin = try arena.dupe(u8, stmt.text(1)),
+                    .model = null,
+                    .timestamp = stmt.int(2),
+                };
+                try map.put(step_hex, meta);
+            }
+        }
+
+        return map;
+    }
+
     /// Append the distinct blame object hashes referenced by blame_maps to `out`.
     pub fn collectBlameHashes(self: Index, gpa: std.mem.Allocator, out: *std.ArrayList([64]u8)) !void {
         var rs = try self.db.rows("select distinct blame_hash from blame_maps", .{});
