@@ -69,7 +69,7 @@ through files, logs, local IPC, or future MCP-style callouts rather than hooks.
 
 1. Define `ObserverSource` and `ObserverCheckpoint` types.
 2. Implement a fake file-backed observer in tests before adding a real agent.
-3. Add `agit observe --once <source-fixture>` for deterministic e2e validation.
+3. Add `agit observe --once <source>` with deterministic e2e validation.
 4. Research Pi session-state files and Copilot CLI state separately, then add
    one thin adapter at a time.
 5. Document each observer's stability, permissions, and failure modes before it

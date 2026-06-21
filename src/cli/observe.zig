@@ -35,11 +35,7 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
     };
 
     const source_name = options.source_name orelse {
-        try status_cmd.writeDiagnostic(&stdout, options.format, usage.name, .{
-            .code = "missing_source",
-            .message = "Missing observer source name.",
-            .hint = "Pass a source such as `fixture`.",
-        });
+        try status_cmd.writeDiagnostic(&stdout, options.format, usage.name, .{ .code = "missing_source", .message = "Missing observer source name.", .hint = "Pass a source such as `jsonl`." });
         if (options.format == .human) {
             try stdout.interface.writeAll("\n");
             try help_mod.renderUsage(&stdout, usage);
@@ -185,11 +181,7 @@ fn writeRunError(
             .message = "The selected observer source requires --input.",
             .hint = source_name,
         },
-        error.ObserverInputTooLarge => output_mod.Diagnostic{
-            .code = "input_too_large",
-            .message = "Observer input exceeds the 4 MiB safety cap.",
-            .hint = "Trim the fixture or split it into smaller batches.",
-        },
+        error.ObserverInputTooLarge => output_mod.Diagnostic{ .code = "input_too_large", .message = "Observer input exceeds the 4 MiB safety cap.", .hint = "Trim the input or split it into smaller batches." },
         error.ObserverCheckpointInstanceMismatch => output_mod.Diagnostic{
             .code = "checkpoint_instance_mismatch",
             .message = "Existing observer checkpoint belongs to a different input path.",

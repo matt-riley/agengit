@@ -40,7 +40,7 @@ AGIT_UPDATE_GOLDEN=1 zig build test-e2e
 
 Recording flows through layered phases:
 
-1. **Hook adapters** (`src/cli/claude_hook.zig`, `claude_tool_batch_hook.zig`, `codex_hook.zig`, `gemini_hook.zig`) — parse agent-specific JSON payloads from stdin and call into the Recorder.
+1. **Hook adapters** (`src/hook/adapters/*.zig`, dispatched through `src/hook/runner.zig`) — parse agent-specific JSON payloads from stdin and call into the Recorder.
 2. **Recorder** (`src/recorder.zig`) — orchestrates staging, snapshotting, and committing. Each agent turn flows through three hook calls: `recordUserPrompt` → `recordToolUse` (zero or more) → `recordAssistantAndFinalize`. Between calls, partial state is accumulated in a JSON staging file under `.agit/tmp/<key>.json`.
 3. **Snapshotter** (`src/store/snapshot.zig`) — walks the working tree, applies `.agitignore` rules, and writes a `Tree` object.
 4. **Object store** (`src/store/`) — content-addressed (BLAKE3) storage. Object types: `blob`, `tree`, `step`, `blame`. Objects live under `.agit/objects/<2-hex-char shard>/<remaining-62 hex>`.
@@ -75,7 +75,7 @@ Supporting modules:
 - E2E tests live in `tests/e2e/` and use `tests/e2e/support/harness.zig` to spawn the built binary. Golden output lives in `tests/golden/`; update with `AGIT_UPDATE_GOLDEN=1`.
 - Property tests are in `tests/property/` and use `src/test_support.zig` (which imports zqlite).
 - Fuzz harnesses are in `tests/fuzz/hooks.zig` and use the `hook` module directly.
-- `src/fixtures/hooks/` and `tests/e2e/fixtures/hooks/` contain representative agent hook payloads; add fixtures there rather than hard-coding large JSON inline.
+- `src/fixtures/hooks/` contains representative agent hook payloads; reuse those fixtures from tests rather than duplicating JSON.
 
 When writing tests targeting `.agit/tmp/`, target only top-level `.agit/tmp/*.json` files — recursive walks also see turn-state files under `.agit/tmp/turns/` and will accidentally exercise recovery-turn behavior instead of corrupt-staging handling.
 

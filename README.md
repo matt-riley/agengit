@@ -106,8 +106,8 @@ Run an experimental observer source and record newly seen events.
 **Synopsis:** `agit observe [OPTIONS] <SOURCE>`
 
 ```sh
-# process a fixture-backed observer file once
-agit observe --once fixture --input observer.json
+# process a JSONL observer file once
+agit observe --once jsonl --input observer.jsonl
 ```
 
 **Notes:** Observer sources are explicit and experimental. Current sources run one pass and persist watermarks under .agit/observers/ for duplicate suppression on rerun.
@@ -401,7 +401,7 @@ Planned but not shipped today:
   `agit grep` ships today; searching the content-addressed snapshot blobs is
   the open item)
 
-Experimental today: `agit observe --once fixture --input observer.json` exercises
+Experimental today: `agit observe --once jsonl --input observer.jsonl` exercises
 the observer framework and persists replay checkpoints under
 `.agit/observers/`.
 

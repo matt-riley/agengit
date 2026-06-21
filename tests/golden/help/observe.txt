@@ -10,15 +10,15 @@ OPTIONS:
     --once
         Process one batch of available events and exit.
     --input <PATH>
-        Source-specific input path (required for the fixture source).
+        Source-specific input path (required for jsonl).
     -h, --help
         Display this help and exit.
 
 EXAMPLES:
-    # process a fixture-backed observer file once
-    agit observe --once fixture --input observer.json
+    # process a JSONL observer file once
+    agit observe --once jsonl --input observer.jsonl
     # emit machine-readable observe stats
-    agit observe --json --once fixture --input observer.json
+    agit observe --json --once jsonl --input observer.jsonl
 
 NOTES:
     Observer sources are explicit and experimental. Current sources run one pass and persist watermarks under .agit/observers/ for duplicate suppression on rerun.

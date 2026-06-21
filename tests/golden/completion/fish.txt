@@ -38,7 +38,7 @@ complete -c agit -f -n '__fish_seen_subcommand_from init' -l force -d 'Back up a
 complete -c agit -f -n '__fish_seen_subcommand_from init' -s h -l help -d 'Display this help and exit.'
 complete -c agit -f -n '__fish_seen_subcommand_from observe' -l json -d 'Render observe results as structured JSON.'
 complete -c agit -f -n '__fish_seen_subcommand_from observe' -l once -d 'Process one batch of available events and exit.'
-complete -c agit -f -n '__fish_seen_subcommand_from observe' -l input -r -d 'Source-specific input path (required for the fixture source).'
+complete -c agit -f -n '__fish_seen_subcommand_from observe' -l input -r -d 'Source-specific input path (required for jsonl).'
 complete -c agit -f -n '__fish_seen_subcommand_from observe' -s h -l help -d 'Display this help and exit.'
 complete -c agit -f -n '__fish_seen_subcommand_from uninstall' -s h -l help -d 'Display this help and exit.'
 complete -c agit -f -n '__fish_seen_subcommand_from doctor' -l json -d 'Render doctor checks as structured JSON.'

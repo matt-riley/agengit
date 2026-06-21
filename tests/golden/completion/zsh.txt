@@ -56,7 +56,7 @@ _agit() {
                     _arguments \
                         '--json[Render observe results as structured JSON.]' \
                         '--once[Process one batch of available events and exit.]' \
-                        '--input[Source-specific input path (required for the fixture source).]:PATH' \
+                        '--input[Source-specific input path (required for jsonl).]:PATH' \
                         '--help[Display this help and exit.]'
                     ;;
                 uninstall)

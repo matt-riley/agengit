@@ -1,7 +1,0 @@
-{
-  "session_id": "pi-sess-001",
-  "cwd": "/home/user/myproject",
-  "hook_event_name": "input",
-  "turn_id": "agturn:pi-1",
-  "prompt": "Refactor the auth module to use JWT tokens"
-}

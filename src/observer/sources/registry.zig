@@ -1,10 +1,8 @@
 const std = @import("std");
 const source_mod = @import("../Source.zig");
-const fixture = @import("fixture.zig");
 const jsonl = @import("jsonl.zig");
 
 pub const all = [_]source_mod.Source{
-    fixture.source,
     jsonl.source,
 };
 

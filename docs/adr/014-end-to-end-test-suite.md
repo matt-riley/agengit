@@ -61,8 +61,7 @@ Each e2e test:
    - `uninstall/clean.zig` — removes only managed hooks, leaves user
      keys.
    - `uninstall/malformed.zig` — warns but leaves file (ADR 006).
-   - `hooks/claude_payloads.zig` — replay golden payloads per event.
-   - `hooks/codex_payloads.zig`, `hooks/gemini_payloads.zig` — ditto.
+   - `hooks/payloads.zig` — replay canonical hook payloads per agent.
    - `record_replay/concurrent_writers.zig` — N parallel hook writers,
      assert all steps land, index matches refs (ADR 007 + ADR 009).
    - `record_replay/crash_recovery.zig` — kill mid-write, reopen,

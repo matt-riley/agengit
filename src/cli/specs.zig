@@ -9,7 +9,6 @@ pub const init_usage = help_mod.UsageSpec{
         .{ .long = "agent", .value_name = "name", .description = "Install only the specified agent (claude, codex, gemini, copilot, pi). Can be repeated.", .repeatable = true, .value_choices = &.{ "claude", "codex", "gemini", "copilot", "pi" } },
         .{ .long = "dry-run", .description = "Show what would be installed without making changes." },
         .{ .long = "force", .description = "Back up and replace malformed/non-object existing JSON config." },
-        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
     },
     .examples = &.{
         .{ .description = "install hooks for available agents", .command = "" },
@@ -23,9 +22,7 @@ pub const uninstall_usage = help_mod.UsageSpec{
     .name = "uninstall",
     .synopsis = "[OPTIONS]",
     .description = "Remove agit hooks from agent configurations.",
-    .options = &.{
-        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
-    },
+    .options = &.{},
     .examples = &.{
         .{ .description = "remove all hooks", .command = "" },
     },
@@ -38,12 +35,11 @@ pub const observe_usage = help_mod.UsageSpec{
     .options = &.{
         .{ .long = "json", .description = "Render observe results as structured JSON." },
         .{ .long = "once", .description = "Process one batch of available events and exit." },
-        .{ .long = "input", .value_name = "PATH", .description = "Source-specific input path (required for the fixture source)." },
-        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
+        .{ .long = "input", .value_name = "PATH", .description = "Source-specific input path (required for jsonl)." },
     },
     .examples = &.{
-        .{ .description = "process a fixture-backed observer file once", .command = "--once fixture --input observer.json" },
-        .{ .description = "emit machine-readable observe stats", .command = "--json --once fixture --input observer.json" },
+        .{ .description = "process a JSONL observer file once", .command = "--once jsonl --input observer.jsonl" },
+        .{ .description = "emit machine-readable observe stats", .command = "--json --once jsonl --input observer.jsonl" },
     },
     .notes = "Observer sources are explicit and experimental. Current sources run one pass and persist watermarks under .agit/observers/ for duplicate suppression on rerun.",
 };
@@ -57,7 +53,6 @@ pub const doctor_usage = help_mod.UsageSpec{
         .{ .long = "locks", .description = "List currently held lock files with age and executable path." },
         .{ .long = "stats", .description = "Print finalize retry/object-write counters." },
         .{ .long = "last-hook-error", .description = "Pretty-print the newest hook-error log entry." },
-        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
     },
     .examples = &.{
         .{ .description = "check store and agent health", .command = "" },
@@ -73,7 +68,6 @@ pub const fsck_usage = help_mod.UsageSpec{
     .options = &.{
         .{ .long = "json", .description = "Render fsck checks as structured JSON." },
         .{ .long = "reindex", .description = "Explicitly rebuild only index.db after a successful read-only scan." },
-        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
     },
     .examples = &.{
         .{ .description = "run a read-only integrity scan", .command = "" },
@@ -90,7 +84,6 @@ pub const gc_usage = help_mod.UsageSpec{
         .{ .long = "json", .description = "Render gc results as structured JSON." },
         .{ .long = "grace-hours", .value_name = "N", .description = "Only prune unreachable objects/tmp files older than <N> hours. Defaults to 2." },
         .{ .long = "prune-before", .value_name = "YYYY-MM-DD", .description = "Delete session refs whose head-step timestamp is older than UTC midnight on the given date before sweeping." },
-        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
     },
     .examples = &.{
         .{ .description = "prune unreachable store data with the default grace period", .command = "" },
@@ -107,7 +100,6 @@ pub const push_usage = help_mod.UsageSpec{
         .{ .long = "json", .description = "Render push results as structured JSON." },
         .{ .long = "remote", .value_name = "name", .description = "Choose a configured remote by name." },
         .{ .long = "allow-sensitive", .description = "Allow plaintext uploads even when privacy scan findings exist." },
-        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
     },
     .examples = &.{
         .{ .description = "push to the only configured remote", .command = "" },
@@ -123,7 +115,6 @@ pub const pull_usage = help_mod.UsageSpec{
     .options = &.{
         .{ .long = "json", .description = "Render pull results as structured JSON." },
         .{ .long = "remote", .value_name = "name", .description = "Choose a configured remote by name." },
-        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
     },
     .examples = &.{
         .{ .description = "pull from the only configured remote", .command = "" },
@@ -143,7 +134,6 @@ pub const export_usage = help_mod.UsageSpec{
         .{ .long = "since", .value_name = "YYYY-MM-DD", .description = "Only select sessions with at least one step on or after UTC midnight for the given date." },
         .{ .long = "until", .value_name = "YYYY-MM-DD", .description = "Only select sessions with at least one step before UTC midnight after the given date." },
         .{ .long = "allow-sensitive", .description = "Allow plaintext export when privacy scan findings exist; writes a privacy report." },
-        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
     },
     .examples = &.{
         .{ .description = "export all recorded sessions into a bundle directory", .command = "dist/bundle" },
@@ -159,7 +149,6 @@ pub const import_usage = help_mod.UsageSpec{
     .options = &.{
         .{ .long = "json", .description = "Render import results as structured JSON." },
         .{ .long = "replace-ref", .value_name = "origin/session-id", .description = "Overwrite a named canonical session ref instead of namespacing conflicts. Can be repeated." },
-        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
     },
     .examples = &.{
         .{ .description = "import a bundle directory", .command = "dist/bundle" },
@@ -173,7 +162,6 @@ pub const status_usage = help_mod.UsageSpec{
     .description = "Show the current investigation dashboard for this repository.",
     .options = &.{
         .{ .long = "json", .description = "Render the status as structured JSON." },
-        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
     },
     .examples = &.{
         .{ .description = "show repository status", .command = "" },
@@ -192,7 +180,6 @@ pub const timeline_usage = help_mod.UsageSpec{
         .{ .long = "limit", .value_name = "N", .description = "Show at most <N> steps. Defaults to 20." },
         .{ .long = "redacted", .description = "Redact obvious secrets in previews." },
         .{ .long = "full", .description = "Render full previews even when redaction is the repo default." },
-        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
     },
     .examples = &.{
         .{ .description = "show the most recent recorded steps", .command = "" },
@@ -215,7 +202,6 @@ pub const eval_usage = help_mod.UsageSpec{
         .{ .long = "until", .value_name = "YYYY-MM-DD", .description = "Attach the given upper date bound to the evaluation scope." },
         .{ .long = "lookahead", .value_name = "DURATION", .description = "Scan later captured evidence for follow-up failure signals, such as 24h or 7d. Defaults to 24h." },
         .{ .long = "no-lookahead", .description = "Disable follow-up signal scanning." },
-        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
     },
     .examples = &.{
         .{ .description = "evaluate the most recent recorded session", .command = "" },
@@ -232,7 +218,6 @@ pub const sessions_usage = help_mod.UsageSpec{
     .description = "List recorded agent sessions from the index.",
     .options = &.{
         .{ .long = "json", .description = "Render the session list as structured JSON." },
-        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
     },
     .examples = &.{
         .{ .description = "list all sessions", .command = "" },
@@ -245,7 +230,6 @@ pub const log_usage = help_mod.UsageSpec{
     .description = "Show step history for a session.",
     .options = &.{
         .{ .long = "json", .description = "Render the session log as structured JSON." },
-        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
     },
     .examples = &.{
         .{ .description = "show most recent session steps", .command = "" },
@@ -262,7 +246,6 @@ pub const restore_usage = help_mod.UsageSpec{
         .{ .long = "all", .description = "Restore every file in the captured snapshot." },
         .{ .long = "force", .description = "Overwrite existing files instead of skipping them." },
         .{ .long = "dry-run", .description = "Report what would be restored without writing files." },
-        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
     },
     .examples = &.{
         .{ .description = "restore one captured file", .command = "abc123def -- src/main.zig" },
@@ -281,7 +264,6 @@ pub const show_usage = help_mod.UsageSpec{
         .{ .long = "stat", .description = "Summarize file changes between this step and its parent." },
         .{ .long = "redacted", .description = "Redact obvious secrets in the rendered output." },
         .{ .long = "full", .description = "Render full output even when redaction is the repo default." },
-        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
     },
     .examples = &.{
         .{ .description = "show details of a step", .command = "abc123def" },
@@ -299,7 +281,6 @@ pub const diff_usage = help_mod.UsageSpec{
         .{ .long = "session", .value_name = "id", .description = "Diff the first step's parent tree against the latest step in one session." },
         .{ .long = "redacted", .description = "Redact obvious secrets in diff output." },
         .{ .long = "full", .description = "Render full diff output even when redaction is the repo default." },
-        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
     },
     .examples = &.{
         .{ .description = "diff a recorded step against its parent", .command = "abc123def" },
@@ -315,7 +296,6 @@ pub const between_usage = help_mod.UsageSpec{
     .description = "Show recorded steps whose captured Git commit falls between two revisions.",
     .options = &.{
         .{ .long = "json", .description = "Render matching steps as structured JSON." },
-        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
     },
     .examples = &.{
         .{ .description = "show steps recorded after one commit through HEAD", .command = "abc123def" },
@@ -337,7 +317,6 @@ pub const recall_usage = help_mod.UsageSpec{
         .{ .long = "judged", .value_name = "kind", .description = "Only return steps from sessions whose latest eval classification is good, bad, or mixed." },
         .{ .long = "redacted", .description = "Redact obvious secrets in rendered previews." },
         .{ .long = "full", .description = "Render full previews even when redaction is the repo default." },
-        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
     },
     .examples = &.{
         .{ .description = "show recent prior work on one file", .command = "--path src/main.zig" },
@@ -363,7 +342,6 @@ pub const grep_usage = help_mod.UsageSpec{
         .{ .long = "redacted", .description = "Redact obvious secrets in rendered snippets." },
         .{ .long = "full", .description = "Render full snippets even when redaction is the repo default." },
         .{ .long = "content", .description = "Search captured workspace file content instead of agent messages and tool activity." },
-        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
     },
     .examples = &.{
         .{ .description = "search all recorded sessions for a term", .command = "factorial" },
@@ -381,7 +359,6 @@ pub const blame_usage = help_mod.UsageSpec{
         .{ .long = "json", .description = "Render blame attribution as structured JSON." },
         .{ .long = "step", .value_name = "hash", .description = "Show blame as of the given step instead of the latest." },
         .{ .long = "no-limits", .description = "Disable the blame file-size cap for this invocation." },
-        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
     },
     .examples = &.{
         .{ .description = "show blame for a file", .command = "src/main.zig" },
@@ -402,7 +379,6 @@ pub const watch_usage = help_mod.UsageSpec{
         .{ .long = "interval", .value_name = "DURATION", .description = "Polling interval such as 1s or 250ms. Defaults to 1s." },
         .{ .long = "redacted", .description = "Redact obvious secrets in rendered previews." },
         .{ .long = "full", .description = "Render full previews even when redaction is the repo default." },
-        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
     },
     .examples = &.{
         .{ .description = "follow newly recorded steps", .command = "" },
@@ -419,7 +395,6 @@ pub const stats_usage = help_mod.UsageSpec{
     .options = &.{
         .{ .long = "json", .description = "Render stats as structured JSON." },
         .{ .long = "session", .value_name = "id", .description = "Only summarize one session id, or pass origin/session-id to disambiguate." },
-        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
     },
     .examples = &.{
         .{ .description = "show repository-wide analytics", .command = "" },
@@ -436,7 +411,6 @@ pub const cat_usage = help_mod.UsageSpec{
     .options = &.{
         .{ .long = "redacted", .description = "Redact obvious secrets in the rendered object output." },
         .{ .long = "full", .description = "Render full object output even when redaction is the repo default." },
-        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
     },
     .examples = &.{
         .{ .description = "print object content", .command = "abc123def" },
@@ -449,7 +423,6 @@ pub const privacy_usage = help_mod.UsageSpec{
     .description = "Scan reachable captured content for sensitive data without printing secret values.",
     .options = &.{
         .{ .long = "json", .description = "Render privacy scan findings as structured JSON." },
-        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
     },
     .examples = &.{
         .{ .description = "scan captured content for sensitive data", .command = "scan" },
@@ -463,7 +436,6 @@ pub const reindex_usage = help_mod.UsageSpec{
     .description = "Rebuild the SQLite index from object/ref truth.",
     .options = &.{
         .{ .long = "from", .value_name = "HASH", .description = "Incrementally replay steps newer than <HASH> that are reachable from session refs." },
-        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
     },
     .examples = &.{
         .{ .description = "rebuild entire index", .command = "" },
@@ -475,9 +447,7 @@ pub const version_usage = help_mod.UsageSpec{
     .name = "version",
     .synopsis = "[OPTIONS]",
     .description = "Print agit version information.",
-    .options = &.{
-        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
-    },
+    .options = &.{},
     .examples = &.{
         .{ .description = "print the current version", .command = "" },
     },
@@ -487,9 +457,7 @@ pub const completion_usage = help_mod.UsageSpec{
     .name = "completion",
     .synopsis = "[OPTIONS] <SHELL>",
     .description = "Generate shell completion scripts for bash, zsh, fish, or nushell.",
-    .options = &.{
-        .{ .short = 'h', .long = "help", .description = "Display this help and exit." },
-    },
+    .options = &.{},
     .examples = &.{
         .{ .description = "bash completion script", .command = "bash" },
         .{ .description = "zsh completion script", .command = "zsh" },

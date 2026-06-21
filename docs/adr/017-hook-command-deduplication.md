@@ -7,10 +7,10 @@
 
 There are currently four hook command files:
 
-- `src/cli/claude_hook.zig` (111 LOC)
-- `src/cli/claude_tool_batch_hook.zig` (145 LOC)
-- `src/cli/codex_hook.zig` (194 LOC)
-- `src/cli/gemini_hook.zig` (133 LOC)
+- `src/hook/adapters/claude.zig` (111 LOC)
+- `src/hook/adapters/claude.zig` (145 LOC)
+- `src/hook/adapters/codex.zig` (194 LOC)
+- `src/hook/adapters/gemini.zig` (133 LOC)
 
 They share roughly 80% of their structure: read stdin, parse JSON, extract
 session/turn/event metadata, build a step value, hand it to the recorder,
@@ -22,8 +22,8 @@ report failure on the hook-error log. The differences are in:
 
 Adding a fifth adapter (Pi or GitHub Copilot CLI is on the roadmap per
 README) means copy-pasting this scaffolding again. That is the kind of
-duplication that quietly drifts: a bug fixed in `claude_hook.zig` doesn't
-land in `codex_hook.zig`.
+duplication that quietly drifts: a bug fixed in `claude.zig` doesn't
+land in `codex.zig`.
 
 ## Decision
 

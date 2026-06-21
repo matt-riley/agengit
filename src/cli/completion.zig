@@ -5,6 +5,8 @@ const specs = @import("specs.zig");
 
 pub const usage = specs.completion_usage;
 
+const help_option = help_mod.Option{ .short = 'h', .long = "help", .description = "Display this help and exit." };
+
 pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator) !void {
     _ = gpa;
 
@@ -83,6 +85,7 @@ fn writeBash(w: *std.Io.File.Writer) !void {
         try writeBashChoiceHandlers(w, spec);
         try w.interface.writeAll("        COMPREPLY=($(compgen -W \"");
         try writeBashOptionWords(w, spec);
+        try writeBashOption(w, help_option);
         try w.interface.writeAll("\" -- \"$cur\"))\n        ;;\n");
     }
 
@@ -132,6 +135,9 @@ fn writeZsh(w: *std.Io.File.Writer) !void {
             try writeZshOptionSpec(w, opt);
             try w.interface.writeAll("'");
         }
+        try w.interface.writeAll(" \\\n                        '");
+        try writeZshOptionSpec(w, help_option);
+        try w.interface.writeAll("'");
         try w.interface.writeAll("\n                    ;;\n");
     }
 
@@ -165,25 +171,30 @@ fn writeFish(w: *std.Io.File.Writer) !void {
     for (registry.public_commands) |command| {
         const spec = command.usage.?;
         for (spec.options) |opt| {
-            try w.interface.print("complete -c agit -f -n '__fish_seen_subcommand_from {s}'", .{command.name});
-            if (opt.short) |short| {
-                try w.interface.print(" -s {c}", .{short});
-            }
-            if (opt.long) |long| {
-                try w.interface.print(" -l {s}", .{long});
-            }
-            if (opt.value_name != null) try w.interface.writeAll(" -r");
-            if (opt.value_choices.len > 0) {
-                try w.interface.writeAll(" -a '");
-                for (opt.value_choices, 0..) |choice, i| {
-                    if (i != 0) try w.interface.writeAll(" ");
-                    try w.interface.writeAll(choice);
-                }
-                try w.interface.writeAll("'");
-            }
-            try w.interface.print(" -d '{s}'\n", .{opt.description});
+            try writeFishOption(w, command.name, opt);
         }
+        try writeFishOption(w, command.name, help_option);
     }
+}
+
+fn writeFishOption(w: *std.Io.File.Writer, command_name: []const u8, opt: help_mod.Option) !void {
+    try w.interface.print("complete -c agit -f -n '__fish_seen_subcommand_from {s}'", .{command_name});
+    if (opt.short) |short| {
+        try w.interface.print(" -s {c}", .{short});
+    }
+    if (opt.long) |long| {
+        try w.interface.print(" -l {s}", .{long});
+    }
+    if (opt.value_name != null) try w.interface.writeAll(" -r");
+    if (opt.value_choices.len > 0) {
+        try w.interface.writeAll(" -a '");
+        for (opt.value_choices, 0..) |choice, i| {
+            if (i != 0) try w.interface.writeAll(" ");
+            try w.interface.writeAll(choice);
+        }
+        try w.interface.writeAll("'");
+    }
+    try w.interface.print(" -d '{s}'\n", .{opt.description});
 }
 
 fn writeNushell(w: *std.Io.File.Writer) !void {
@@ -233,6 +244,9 @@ fn writeNushell(w: *std.Io.File.Writer) !void {
             try writeNushellOptionSpec(w, command.name, opt);
             try w.interface.writeAll("\n");
         }
+        try w.interface.writeAll("    ");
+        try writeNushellOptionSpec(w, command.name, help_option);
+        try w.interface.writeAll("\n");
         try w.interface.writeAll("]\n\n");
     }
 }
@@ -246,12 +260,16 @@ fn writeBashTopLevelWords(w: *std.Io.File.Writer) !void {
 
 fn writeBashOptionWords(w: *std.Io.File.Writer, spec: *const help_mod.UsageSpec) !void {
     for (spec.options) |opt| {
-        if (opt.short) |short| {
-            try w.interface.print("-{c} ", .{short});
-        }
-        if (opt.long) |long| {
-            try w.interface.print("--{s} ", .{long});
-        }
+        try writeBashOption(w, opt);
+    }
+}
+
+fn writeBashOption(w: *std.Io.File.Writer, opt: help_mod.Option) !void {
+    if (opt.short) |short| {
+        try w.interface.print("-{c} ", .{short});
+    }
+    if (opt.long) |long| {
+        try w.interface.print("--{s} ", .{long});
     }
 }
 

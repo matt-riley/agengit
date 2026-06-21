@@ -5,6 +5,14 @@ const file_limits_mod = @import("util/file_limits.zig");
 const file_lock_mod = @import("util/file_lock.zig");
 const hook_mod = @import("hook.zig");
 const registry = @import("cli/registry.zig");
+const hook_runner = @import("hook/runner.zig");
+const hook_adapters = struct {
+    const claude = @import("hook/adapters/claude.zig");
+    const codex = @import("hook/adapters/codex.zig");
+    const gemini = @import("hook/adapters/gemini.zig");
+    const copilot = @import("hook/adapters/copilot.zig");
+    const pi = @import("hook/adapters/pi.zig");
+};
 const version_mod = @import("version.zig");
 
 const cli = struct {
@@ -38,12 +46,6 @@ const cli = struct {
     const completion = @import("cli/completion.zig");
     const reindex = @import("cli/reindex.zig");
     const version = @import("cli/version.zig");
-    const claude_hook = @import("cli/claude_hook.zig");
-    const claude_tool_batch_hook = @import("cli/claude_tool_batch_hook.zig");
-    const codex_hook = @import("cli/codex_hook.zig");
-    const gemini_hook = @import("cli/gemini_hook.zig");
-    const copilot_hook = @import("cli/copilot_hook.zig");
-    const pi_hook = @import("cli/pi_hook.zig");
 };
 
 pub const version = version_mod.value;
@@ -179,12 +181,12 @@ pub fn main(init: std.process.Init) !void {
         .privacy => try cli.privacy.run(init.io, init.gpa, &iter),
         .reindex => try cli.reindex.run(init.io, init.gpa, &iter),
         .completion => try cli.completion.run(init.io, init.gpa, &iter),
-        .@"claude-hook" => try cli.claude_hook.run(init.io, init.gpa, &iter),
-        .@"claude-tool-batch-hook" => try cli.claude_tool_batch_hook.run(init.io, init.gpa, &iter),
-        .@"codex-hook" => try cli.codex_hook.run(init.io, init.gpa, &iter),
-        .@"gemini-hook" => try cli.gemini_hook.run(init.io, init.gpa, &iter),
-        .@"copilot-hook" => try cli.copilot_hook.run(init.io, init.gpa, &iter),
-        .@"pi-hook" => try cli.pi_hook.run(init.io, init.gpa, &iter),
+        .@"claude-hook" => try hook_runner.run(init.io, init.gpa, &iter, hook_adapters.claude.hook_adapter),
+        .@"claude-tool-batch-hook" => try hook_runner.run(init.io, init.gpa, &iter, hook_adapters.claude.tool_batch_adapter),
+        .@"codex-hook" => try hook_runner.run(init.io, init.gpa, &iter, hook_adapters.codex.adapter),
+        .@"gemini-hook" => try hook_runner.run(init.io, init.gpa, &iter, hook_adapters.gemini.adapter),
+        .@"copilot-hook" => try hook_runner.run(init.io, init.gpa, &iter, hook_adapters.copilot.adapter),
+        .@"pi-hook" => try hook_runner.run(init.io, init.gpa, &iter, hook_adapters.pi.adapter),
     }
 
     try stdout.flush();
@@ -234,12 +236,6 @@ test {
     _ = @import("cli/docgen.zig");
     _ = @import("cli/output.zig");
     _ = @import("cli/registry.zig");
-    _ = @import("cli/claude_hook.zig");
-    _ = @import("cli/claude_tool_batch_hook.zig");
-    _ = @import("cli/codex_hook.zig");
-    _ = @import("cli/gemini_hook.zig");
-    _ = @import("cli/copilot_hook.zig");
-    _ = @import("cli/pi_hook.zig");
     _ = @import("cli/pi_extension.zig");
     _ = @import("cli/reindex.zig");
     _ = @import("cli/init.zig");
