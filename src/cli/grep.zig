@@ -71,18 +71,8 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
     var store = try status.openStoreOrExit(io, gpa, &stdout, options.format, usage.name);
     defer store.deinit(io);
 
-    var loaded_config = config_mod.loadOrDefaultFromStore(io, store.root, gpa) catch |err| {
-        try status.writeDiagnostic(&stdout, options.format, usage.name, .{
-            .code = "invalid_config",
-            .message = "Failed to load .agit/config.json.",
-            .hint = @errorName(err),
-            .path = ".agit/config.json",
-        });
-        try stdout.flush();
-        std.process.exit(1);
-    };
-    defer loaded_config.deinit();
-    const use_redaction = shared.shouldUseRedaction(options.redaction_mode, loaded_config.value.privacy.display.redacted_by_default);
+    var setup = try shared.loadQuerySetup(io, gpa, &store, &stdout, options.format, usage.name, options.redaction_mode);
+    defer setup.deinit();
 
     if (options.content) {
         try runContentSearch(
@@ -90,11 +80,11 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
             gpa,
             &stdout,
             &store,
-            &loaded_config,
+            &setup.config,
             trimmed_query,
             session_filter,
             options,
-            use_redaction,
+            setup.use_redaction,
         );
         try stdout.flush();
         return;
@@ -128,11 +118,11 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
             gpa,
             trimmed_query,
             matches,
-            use_redaction,
-            loaded_config.value.privacy.custom_literals,
+            setup.use_redaction,
+            setup.config.value.privacy.custom_literals,
         ),
         .json => {
-            if (!use_redaction) {
+            if (!setup.use_redaction) {
                 try output_mod.writeEnvelope(&stdout, usage.name, .{
                     .query = trimmed_query,
                     .origin = session_filter.origin,
@@ -148,7 +138,7 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
                 const json_matches = try buildJsonMatches(
                     gpa,
                     matches,
-                    loaded_config.value.privacy.custom_literals,
+                    setup.config.value.privacy.custom_literals,
                 );
                 defer freeJsonMatches(gpa, json_matches);
                 try output_mod.writeEnvelope(&stdout, usage.name, .{

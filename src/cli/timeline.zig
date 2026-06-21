@@ -44,18 +44,8 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
     var store = try status.openStoreOrExit(io, gpa, &stdout, .human, usage.name);
     defer store.deinit(io);
 
-    var loaded_config = config_mod.loadOrDefaultFromStore(io, store.root, gpa) catch |err| {
-        try status.writeDiagnostic(&stdout, .human, usage.name, .{
-            .code = "invalid_config",
-            .message = "Failed to load .agit/config.json.",
-            .hint = @errorName(err),
-            .path = ".agit/config.json",
-        });
-        try stdout.flush();
-        std.process.exit(1);
-    };
-    defer loaded_config.deinit();
-    const use_redaction = shared.shouldUseRedaction(options.redaction_mode, loaded_config.value.privacy.display.redacted_by_default);
+    var setup = try shared.loadQuerySetup(io, gpa, &store, &stdout, .human, usage.name, options.redaction_mode);
+    defer setup.deinit();
 
     const rows = store.index.listRecentSteps(gpa, .{
         .origin = session_filter.origin,
@@ -80,8 +70,8 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
         &stdout,
         &store,
         rows,
-        use_redaction,
-        loaded_config.value.privacy.custom_literals,
+        setup.use_redaction,
+        setup.config.value.privacy.custom_literals,
     );
     try stdout.flush();
 }

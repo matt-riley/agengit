@@ -1,4 +1,6 @@
 const std = @import("std");
+const config_mod = @import("../store/config.zig");
+const store_mod = @import("../store/store.zig");
 const output_mod = @import("output.zig");
 const status = @import("status.zig");
 
@@ -19,6 +21,38 @@ pub fn shouldUseRedaction(mode: RedactionMode, redacted_by_default: bool) bool {
         .redacted => true,
         .full => false,
     };
+}
+
+pub const QuerySetup = struct {
+    config: config_mod.Loaded,
+    use_redaction: bool,
+
+    pub fn deinit(self: *QuerySetup) void {
+        self.config.deinit();
+    }
+};
+
+pub fn loadQuerySetup(
+    io: std.Io,
+    gpa: std.mem.Allocator,
+    store: *const store_mod.Store,
+    stdout: *std.Io.File.Writer,
+    format: output_mod.Format,
+    command_name: []const u8,
+    redaction_mode: RedactionMode,
+) !QuerySetup {
+    const loaded_config = config_mod.loadOrDefaultFromStore(io, store.root, gpa) catch |err| {
+        try status.writeDiagnostic(stdout, format, command_name, .{
+            .code = "invalid_config",
+            .message = "Failed to load .agit/config.json.",
+            .hint = @errorName(err),
+            .path = ".agit/config.json",
+        });
+        try stdout.flush();
+        std.process.exit(1);
+    };
+    const use_redaction = shouldUseRedaction(redaction_mode, loaded_config.value.privacy.display.redacted_by_default);
+    return .{ .config = loaded_config, .use_redaction = use_redaction };
 }
 
 pub fn resolveSessionFilter(
