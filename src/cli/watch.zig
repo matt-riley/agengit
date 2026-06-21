@@ -55,18 +55,8 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
     defer store.deinit(io);
     try store.index.db.execNoArgs("pragma busy_timeout = 250");
 
-    var loaded_config = config_mod.loadOrDefaultFromStore(io, store.root, gpa) catch |err| {
-        try status.writeDiagnostic(&stdout, options.format, usage.name, .{
-            .code = "invalid_config",
-            .message = "Failed to load .agit/config.json.",
-            .hint = @errorName(err),
-            .path = ".agit/config.json",
-        });
-        try stdout.flush();
-        std.process.exit(1);
-    };
-    defer loaded_config.deinit();
-    const use_redaction = shared.shouldUseRedaction(options.redaction_mode, loaded_config.value.privacy.display.redacted_by_default);
+    var setup = try shared.loadQuerySetup(io, gpa, &store, &stdout, options.format, usage.name, options.redaction_mode);
+    defer setup.deinit();
 
     stop_requested.store(false, .release);
     const guards = installStopHandlers();
@@ -105,7 +95,7 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
             if (rows.len == 0) break;
             for (rows) |row| {
                 if (stop_requested.load(.acquire)) break;
-                try writeRow(io, gpa, &stdout, &store, row, options.format, use_redaction, loaded_config.value.privacy.custom_literals);
+                try writeRow(io, gpa, &stdout, &store, row, options.format, setup.use_redaction, setup.config.value.privacy.custom_literals);
                 cursor_rowid = row.rowid;
                 watched_count += 1;
                 try stdout.flush();

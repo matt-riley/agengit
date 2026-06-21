@@ -82,18 +82,8 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
     var store = try status.openStoreOrExit(io, gpa, &stdout, options.format, usage.name);
     defer store.deinit(io);
 
-    var loaded_config = config_mod.loadOrDefaultFromStore(io, store.root, gpa) catch |err| {
-        try status.writeDiagnostic(&stdout, options.format, usage.name, .{
-            .code = "invalid_config",
-            .message = "Failed to load .agit/config.json.",
-            .hint = @errorName(err),
-            .path = ".agit/config.json",
-        });
-        try stdout.flush();
-        std.process.exit(1);
-    };
-    defer loaded_config.deinit();
-    const use_redaction = shared.shouldUseRedaction(options.redaction_mode, loaded_config.value.privacy.display.redacted_by_default);
+    var setup = try shared.loadQuerySetup(io, gpa, &store, &stdout, options.format, usage.name, options.redaction_mode);
+    defer setup.deinit();
 
     const search_rows = if (trimmed_query) |query| blk: {
         const match_query = try shared.buildMatchQuery(gpa, query);
@@ -199,8 +189,8 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
             &stdout,
             &store,
             matches.items,
-            use_redaction,
-            loaded_config.value.privacy.custom_literals,
+            setup.use_redaction,
+            setup.config.value.privacy.custom_literals,
         ),
         .json => {
             const json_matches = try buildJsonMatches(
@@ -209,8 +199,8 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
                 &stdout,
                 &store,
                 matches.items,
-                use_redaction,
-                loaded_config.value.privacy.custom_literals,
+                setup.use_redaction,
+                setup.config.value.privacy.custom_literals,
             );
             defer freeJsonMatches(gpa, json_matches);
 
@@ -222,7 +212,7 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
                 .outcome = outcome_filter,
                 .judged = judged_filter,
                 .limit = options.limit,
-                .redacted = use_redaction,
+                .redacted = setup.use_redaction,
                 .matches = json_matches,
             });
         },
