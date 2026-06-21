@@ -5,17 +5,13 @@ const help_mod = @import("help.zig");
 const output_mod = @import("output.zig");
 const specs = @import("specs.zig");
 const arg_parse = @import("arg_parse.zig");
+const session_arg = @import("session_arg.zig");
 
 pub const usage = specs.log_usage;
 
 const LogOptions = struct {
     format: output_mod.Format = .human,
     session_arg: ?[:0]const u8 = null,
-};
-
-const SessionTarget = struct {
-    origin: []const u8,
-    session_id: []const u8,
 };
 
 pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator) !void {
@@ -29,11 +25,8 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
     var store = try status.openStoreOrExit(io, gpa, &stdout, options.format, usage.name);
     defer store.deinit(io);
 
-    const resolved = try resolveSessionArg(gpa, &store, options.session_arg, &stdout, options.format);
-    defer {
-        gpa.free(resolved.origin);
-        gpa.free(resolved.session_id);
-    }
+    const resolved = try session_arg.resolveExisting(gpa, &store, &stdout, options.format, usage.name, options.session_arg);
+    defer resolved.deinit(gpa);
 
     const steps = try store.index.listSteps(gpa, resolved.origin, resolved.session_id);
     defer store_mod.freeStepRows(gpa, steps);
@@ -49,7 +42,7 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
     try stdout.flush();
 }
 
-fn writeHuman(stdout: *std.Io.File.Writer, resolved: SessionTarget, steps: []const store_mod.StepRow) !void {
+fn writeHuman(stdout: *std.Io.File.Writer, resolved: session_arg.Target, steps: []const store_mod.StepRow) !void {
     if (steps.len == 0) {
         try stdout.interface.print("No steps recorded for {s}/{s}\n", .{
             resolved.origin,
@@ -75,54 +68,6 @@ fn writeHuman(stdout: *std.Io.File.Writer, resolved: SessionTarget, steps: []con
             try stdout.interface.print("  model {s}\n", .{model});
         }
     }
-}
-
-fn resolveSessionArg(
-    gpa: std.mem.Allocator,
-    store: *store_mod.Store,
-    arg: ?[:0]const u8,
-    stdout: *std.Io.File.Writer,
-    format: output_mod.Format,
-) !SessionTarget {
-    if (arg) |value| {
-        if (std.mem.indexOfScalar(u8, value, '/')) |sep| {
-            return .{
-                .origin = try gpa.dupe(u8, value[0..sep]),
-                .session_id = try gpa.dupe(u8, value[sep + 1 ..]),
-            };
-        }
-
-        const row = try store.index.db.row(
-            "select origin, session_id from sessions where session_id=? order by updated_at desc limit 1",
-            .{value},
-        ) orelse {
-            try status.writeDiagnostic(stdout, format, usage.name, .{
-                .code = "session_not_found",
-                .message = "Session not found.",
-                .hint = "Pass <origin>/<session-id> to disambiguate or run `agit sessions`.",
-                .path = value,
-            });
-            try stdout.flush();
-            std.process.exit(1);
-        };
-        defer row.deinit();
-        return .{
-            .origin = try gpa.dupe(u8, row.get([]const u8, 0)),
-            .session_id = try gpa.dupe(u8, row.get([]const u8, 1)),
-        };
-    }
-
-    const sess = try store.index.mostRecentSession(gpa) orelse {
-        try status.writeDiagnostic(stdout, format, usage.name, .{
-            .code = "session_not_found",
-            .message = "No sessions recorded yet.",
-            .hint = "Record some activity first or pass an explicit session id.",
-        });
-        try stdout.flush();
-        std.process.exit(1);
-    };
-    if (sess.head_hash) |hh| gpa.free(hh);
-    return .{ .origin = sess.origin, .session_id = sess.session_id };
 }
 
 fn parseOptions(iter: *std.process.Args.Iterator, stdout: *std.Io.File.Writer) !LogOptions {

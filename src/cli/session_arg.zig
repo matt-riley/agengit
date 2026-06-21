@@ -19,14 +19,32 @@ pub fn resolveExisting(
     stdout: *std.Io.File.Writer,
     format: output_mod.Format,
     command_name: []const u8,
-    arg: []const u8,
+    arg: ?[]const u8,
 ) !Target {
+    if (arg == null) {
+        const sess = try store.index.mostRecentSession(gpa) orelse {
+            try status.writeDiagnostic(stdout, format, command_name, .{
+                .code = "session_not_found",
+                .message = "No sessions recorded yet.",
+                .hint = "Record some activity first or pass an explicit session id.",
+            });
+            try stdout.flush();
+            std.process.exit(1);
+        };
+        if (sess.head_hash) |hh| gpa.free(hh);
+        return .{
+            .origin = sess.origin,
+            .session_id = sess.session_id,
+        };
+    }
+    const value = arg.?;
+
     const sessions = try store.index.listSessions(gpa);
     defer store_mod.freeSessionRows(gpa, sessions);
 
-    if (std.mem.indexOfScalar(u8, arg, '/')) |sep| {
-        const origin = arg[0..sep];
-        const session_id = arg[sep + 1 ..];
+    if (std.mem.indexOfScalar(u8, value, '/')) |sep| {
+        const origin = value[0..sep];
+        const session_id = value[sep + 1 ..];
         for (sessions) |session| {
             if (std.mem.eql(u8, session.origin, origin) and std.mem.eql(u8, session.session_id, session_id)) {
                 return .{
@@ -35,7 +53,7 @@ pub fn resolveExisting(
                 };
             }
         }
-        try writeSessionNotFound(stdout, format, command_name, arg);
+        try writeSessionNotFound(stdout, format, command_name, value);
         std.process.exit(1);
     }
 
@@ -49,7 +67,7 @@ pub fn resolveExisting(
     }
 
     for (sessions) |session| {
-        if (!std.mem.eql(u8, session.session_id, arg)) continue;
+        if (!std.mem.eql(u8, session.session_id, value)) continue;
         match_count += 1;
         try candidates.append(gpa, try std.fmt.allocPrint(gpa, "{s}/{s}", .{ session.origin, session.session_id }));
         if (matched == null) {
@@ -61,7 +79,7 @@ pub fn resolveExisting(
     }
 
     if (match_count == 0) {
-        try writeSessionNotFound(stdout, format, command_name, arg);
+        try writeSessionNotFound(stdout, format, command_name, value);
         std.process.exit(1);
     }
     if (match_count > 1) {
@@ -69,7 +87,7 @@ pub fn resolveExisting(
             .code = "ambiguous_session_id",
             .message = "Session id is ambiguous.",
             .hint = "Pass <origin>/<session-id> to disambiguate.",
-            .path = arg,
+            .path = value,
             .candidates = candidates.items,
         });
         try stdout.flush();
