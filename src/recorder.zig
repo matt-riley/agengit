@@ -173,8 +173,139 @@ fn findStoreRoot(io: std.Io, start: std.Io.Dir) !std.Io.Dir {
     }
 }
 
-/// Read and parse a TurnState from a JSON staging file.
-/// Returns null if the file is absent or the JSON is corrupt.
+/// A single append-only event stored as one JSONL line in the staging file.
+///
+/// The staging file is newline-delimited JSON: each hook call appends one
+/// self-contained event line. On finalize the file is replayed line-by-line
+/// to rebuild the `TurnState` in arrival order, instead of re-reading and
+/// re-writing the whole document on every hook call.
+const StagingEvent = struct {
+    op: []const u8,
+    role: ?[]const u8 = null,
+    content: ?[]const u8 = null,
+    tool_name: ?[]const u8 = null,
+    args: ?[]const u8 = null,
+    result: ?[]const u8 = null,
+    model: ?[]const u8 = null,
+    cause: ?Cause = null,
+};
+
+/// Parse staging file data into a `TurnState`.
+///
+/// The new format is newline-delimited JSON (one `StagingEvent` per line).
+/// An append that crashed mid-write leaves a trailing partial line; that
+/// final line is skipped on parse failure when at least one prior event was
+/// already read (truncation tolerance — strictly more robust than the old
+/// full-document parse, which lost the whole turn on any truncation).
+///
+/// For in-flight files written by the prior read-modify-write format (a
+/// single full JSON `TurnState` document, which has no `op` field and so
+/// fails to parse as a `StagingEvent`), this falls back to a full-document
+/// parse so an upgrade does not abandon a turn mid-flight.
+///
+/// Returns null for empty/whitespace-only data (an empty `TurnState`).
+/// Returns an error if the data is neither valid JSONL nor a parseable
+/// full document, so the caller can quarantine it.
+fn parseStagingData(
+    gpa: std.mem.Allocator,
+    data: []const u8,
+) !?std.json.Parsed(TurnState) {
+    if (std.mem.trim(u8, data, " \t\r\n").len == 0) return null;
+
+    const arena_ptr = try gpa.create(std.heap.ArenaAllocator);
+    arena_ptr.* = std.heap.ArenaAllocator.init(gpa);
+    // `arena_released` is set whenever ownership of `arena_ptr` is transferred
+    // away (to a `Parsed` on success, or freed before the legacy fallback).
+    var arena_released = false;
+    defer if (!arena_released) {
+        arena_ptr.deinit();
+        gpa.destroy(arena_ptr);
+    };
+    const arena = arena_ptr.allocator();
+
+    var msgs: std.ArrayList(StepMessage) = .empty;
+    var tcs: std.ArrayList(StepToolCall) = .empty;
+    var causes: std.ArrayList(Cause) = .empty;
+    var model: ?[]const u8 = null;
+
+    // Collect non-empty line slices (views into `data`) so we can tell which
+    // is last. Turn event counts are small; the whole point of the rewrite is
+    // one O(lines) pass instead of N full rewrites.
+    var lines: std.ArrayList([]const u8) = .empty;
+    defer lines.deinit(gpa);
+    var it = std.mem.splitScalar(u8, data, '\n');
+    while (it.next()) |raw| {
+        const trimmed = std.mem.trim(u8, raw, " \t\r");
+        if (trimmed.len == 0) continue;
+        try lines.append(gpa, trimmed);
+    }
+    if (lines.items.len == 0) return null;
+
+    var jsonl_ok = true;
+    var saw_event = false;
+    for (lines.items, 0..) |line, i| {
+        var ev = std.json.parseFromSlice(StagingEvent, gpa, line, .{ .allocate = .alloc_always, .ignore_unknown_fields = true }) catch {
+            const is_last = (i == lines.items.len - 1);
+            // Truncation tolerance: a partial trailing line is skippable only
+            // when we already have at least one complete event line (regardless
+            // of op). Otherwise the file is garbage or an old-format single
+            // document — fall back to the full-document parse below.
+            if (is_last and saw_event) break;
+            jsonl_ok = false;
+            break;
+        };
+        defer ev.deinit();
+        saw_event = true;
+
+        const op = ev.value.op;
+        if (std.mem.eql(u8, op, "message")) {
+            if (ev.value.role) |r| {
+                try msgs.append(arena, .{
+                    .role = try arena.dupe(u8, r),
+                    .content = try arena.dupe(u8, ev.value.content orelse ""),
+                });
+            }
+        } else if (std.mem.eql(u8, op, "tool_call")) {
+            try tcs.append(arena, .{
+                .tool_name = try arena.dupe(u8, ev.value.tool_name orelse ""),
+                .args = try arena.dupe(u8, ev.value.args orelse ""),
+                .result = if (ev.value.result) |r| try arena.dupe(u8, r) else null,
+            });
+        } else if (std.mem.eql(u8, op, "model")) {
+            if (ev.value.model) |m| model = try arena.dupe(u8, m);
+        } else if (std.mem.eql(u8, op, "cause")) {
+            if (ev.value.cause) |c| {
+                try causes.append(arena, .{
+                    .kind = try arena.dupe(u8, c.kind),
+                    .ref = try arena.dupe(u8, c.ref),
+                });
+            }
+        }
+        // Unknown ops are ignored (forward-compat for new event kinds).
+    }
+
+    if (!jsonl_ok) {
+        // Fall back to the legacy single-document TurnState format. Release
+        // this arena first so the deferred cleanup does not double-free.
+        arena_ptr.deinit();
+        gpa.destroy(arena_ptr);
+        arena_released = true;
+        return try std.json.parseFromSlice(TurnState, gpa, data, .{ .allocate = .alloc_always });
+    }
+
+    const turn: TurnState = .{
+        .messages = try arena.dupe(StepMessage, msgs.items),
+        .tool_calls = try arena.dupe(StepToolCall, tcs.items),
+        .causes = try arena.dupe(Cause, causes.items),
+        .model = model,
+    };
+    // Transfer ownership of the arena to the returned `Parsed`.
+    arena_released = true;
+    return .{ .arena = arena_ptr, .value = turn };
+}
+
+/// Read and parse a `TurnState` from a JSON staging file.
+/// Returns null if the file is absent or empty.
 fn readStagingFile(
     io: std.Io,
     agit_dir: std.Io.Dir,
@@ -186,25 +317,7 @@ fn readStagingFile(
         else => return err,
     };
     defer gpa.free(data);
-    return std.json.parseFromSlice(TurnState, gpa, data, .{ .allocate = .alloc_always }) catch null;
-}
-
-/// Serialize `state` to JSON and write it atomically, replacing any prior content.
-fn writeStagingFile(
-    io: std.Io,
-    agit_dir: std.Io.Dir,
-    gpa: std.mem.Allocator,
-    path: []const u8,
-    state: TurnState,
-) !void {
-    var aw: std.Io.Writer.Allocating = .init(gpa);
-    defer aw.deinit();
-    try std.json.Stringify.value(state, .{}, &aw.writer);
-
-    var af = try agit_dir.createFileAtomic(io, path, .{ .replace = true, .make_path = false });
-    defer af.deinit(io);
-    try af.file.writeStreamingAll(io, aw.writer.buffered());
-    try fs_mod.atomicReplace(io, &af);
+    return parseStagingData(gpa, data);
 }
 
 /// The Phase 4 recorder: bridges the agent hook adapters (Phase 5) with the
@@ -552,8 +665,16 @@ pub const Recorder = struct {
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
-    /// Append a message to the staging file, under the staging lock.
-    fn appendMessage(self: *Recorder, io: std.Io, key: *const [64]u8, msg: StepMessage) !void {
+    /// Append a single JSONL event line to the staging file, under the staging
+    /// lock. No read, no parse, no full rewrite — one small positional append.
+    /// Durability mirrors `appendHookLog`: fsync the file content, then sync the
+    /// `tmp/` directory (which no-ops when `AGIT_FSYNC` is disabled).
+    fn appendStagingEvent(self: *Recorder, io: std.Io, key: *const [64]u8, event: StagingEvent) !void {
+        var aw: std.Io.Writer.Allocating = .init(self.gpa);
+        defer aw.deinit();
+        try std.json.Stringify.value(event, .{ .emit_null_optional_fields = false }, &aw.writer);
+        const line = aw.writer.buffered();
+
         // "tmp/" (4) + key (64) + ".json" (5) = 73 chars
         var path_buf: [73]u8 = undefined;
         const path = std.fmt.bufPrint(&path_buf, "tmp/{s}.json", .{key.*}) catch unreachable;
@@ -564,67 +685,40 @@ pub const Recorder = struct {
         var lock = try file_lock_mod.LockFile.acquire(io, self.store.root, lock_path, .{});
         defer lock.release(io);
 
-        var existing = try readStagingFile(io, self.store.root, self.gpa, path);
-        defer if (existing) |*p| p.deinit();
-        const ev: TurnState = if (existing) |p| p.value else .{};
+        var file = try self.store.root.createFile(io, path, .{ .read = true, .truncate = false });
+        defer file.close(io);
 
-        var new_msgs: std.ArrayList(StepMessage) = .empty;
-        defer new_msgs.deinit(self.gpa);
-        try new_msgs.appendSlice(self.gpa, ev.messages);
-        try new_msgs.append(self.gpa, msg);
+        const offset = try file.length(io);
+        try file.writePositionalAll(io, line, offset);
+        try file.writePositionalAll(io, "\n", offset + line.len);
+        try file.sync(io);
+        var tmp_dir = try self.store.root.openDir(io, "tmp", .{});
+        defer tmp_dir.close(io);
+        try fs_mod.syncDir(io, tmp_dir);
+    }
 
-        try writeStagingFile(io, self.store.root, self.gpa, path, .{
-            .messages = new_msgs.items,
-            .tool_calls = ev.tool_calls,
-            .causes = ev.causes,
-            .model = ev.model,
+    /// Append a message to the staging file, under the staging lock.
+    fn appendMessage(self: *Recorder, io: std.Io, key: *const [64]u8, msg: StepMessage) !void {
+        try self.appendStagingEvent(io, key, .{
+            .op = "message",
+            .role = msg.role,
+            .content = msg.content,
         });
     }
 
     /// Append a tool call to the staging file, under the staging lock.
     fn appendToolCall(self: *Recorder, io: std.Io, key: *const [64]u8, tc: StepToolCall) !void {
-        var path_buf: [73]u8 = undefined;
-        const path = std.fmt.bufPrint(&path_buf, "tmp/{s}.json", .{key.*}) catch unreachable;
-        var lock_buf: [78]u8 = undefined;
-        const lock_path = std.fmt.bufPrint(&lock_buf, "tmp/{s}.json.lock", .{key.*}) catch unreachable;
-
-        var lock = try file_lock_mod.LockFile.acquire(io, self.store.root, lock_path, .{});
-        defer lock.release(io);
-
-        var existing = try readStagingFile(io, self.store.root, self.gpa, path);
-        defer if (existing) |*p| p.deinit();
-        const ev: TurnState = if (existing) |p| p.value else .{};
-
-        var new_tcs: std.ArrayList(StepToolCall) = .empty;
-        defer new_tcs.deinit(self.gpa);
-        try new_tcs.appendSlice(self.gpa, ev.tool_calls);
-        try new_tcs.append(self.gpa, tc);
-
-        try writeStagingFile(io, self.store.root, self.gpa, path, .{
-            .messages = ev.messages,
-            .tool_calls = new_tcs.items,
-            .causes = ev.causes,
-            .model = ev.model,
+        try self.appendStagingEvent(io, key, .{
+            .op = "tool_call",
+            .tool_name = tc.tool_name,
+            .args = tc.args,
+            .result = tc.result,
         });
     }
 
     fn setStagingModel(self: *Recorder, io: std.Io, key: *const [64]u8, model: []const u8) !void {
-        var path_buf: [73]u8 = undefined;
-        const path = std.fmt.bufPrint(&path_buf, "tmp/{s}.json", .{key.*}) catch unreachable;
-        var lock_buf: [78]u8 = undefined;
-        const lock_path = std.fmt.bufPrint(&lock_buf, "tmp/{s}.json.lock", .{key.*}) catch unreachable;
-
-        var lock = try file_lock_mod.LockFile.acquire(io, self.store.root, lock_path, .{});
-        defer lock.release(io);
-
-        var existing = try readStagingFile(io, self.store.root, self.gpa, path);
-        defer if (existing) |*p| p.deinit();
-        const ev: TurnState = if (existing) |p| p.value else .{};
-
-        try writeStagingFile(io, self.store.root, self.gpa, path, .{
-            .messages = ev.messages,
-            .tool_calls = ev.tool_calls,
-            .causes = ev.causes,
+        try self.appendStagingEvent(io, key, .{
+            .op = "model",
             .model = model,
         });
     }
@@ -662,9 +756,7 @@ pub const Recorder = struct {
         };
         defer self.gpa.free(data);
 
-        const parsed = std.json.parseFromSlice(TurnState, self.gpa, data, .{
-            .allocate = .alloc_always,
-        }) catch |err| {
+        const parsed = parseStagingData(self.gpa, data) catch |err| {
             var quarantine_buf: [128]u8 = undefined;
             const quarantine_path = try self.quarantineStagingData(io, key, path, data, &quarantine_buf);
             self.logHookFailure(io, "recorder-finalize", err, .{
@@ -1103,4 +1195,134 @@ test "logError: repeated writes preserve one line per failure" {
     }
     try std.testing.expectEqual(@as(usize, 3), lines);
     try std.testing.expect(std.mem.indexOf(u8, log, "invalid_field_type") != null);
+}
+
+test "append-only staging: append message/tool/model replay in arrival order" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+
+    var rec = try makeRecorder(io, tmp.dir, gpa);
+    defer rec.deinit(io);
+
+    const meta: SessionMeta = .{ .origin = "test", .session_id = "s1" };
+
+    // setStagingModel is reachable only via recordTurnModel (which gates empty).
+    try rec.recordTurnModel(io, meta, "t1", "claude-opus");
+    try rec.recordUserPrompt(io, meta, "t1", .{ .content = "hello" });
+    try rec.recordToolUse(io, meta, "t1", .{ .tool_name = "bash", .args = "ls", .result = "ok" });
+    try rec.recordToolUse(io, meta, "t1", .{ .tool_name = "grep", .args = "foo", .result = null });
+
+    const key = stagingKey(meta.origin, meta.session_id, "t1");
+    var path_buf: [73]u8 = undefined;
+    const path = std.fmt.bufPrint(&path_buf, "tmp/{s}.json", .{key}) catch unreachable;
+    var parsed = try readStagingFile(io, rec.store.root, gpa, path);
+    defer if (parsed) |*pp| pp.deinit();
+
+    try std.testing.expect(parsed != null);
+    const st = parsed.?.value;
+    try std.testing.expectEqual(@as(usize, 1), st.messages.len);
+    try std.testing.expectEqualStrings("user", st.messages[0].role);
+    try std.testing.expectEqualStrings("hello", st.messages[0].content);
+    try std.testing.expectEqual(@as(usize, 2), st.tool_calls.len);
+    try std.testing.expectEqualStrings("bash", st.tool_calls[0].tool_name);
+    try std.testing.expectEqualStrings("grep", st.tool_calls[1].tool_name);
+    try std.testing.expect(st.tool_calls[1].result == null);
+    try std.testing.expectEqualStrings("claude-opus", st.model.?);
+}
+
+test "append-only staging: truncated final JSONL line is tolerated" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+
+    var rec = try makeRecorder(io, tmp.dir, gpa);
+    defer rec.deinit(io);
+
+    const meta: SessionMeta = .{ .origin = "test", .session_id = "s1" };
+    try rec.recordUserPrompt(io, meta, "t1", .{ .content = "first" });
+    try rec.recordToolUse(io, meta, "t1", .{ .tool_name = "bash", .args = "ls", .result = "ok" });
+
+    const key = stagingKey(meta.origin, meta.session_id, "t1");
+    var path_buf: [73]u8 = undefined;
+    const path = std.fmt.bufPrint(&path_buf, "tmp/{s}.json", .{key}) catch unreachable;
+
+    // Append a partial (unterminated) final line to simulate a crash mid-write.
+    var f = try rec.store.root.createFile(io, path, .{ .read = true, .truncate = false });
+    const offset = try f.length(io);
+    try f.writePositionalAll(io, "{\"op\":\"tool_call\",\"bad", offset);
+    f.close(io);
+
+    var parsed = try readStagingFile(io, rec.store.root, gpa, path);
+    defer if (parsed) |*pp| pp.deinit();
+
+    try std.testing.expect(parsed != null);
+    const st = parsed.?.value;
+    // The two complete events are recovered; the partial tail is skipped.
+    try std.testing.expectEqual(@as(usize, 1), st.messages.len);
+    try std.testing.expectEqualStrings("first", st.messages[0].content);
+    try std.testing.expectEqual(@as(usize, 1), st.tool_calls.len);
+    try std.testing.expectEqualStrings("bash", st.tool_calls[0].tool_name);
+}
+
+test "append-only staging: legacy single-document staging file is readable (dual-read)" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+
+    var rec = try makeRecorder(io, tmp.dir, gpa);
+    defer rec.deinit(io);
+
+    const meta: SessionMeta = .{ .origin = "test", .session_id = "s1" };
+    const key = stagingKey(meta.origin, meta.session_id, "t1");
+    var path_buf: [73]u8 = undefined;
+    const path = std.fmt.bufPrint(&path_buf, "tmp/{s}.json", .{key}) catch unreachable;
+
+    // Write the OLD read-modify-write format: a single full TurnState document.
+    const legacy =
+        \\{"messages":[{"role":"user","content":"legacy"}],"tool_calls":[{"tool_name":"grep","args":"x","result":"y"}],"causes":[],"model":"legacy-model"}
+    ;
+    var f = try rec.store.root.createFile(io, path, .{});
+    try f.writeStreamingAll(io, legacy);
+    f.close(io);
+
+    var parsed = try readStagingFile(io, rec.store.root, gpa, path);
+    defer if (parsed) |*pp| pp.deinit();
+
+    try std.testing.expect(parsed != null);
+    const st = parsed.?.value;
+    try std.testing.expectEqual(@as(usize, 1), st.messages.len);
+    try std.testing.expectEqualStrings("legacy", st.messages[0].content);
+    try std.testing.expectEqual(@as(usize, 1), st.tool_calls.len);
+    try std.testing.expectEqualStrings("grep", st.tool_calls[0].tool_name);
+    try std.testing.expectEqualStrings("legacy-model", st.model.?);
+}
+
+test "append-only staging: garbage-only file fails to parse (not silently skipped)" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+
+    var rec = try makeRecorder(io, tmp.dir, gpa);
+    defer rec.deinit(io);
+
+    const meta: SessionMeta = .{ .origin = "test", .session_id = "s1" };
+    const key = stagingKey(meta.origin, meta.session_id, "t1");
+    var path_buf: [73]u8 = undefined;
+    const path = std.fmt.bufPrint(&path_buf, "tmp/{s}.json", .{key}) catch unreachable;
+
+    var f = try rec.store.root.createFile(io, path, .{});
+    try f.writeStreamingAll(io, "{not-json");
+    f.close(io);
+
+    // A file with zero complete events is corrupt: dual-read falls back to the
+    // full-document parse, which also fails -> error (not an empty TurnState).
+    try std.testing.expectError(
+        error.CorruptStaging,
+        rec.recordAssistantAndFinalize(io, meta, "t1", .{ .content = "ok" }, &.{}),
+    );
 }
