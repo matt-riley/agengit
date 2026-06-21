@@ -1,10 +1,11 @@
 const std = @import("std");
 const output_mod = @import("output.zig");
+const preview_mod = @import("../store/preview.zig");
 const redact_mod = @import("../privacy/redact.zig");
 const status = @import("status.zig");
 const store_mod = @import("../store/store.zig");
 
-pub const preview_limit: usize = 96;
+pub const preview_limit: usize = preview_mod.preview_limit;
 
 pub fn writeHumanRow(
     io: std.Io,
@@ -61,6 +62,20 @@ pub fn previewAllocForRow(
     use_redaction: bool,
     custom_literals: []const []const u8,
 ) ![]u8 {
+    // Hot path: the index already stores the normalized preview computed at
+    // finalize/reindex time, so we only need the per-viewer redaction pass.
+    if (row.preview) |stored| {
+        if (stored.len > 0) {
+            const redacted = if (use_redaction) try redact_mod.redactAlloc(gpa, stored, .{
+                .custom_literals = custom_literals,
+            }) else stored;
+            defer if (use_redaction) gpa.free(redacted);
+            return try gpa.dupe(u8, redacted);
+        }
+    }
+
+    // Fallback for pre-migration or unreindexed steps: re-read the step blob and
+    // rebuild the preview exactly as before, so old stores still render.
     const hash = store_mod.Hash.fromHex(row.hash) catch {
         try status.writeDiagnostic(stdout, format, command_name, .{
             .code = "invalid_step_hash",
@@ -82,63 +97,11 @@ pub fn previewAllocForRow(
     };
     defer parsed.deinit();
 
-    const preview_source = choosePreview(parsed.value);
+    const preview_source = preview_mod.choosePreview(parsed.value);
     const preview_text = if (use_redaction) try redact_mod.redactAlloc(gpa, preview_source, .{
         .custom_literals = custom_literals,
     }) else preview_source;
     defer if (use_redaction) gpa.free(preview_text);
 
-    return try normalizePreviewAlloc(gpa, preview_text, preview_limit);
-}
-
-fn choosePreview(step: store_mod.Step) []const u8 {
-    for (step.messages) |message| {
-        if (std.mem.eql(u8, message.role, "user") and message.content.len > 0) return message.content;
-    }
-    for (step.messages) |message| {
-        if (std.mem.eql(u8, message.role, "assistant") and message.content.len > 0) return message.content;
-    }
-    for (step.tool_calls) |tool_call| {
-        if (tool_call.result) |result| {
-            if (result.len > 0) return result;
-        }
-        if (tool_call.args.len > 0) return tool_call.args;
-        if (tool_call.tool_name.len > 0) return tool_call.tool_name;
-    }
-    return "(no preview)";
-}
-
-fn normalizePreviewAlloc(gpa: std.mem.Allocator, text: []const u8, limit: usize) ![]u8 {
-    var out: std.ArrayList(u8) = .empty;
-    errdefer out.deinit(gpa);
-
-    var previous_was_space = false;
-    var i: usize = 0;
-    while (i < text.len and out.items.len < limit) : (i += 1) {
-        const ch = text[i];
-        const normalized = switch (ch) {
-            '\r', '\n', '\t' => ' ',
-            else => ch,
-        };
-
-        if (normalized == ' ') {
-            if (previous_was_space or out.items.len == 0) continue;
-            previous_was_space = true;
-        } else {
-            previous_was_space = false;
-        }
-        try out.append(gpa, normalized);
-    }
-
-    while (out.items.len > 0 and out.items[out.items.len - 1] == ' ') {
-        _ = out.pop().?;
-    }
-
-    if (i < text.len and out.items.len > 0) {
-        if (out.items.len == limit) _ = out.pop().?;
-        try out.appendSlice(gpa, "…");
-    }
-
-    if (out.items.len == 0) try out.appendSlice(gpa, "(empty preview)");
-    return out.toOwnedSlice(gpa);
+    return try preview_mod.normalizePreviewAlloc(gpa, preview_text, preview_limit);
 }
