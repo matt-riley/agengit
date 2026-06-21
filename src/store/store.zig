@@ -10,6 +10,7 @@ const outcome_mod = @import("outcome.zig");
 const snapshot_mod = @import("snapshot.zig");
 const blame_mod = @import("blame.zig");
 const zqlite = @import("zqlite");
+const preview_mod = @import("preview.zig");
 
 pub const Hash = hash_mod.Hash;
 pub const Tree = object.Tree;
@@ -684,6 +685,8 @@ pub const Store = struct {
             defer parsed.deinit();
             const step = parsed.value;
             try self.index.insertObject(&hex, "step", raw.len);
+            const preview_str = try preview_mod.computePreviewAlloc(gpa, step);
+            defer gpa.free(preview_str);
             try self.index.insertStep(
                 &hex,
                 step.origin,
@@ -697,6 +700,7 @@ pub const Store = struct {
                 step.git_commit,
                 step.git_branch,
                 step.git_dirty,
+                preview_str,
             );
             for (step.messages, 0..) |msg, seq| {
                 try self.index.insertMessage(&hex, @intCast(seq), msg.role, msg.content);
@@ -977,6 +981,8 @@ pub const Store = struct {
 
         try self.index.insertObject(&step_hex, "step", step_write.size);
         try self.index.upsertSession(input.origin, input.session_id, &step_hex);
+        const preview_str = try preview_mod.computePreviewAlloc(gpa, step);
+        defer gpa.free(preview_str);
         try self.index.insertStep(
             &step_hex,
             input.origin,
@@ -990,6 +996,7 @@ pub const Store = struct {
             input.git_commit,
             input.git_branch,
             input.git_dirty,
+            preview_str,
         );
         for (input.messages, 0..) |msg, i| {
             try self.index.insertMessage(&step_hex, @intCast(i), msg.role, msg.content);
@@ -1086,6 +1093,8 @@ pub const Store = struct {
         try self.index.upsertSession(origin, session_id, new_hex_str);
 
         const parent_hex_buf = if (step.parent) |p| p else null;
+        const preview_str = try preview_mod.computePreviewAlloc(gpa, step.*);
+        defer gpa.free(preview_str);
         try self.index.insertStep(
             new_hex_str,
             origin,
@@ -1099,6 +1108,7 @@ pub const Store = struct {
             step.git_commit,
             step.git_branch,
             step.git_dirty,
+            preview_str,
         );
         for (messages, 0..) |msg, i| {
             try self.index.insertMessage(new_hex_str, @intCast(i), msg.role, msg.content);

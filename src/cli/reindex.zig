@@ -6,6 +6,7 @@ const hash_mod = @import("../store/hash.zig");
 const pack_mod = @import("../store/pack.zig");
 const help_mod = @import("help.zig");
 const specs = @import("specs.zig");
+const preview_mod = @import("../store/preview.zig");
 
 pub const usage = specs.reindex_usage;
 
@@ -297,6 +298,8 @@ fn indexStepData(
         gpa.free(sess_key);
     }
 
+    const preview_str = try preview_mod.computePreviewAlloc(gpa, step);
+    defer gpa.free(preview_str);
     try store.index.insertStep(
         object_hex,
         step.origin,
@@ -310,6 +313,7 @@ fn indexStepData(
         step.git_commit,
         step.git_branch,
         step.git_dirty,
+        preview_str,
     );
     for (step.messages, 0..) |msg, i| {
         try store.index.insertMessage(object_hex, @intCast(i), msg.role, msg.content);
@@ -432,6 +436,8 @@ fn replayFromHead(
         defer parsed.deinit();
         const step = parsed.value;
         try store.index.insertObject(&h_hex, "step", raw.len);
+        const preview_str = try preview_mod.computePreviewAlloc(gpa, step);
+        defer gpa.free(preview_str);
         try store.index.insertStep(
             &h_hex,
             step.origin,
@@ -445,6 +451,7 @@ fn replayFromHead(
             step.git_commit,
             step.git_branch,
             step.git_dirty,
+            preview_str,
         );
         for (step.messages, 0..) |msg, seq| {
             try store.index.insertMessage(&h_hex, @intCast(seq), msg.role, msg.content);
@@ -533,6 +540,16 @@ test "reindex repairs missing rows from objects and refs" {
     try std.testing.expect(msg_row != null);
     defer msg_row.?.deinit();
     try std.testing.expectEqualStrings("ok", msg_row.?.get([]const u8, 0));
+
+    // Reindex backfills the preview column from the parsed step, so list views
+    // never need to re-read the blob even for stores that pre-date the column.
+    const preview_row = try store.index.db.row(
+        "select preview from steps where hash=?",
+        .{&h_hex},
+    );
+    try std.testing.expect(preview_row != null);
+    defer preview_row.?.deinit();
+    try std.testing.expectEqualStrings("ok", preview_row.?.get([]const u8, 0));
 
     try std.testing.expect(try store.index.hasObject(&h_hex));
     try std.testing.expectEqual(true, (try store.index.getObjectsComplete()).?);
