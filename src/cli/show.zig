@@ -5,6 +5,7 @@ const object_mod = @import("../store/object.zig");
 const redact_mod = @import("../privacy/redact.zig");
 const store_mod = @import("../store/store.zig");
 const status = @import("status.zig");
+const arg_parse = @import("arg_parse.zig");
 const help_mod = @import("help.zig");
 const output_mod = @import("output.zig");
 const specs = @import("specs.zig");
@@ -324,16 +325,7 @@ fn parseOptions(iter: *std.process.Args.Iterator, stdout: *std.Io.File.Writer) !
         } else if (options.hash_prefix == null) {
             options.hash_prefix = arg;
         } else {
-            try status.writeDiagnostic(stdout, options.format, usage.name, .{
-                .code = "invalid_argument",
-                .message = "Unexpected argument.",
-                .hint = arg,
-            });
-            if (options.format == .human) {
-                try stdout.interface.writeAll("\n");
-                try help_mod.renderUsage(stdout, usage);
-            }
-            try stdout.flush();
+            arg_parse.invalidArg(stdout, options.format, usage, "Unexpected argument.") catch {};
             std.process.exit(1);
         }
     }

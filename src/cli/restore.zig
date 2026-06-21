@@ -7,6 +7,7 @@ const status = @import("status.zig");
 const help_mod = @import("help.zig");
 const output_mod = @import("output.zig");
 const specs = @import("specs.zig");
+const arg_parse = @import("arg_parse.zig");
 
 pub const usage = specs.restore_usage;
 
@@ -196,33 +197,21 @@ fn parseOptions(gpa: std.mem.Allocator, iter: *std.process.Args.Iterator, stdout
             try stdout.flush();
             return error.HelpShown;
         } else if (std.mem.startsWith(u8, arg, "-")) {
-            try invalidArgument(stdout, options.format, "Unknown option.");
+            try arg_parse.invalidArg(stdout, options.format, usage, "Unknown option.");
             return error.InvalidArgument;
         } else if (options.hash_prefix == null) {
             options.hash_prefix = arg;
         } else {
-            try invalidArgument(stdout, options.format, "Unexpected argument.");
+            try arg_parse.invalidArg(stdout, options.format, usage, "Unexpected argument.");
             return error.InvalidArgument;
         }
     }
 
     if (path_mode and options.filters.items.len == 0) {
-        try invalidArgument(stdout, options.format, "`--` must be followed by at least one captured path.");
+        try arg_parse.invalidArg(stdout, options.format, usage, "`--` must be followed by at least one captured path.");
         return error.InvalidArgument;
     }
     return options;
-}
-
-fn invalidArgument(stdout: *std.Io.File.Writer, format: output_mod.Format, message: []const u8) !void {
-    try status.writeDiagnostic(stdout, format, usage.name, .{
-        .code = "invalid_argument",
-        .message = message,
-    });
-    if (format == .human) {
-        try stdout.interface.writeAll("\n");
-        try help_mod.renderUsage(stdout, usage);
-    }
-    try stdout.flush();
 }
 
 fn validateRequestedFilters(stdout: *std.Io.File.Writer, options: RestoreOptions) !void {

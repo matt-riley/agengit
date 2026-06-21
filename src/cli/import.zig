@@ -5,6 +5,7 @@ const help_mod = @import("help.zig");
 const output_mod = @import("output.zig");
 const specs = @import("specs.zig");
 const status_cmd = @import("status.zig");
+const arg_parse = @import("arg_parse.zig");
 
 pub const usage = specs.import_usage;
 
@@ -30,7 +31,7 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
     defer options.deinit(gpa);
 
     const bundle_path = options.path orelse {
-        try invalidArgument(&stdout, options.format, "import requires a bundle directory path.");
+        try arg_parse.invalidArg(&stdout, options.format, usage, "import requires a bundle directory path.");
         return;
     };
 
@@ -98,11 +99,11 @@ fn parseOptions(
             options.format = .json;
         } else if (std.mem.eql(u8, arg, "--replace-ref")) {
             const value = iter.next() orelse {
-                try invalidArgument(stdout, options.format, "--replace-ref requires an origin/session-id value.");
+                try arg_parse.invalidArg(stdout, options.format, usage, "--replace-ref requires an origin/session-id value.");
                 return error.InvalidArgument;
             };
             const session = parseSessionSpec(value) catch {
-                try invalidArgument(stdout, options.format, "Invalid --replace-ref value; use origin/session-id.");
+                try arg_parse.invalidArg(stdout, options.format, usage, "Invalid --replace-ref value; use origin/session-id.");
                 return error.InvalidArgument;
             };
             try options.replace_refs.append(gpa, session);
@@ -111,12 +112,12 @@ fn parseOptions(
             try stdout.flush();
             return error.HelpShown;
         } else if (std.mem.startsWith(u8, arg, "-")) {
-            try invalidArgument(stdout, options.format, "Unknown option.");
+            try arg_parse.invalidArg(stdout, options.format, usage, "Unknown option.");
             return error.InvalidArgument;
         } else if (options.path == null) {
             options.path = arg;
         } else {
-            try invalidArgument(stdout, options.format, "import accepts only one bundle directory path.");
+            try arg_parse.invalidArg(stdout, options.format, usage, "import accepts only one bundle directory path.");
             return error.InvalidArgument;
         }
     }
@@ -131,17 +132,4 @@ fn parseSessionSpec(raw: []const u8) !bundle_mod.SessionFilter {
         .origin = raw[0..sep],
         .session_id = raw[sep + 1 ..],
     };
-}
-
-fn invalidArgument(stdout: *std.Io.File.Writer, format: output_mod.Format, message: []const u8) !void {
-    try status_cmd.writeDiagnostic(stdout, format, usage.name, .{
-        .code = "invalid_argument",
-        .message = message,
-    });
-    if (format == .human) {
-        try stdout.interface.writeAll("\n");
-        try help_mod.renderUsage(stdout, usage);
-    }
-    try stdout.flush();
-    std.process.exit(1);
 }

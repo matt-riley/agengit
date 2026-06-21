@@ -8,6 +8,7 @@ const specs = @import("specs.zig");
 const status_cmd = @import("status.zig");
 const store_mod = @import("../store/store.zig");
 const date_util = @import("../util/date.zig");
+const arg_parse = @import("arg_parse.zig");
 
 pub const usage = specs.gc_usage;
 
@@ -139,47 +140,35 @@ fn parseOptions(iter: *std.process.Args.Iterator, stdout: *std.Io.File.Writer) !
         if (std.mem.eql(u8, arg, "--json")) {
             options.json = true;
         } else if (std.mem.eql(u8, arg, "--grace-hours")) {
-            const value = iter.next() orelse return invalidArgument(stdout, options.json, "--grace-hours requires an integer value.");
-            options.grace_hours = std.fmt.parseUnsigned(u64, value, 10) catch {
-                return invalidArgument(stdout, options.json, "Invalid --grace-hours value.");
+            const value = iter.next();
+            if (value == null) {
+                arg_parse.invalidArg(stdout, if (options.json) .json else .human, usage, "--grace-hours requires an integer value.") catch {};
+                std.process.exit(1);
+            }
+            options.grace_hours = std.fmt.parseUnsigned(u64, value.?, 10) catch {
+                arg_parse.invalidArg(stdout, if (options.json) .json else .human, usage, "Invalid --grace-hours value.") catch {};
+                std.process.exit(1);
             };
         } else if (std.mem.eql(u8, arg, "--prune-before")) {
-            const value = iter.next() orelse return invalidArgument(stdout, options.json, "--prune-before requires a YYYY-MM-DD value.");
-            options.prune_before_ms = date_util.parseUtcDateMidnight(value) catch {
-                return invalidArgument(stdout, options.json, "Invalid --prune-before date; use YYYY-MM-DD.");
+            const value = iter.next();
+            if (value == null) {
+                arg_parse.invalidArg(stdout, if (options.json) .json else .human, usage, "--prune-before requires a YYYY-MM-DD value.") catch {};
+                std.process.exit(1);
+            }
+            options.prune_before_ms = date_util.parseUtcDateMidnight(value.?) catch {
+                arg_parse.invalidArg(stdout, if (options.json) .json else .human, usage, "Invalid --prune-before date; use YYYY-MM-DD.") catch {};
+                std.process.exit(1);
             };
-            options.prune_before_raw = value;
+            options.prune_before_raw = value.?;
         } else if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
             try help_mod.renderUsage(stdout, usage);
             return error.HelpShown;
         } else {
-            try status_cmd.writeDiagnostic(stdout, if (options.json) .json else .human, usage.name, .{
-                .code = "invalid_argument",
-                .message = "Unknown option.",
-                .hint = arg,
-            });
-            if (!options.json) {
-                try stdout.interface.writeAll("\n");
-                try help_mod.renderUsage(stdout, usage);
-            }
-            try stdout.flush();
+            arg_parse.invalidArg(stdout, if (options.json) .json else .human, usage, "Unknown option.") catch {};
             std.process.exit(1);
         }
     }
     return options;
-}
-
-fn invalidArgument(stdout: *std.Io.File.Writer, json: bool, message: []const u8) !Options {
-    try status_cmd.writeDiagnostic(stdout, if (json) .json else .human, usage.name, .{
-        .code = "invalid_argument",
-        .message = message,
-    });
-    if (!json) {
-        try stdout.interface.writeAll("\n");
-        try help_mod.renderUsage(stdout, usage);
-    }
-    try stdout.flush();
-    std.process.exit(1);
 }
 
 fn gracePeriodMs(hours: u64) !i64 {

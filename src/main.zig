@@ -267,6 +267,7 @@ test {
     _ = @import("cli/recall.zig");
     _ = @import("cli/grep.zig");
     _ = @import("cli/blame.zig");
+    _ = @import("cli/arg_parse.zig");
     _ = @import("cli/cat.zig");
     _ = @import("cli/privacy.zig");
     _ = @import("cli/version.zig");

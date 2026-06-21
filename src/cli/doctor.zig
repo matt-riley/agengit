@@ -8,6 +8,7 @@ const help_mod = @import("help.zig");
 const output_mod = @import("output.zig");
 const pi_extension = @import("pi_extension.zig");
 const specs = @import("specs.zig");
+const arg_parse = @import("arg_parse.zig");
 
 pub const usage = specs.doctor_usage;
 
@@ -109,17 +110,7 @@ fn parseOptions(iter: *std.process.Args.Iterator, stdout: *std.Io.File.Writer) !
             try help_mod.renderUsage(stdout, usage);
             return error.HelpShown;
         } else {
-            if (options.json) {
-                try output_mod.writeDiagnosticEnvelope(stdout, usage.name, .{
-                    .code = "invalid_argument",
-                    .message = "Unknown option.",
-                    .hint = arg,
-                });
-            } else {
-                try stdout.interface.print("error: unknown option '{s}'\n\n", .{arg});
-                try help_mod.renderUsage(stdout, usage);
-            }
-            try stdout.flush();
+            arg_parse.invalidArg(stdout, if (options.json) .json else .human, usage, "Unknown option.") catch {};
             std.process.exit(1);
         }
     }
