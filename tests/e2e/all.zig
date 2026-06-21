@@ -20,6 +20,7 @@ test {
     _ = @import("hooks/copilot_payloads.zig");
     _ = @import("hooks/pi_payloads.zig");
     _ = @import("hooks/payload_diagnostics.zig");
+    _ = @import("hooks/model_attribution.zig");
     _ = @import("hooks/turn_identity_and_cwd.zig");
     _ = @import("privacy/capture_policy.zig");
     _ = @import("privacy/scan.zig");

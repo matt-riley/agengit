@@ -246,6 +246,9 @@ fn writeHuman(
 
     try stdout.interface.print("step      {s}\n", .{hex});
     try stdout.interface.print("origin    {s}\n", .{step.origin});
+    if (step.model) |model| {
+        try stdout.interface.print("model     {s}\n", .{model});
+    }
     try stdout.interface.print("session   {s}\n", .{step.session_id});
     try stdout.interface.print("turn      {s}\n", .{step.turn_id});
     try stdout.interface.print("parent    {s}\n", .{step.parent orelse "(none)"});

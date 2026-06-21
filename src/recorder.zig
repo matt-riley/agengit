@@ -95,6 +95,7 @@ const TurnState = struct {
     messages: []const StepMessage = &.{},
     tool_calls: []const StepToolCall = &.{},
     causes: []const Cause = &.{},
+    model: ?[]const u8 = null,
 };
 
 /// Compute a collision-safe staging key for (origin, session_id, turn_id).
@@ -278,6 +279,25 @@ pub const Recorder = struct {
         try self.store.index.upsertSession(meta.origin, meta.session_id, null);
     }
 
+    pub fn recordSessionModel(self: *Recorder, meta: SessionMeta, model: []const u8) !void {
+        if (model.len == 0) return;
+        const key = try modelMetaKey(self.gpa, meta.origin, meta.session_id);
+        defer self.gpa.free(key);
+        try self.store.index.metaSet(key, model);
+    }
+
+    pub fn recordTurnModel(
+        self: *Recorder,
+        io: std.Io,
+        meta: SessionMeta,
+        turn_id: []const u8,
+        model: []const u8,
+    ) !void {
+        if (model.len == 0) return;
+        const key = stagingKey(meta.origin, meta.session_id, turn_id);
+        try self.setStagingModel(io, &key, model);
+    }
+
     /// Append a user prompt to the turn's staging file.
     pub fn recordUserPrompt(
         self: *Recorder,
@@ -339,6 +359,9 @@ pub const Recorder = struct {
         defer if (staging) |*s| s.deinit();
 
         const staging_val: TurnState = if (staging) |s| s.value else .{};
+        const session_model = if (staging_val.model == null) try self.readSessionModel(meta) else null;
+        defer if (session_model) |value| self.gpa.free(value);
+        const model = staging_val.model orelse session_model;
 
         // Build the full message list: prior staged messages + the assistant response.
         var msgs: std.ArrayList(StepMessage) = .empty;
@@ -416,6 +439,7 @@ pub const Recorder = struct {
                 .messages = msgs.items,
                 .tool_calls = staging_val.tool_calls,
                 .outcome = outcome.label(),
+                .model = model,
                 .expected_parent = expected_parent,
                 .retry_delta = @intCast(attempt),
                 .git_commit = git_context.commit,
@@ -553,6 +577,7 @@ pub const Recorder = struct {
             .messages = new_msgs.items,
             .tool_calls = ev.tool_calls,
             .causes = ev.causes,
+            .model = ev.model,
         });
     }
 
@@ -579,6 +604,28 @@ pub const Recorder = struct {
             .messages = ev.messages,
             .tool_calls = new_tcs.items,
             .causes = ev.causes,
+            .model = ev.model,
+        });
+    }
+
+    fn setStagingModel(self: *Recorder, io: std.Io, key: *const [64]u8, model: []const u8) !void {
+        var path_buf: [73]u8 = undefined;
+        const path = std.fmt.bufPrint(&path_buf, "tmp/{s}.json", .{key.*}) catch unreachable;
+        var lock_buf: [78]u8 = undefined;
+        const lock_path = std.fmt.bufPrint(&lock_buf, "tmp/{s}.json.lock", .{key.*}) catch unreachable;
+
+        var lock = try file_lock_mod.LockFile.acquire(io, self.store.root, lock_path, .{});
+        defer lock.release(io);
+
+        var existing = try readStagingFile(io, self.store.root, self.gpa, path);
+        defer if (existing) |*p| p.deinit();
+        const ev: TurnState = if (existing) |p| p.value else .{};
+
+        try writeStagingFile(io, self.store.root, self.gpa, path, .{
+            .messages = ev.messages,
+            .tool_calls = ev.tool_calls,
+            .causes = ev.causes,
+            .model = model,
         });
     }
 
@@ -672,6 +719,12 @@ pub const Recorder = struct {
         };
     }
 
+    fn readSessionModel(self: *Recorder, meta: SessionMeta) !?[]const u8 {
+        const key = try modelMetaKey(self.gpa, meta.origin, meta.session_id);
+        defer self.gpa.free(key);
+        return self.store.index.metaGet(self.gpa, key);
+    }
+
     fn quarantineStagingPath(
         self: *Recorder,
         io: std.Io,
@@ -715,6 +768,10 @@ pub const Recorder = struct {
         return quarantine_path;
     }
 };
+
+fn modelMetaKey(gpa: std.mem.Allocator, origin: []const u8, session_id: []const u8) ![]u8 {
+    return std.fmt.allocPrint(gpa, "session::{x}:{x}::model", .{ origin, session_id });
+}
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 

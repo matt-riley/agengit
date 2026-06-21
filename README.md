@@ -23,16 +23,20 @@ Supported hook integrations today:
 
 | Agent | Installed hooks |
 |---|---|
-| Claude Code | `UserPromptSubmit`, `PostToolBatch`, `Stop` in `~/.claude/settings.json` |
+| Claude Code | `SessionStart`, `UserPromptSubmit`, `PostToolBatch`, `Stop` in `~/.claude/settings.json` |
 | OpenAI Codex CLI | `UserPromptSubmit`, `PostToolUse`, `Stop` in `~/.codex/hooks.json` |
-| Google Gemini CLI | `AfterTool`, `AfterAgent` in `~/.gemini/settings.json` |
+| Google Gemini CLI | `BeforeModel`, `AfterTool`, `AfterAgent` in `~/.gemini/settings.json` |
 | GitHub Copilot CLI | generated extension `~/.copilot/extensions/agit-recorder/extension.mjs` (subscribes to `onUserPromptSubmitted`, `onPostToolUse`, `onAgentStop`) |
 | Pi | generated extension `~/.pi/agent/extensions/agit-recorder.js` (auto-discovered) |
 
 ## What gets recorded
 
-Each captured step includes agent origin, session identifiers, messages, tool
-calls, a workspace snapshot, and a content-addressed object hash.
+Each captured step includes agent origin, optional model attribution, session
+identifiers, messages, tool calls, a workspace snapshot, and a content-addressed
+object hash. Model attribution is best-effort: Codex exposes an active model in
+hook payloads, Claude Code currently provides a session-level model hint on
+`SessionStart` when available, Gemini provides it through `BeforeModel`, and
+Copilot/Pi steps remain origin-only.
 
 In practice: Git tracks commit history, while `agit` tracks agent execution
 history.

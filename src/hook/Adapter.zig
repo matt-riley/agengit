@@ -38,6 +38,7 @@ pub const BuildPlan = struct {
     workspace_cwd: []const u8,
     source_event_id: ?[]const u8 = null,
     preferred_turn_id: ?[]const u8 = null,
+    model: ?[]const u8 = null,
     records: []const Record,
 };
 

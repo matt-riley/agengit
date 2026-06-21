@@ -7,6 +7,7 @@ pub const hook_adapter: adapter_mod.Adapter = .{
     .name = "claude-hook",
     .origin = "claude",
     .events = &.{
+        .{ .name = "SessionStart", .kind = .metadata },
         .{ .name = "UserPromptSubmit", .kind = .user_prompt },
         .{ .name = "Stop", .kind = .assistant },
     },
@@ -33,7 +34,7 @@ fn parseHookArgs(iter: *std.process.Args.Iterator, diagnostic: *hook.Diagnostic)
         };
         return error.MissingSubcommand;
     };
-    if (std.mem.eql(u8, subcommand, "user") or std.mem.eql(u8, subcommand, "assistant")) {
+    if (std.mem.eql(u8, subcommand, "user") or std.mem.eql(u8, subcommand, "assistant") or std.mem.eql(u8, subcommand, "session-start")) {
         return subcommand;
     }
 
@@ -65,6 +66,19 @@ fn buildHookStep(
     const workspace_cwd = try hook.requireString(parsed.root, "cwd", diagnostic);
     const preferred_turn_id = try hook.optionalString(parsed.root, "turn_id", diagnostic);
     const source_event_id = try hook.optionalString(parsed.root, "event_id", diagnostic);
+    const model = try hook.optionalString(parsed.root, "model", diagnostic);
+
+    if (std.mem.eql(u8, parsed.route, "session-start")) {
+        return .{
+            .expected_event_name = "SessionStart",
+            .kind = .metadata,
+            .workspace_cwd = workspace_cwd,
+            .source_event_id = source_event_id,
+            .preferred_turn_id = preferred_turn_id,
+            .model = model,
+            .records = &.{},
+        };
+    }
 
     if (std.mem.eql(u8, parsed.route, "user")) {
         const prompt = try hook.requireString(parsed.root, "prompt", diagnostic);
@@ -74,6 +88,7 @@ fn buildHookStep(
             .workspace_cwd = workspace_cwd,
             .source_event_id = source_event_id,
             .preferred_turn_id = preferred_turn_id,
+            .model = model,
             .records = try adapter_mod.singleRecord(arena, .{ .user_prompt = prompt }),
         };
     }
@@ -85,6 +100,7 @@ fn buildHookStep(
             .workspace_cwd = workspace_cwd,
             .source_event_id = source_event_id,
             .preferred_turn_id = preferred_turn_id,
+            .model = model,
             .records = try adapter_mod.singleRecord(arena, .{ .assistant = content }),
         };
     }
@@ -196,4 +212,32 @@ test "build claude tool batch fixture plan" {
     try std.testing.expectEqual(@as(usize, 2), plan.records.len);
     try std.testing.expectEqualStrings("Read", plan.records[0].tool_use.tool_name);
     try std.testing.expectEqualStrings("Bash", plan.records[1].tool_use.tool_name);
+}
+
+test "build claude session start fixture captures optional model" {
+    const gpa = std.testing.allocator;
+    const payload_result = try hook.parsePayloadBytes(gpa,
+        \\{
+        \\  "session_id": "claude-sess-001",
+        \\  "cwd": "/repo",
+        \\  "hook_event_name": "SessionStart",
+        \\  "model": "claude-sonnet-4-6"
+        \\}
+    );
+    var payload = switch (payload_result) {
+        .ok => |value| value,
+        .err => return error.InvalidPayload,
+    };
+    defer payload.deinit(gpa);
+
+    var diagnostic: hook.Diagnostic = .{};
+    var arena_state = std.heap.ArenaAllocator.init(gpa);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const parsed = try hook_adapter.parsePayload.?(arena, &payload, "session-start", &diagnostic);
+    const plan = try hook_adapter.buildStep.?(arena, parsed, &diagnostic);
+    try std.testing.expectEqualStrings("SessionStart", plan.expected_event_name);
+    try std.testing.expect(plan.kind == .metadata);
+    try std.testing.expectEqualStrings("claude-sonnet-4-6", plan.model.?);
 }

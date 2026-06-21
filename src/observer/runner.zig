@@ -63,6 +63,7 @@ pub fn runOnce(
                 .tool_use => "observer tool event arrived without an active turn; generated recovery turn id",
                 .assistant => "observer assistant event arrived without an active turn; generated recovery turn id",
                 .user_prompt => null,
+                .metadata => null,
             };
             if (recovery_message) |message| {
                 rec.logHookFailure(io, source.name, error.MissingActiveTurn, .{
@@ -114,6 +115,7 @@ pub fn runOnce(
                 try rec.recordAssistantAndFinalize(io, meta, normalized.turn_id, .{ .content = assistant }, observer_event.causes);
                 summary.finalized_turns += 1;
             },
+            .metadata => return error.InvalidObserverEvent,
         }
 
         try updateCheckpoint(io, gpa, rec, source.name, &checkpoint, load_result.instance_id, observer_event.watermark);

@@ -108,7 +108,7 @@ fn processPayload(
         diagnostic.* = hook.Diagnostic.unknownEvent();
         return error.UnknownEventName;
     }
-    if (plan.records.len == 0) return;
+    if (plan.records.len == 0 and plan.kind != .metadata) return;
 
     var workspace = try event_mod.openWorkspaceDir(io, plan.workspace_cwd);
     defer workspace.dir.close(io);
@@ -141,6 +141,7 @@ fn processPayload(
             .tool_use => "tool event arrived without an active turn; generated recovery turn id",
             .assistant => "assistant event arrived without an active turn; generated recovery turn id",
             .user_prompt => null,
+            .metadata => null,
         };
         if (recovery_message) |message| {
             rec.logHookFailure(io, adapter.name, error.MissingActiveTurn, .{
@@ -159,7 +160,16 @@ fn processPayload(
     };
     try rec.upsertSession(meta);
 
+    if (plan.model) |model| {
+        if (normalized.turn_id.len > 0) {
+            try rec.recordTurnModel(io, meta, normalized.turn_id, model);
+        } else {
+            try rec.recordSessionModel(meta, model);
+        }
+    }
+
     switch (plan.kind) {
+        .metadata => return,
         .user_prompt => {
             if (plan.records.len != 1) return error.InvalidAdapter;
             const content = switch (plan.records[0]) {
