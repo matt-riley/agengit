@@ -21,8 +21,9 @@ STOP conditions, and update your row when done.
 | 011 | Add CAS round-trip unit tests to the store layer | P2 | M | — | done |
 | 012 | Add unit tests for CLI investigation command helpers | P2 | M | — | done |
 | 013 | Reject absolute paths in hook payload workspace cwd | P1 | S | — | done |
+<<<<<<< HEAD
 | 014 | Add e2e test coverage for grep and recall commands | P2 | M | — | REJECTED |
-| 015 | Confine recording cwd to hook process tree | P1 | S | — | BLOCKED (absolute-cwd rejection too broad — e2e enshrines absolute-cwd-to-workspace as legitimate per ADR 024; narrow to reject only cwds that don't resolve at/below real workspace root) |
+| 015 | Confine recording cwd to hook process tree | P1 | S | — | done |
 | 016 | Characterization tests for eval scoring engine | P2 | M | — | done |
 | 017 | Batch per-line SQL in blame rendering | P2 | S | — | done |
 | 018 | O(n²)→O(1) blame string dedup via hashmap | P2 | S | — | done |
@@ -40,10 +41,16 @@ STOP conditions, and update your row when done.
 | 030 | Make doctor JSONL-aware for append-only staging | P2 | S | 026 | done |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) | REJECTED
+||||||| parent of 6ee238f (fix: harden recording-path cwd with .agit/ ancestry check)
+| 014 | Add e2e test coverage for grep and recall commands | P2 | M | — | REJECTED (e2e coverage already exists at `tests/e2e/grep/search.zig` and `tests/e2e/recall/path_recall.zig` |
+=======
+| 014 | Add e2e test coverage for grep and recall commands | P2 | M | — | REJECTED (e2e coverage already exists at `tests/e2e/grep/search.zig` and `tests/e2e/recall/path_recall.zig` |
+| 015 | Confine recording cwd to hook process tree | P1 | S | — | done |
+>>>>>>> 6ee238f (fix: harden recording-path cwd with .agit/ ancestry check)
 
 ## Dependency notes
 
-- 015 (cwd hardening) is the live-path counterpart to 013 (error-path). The two confinement rules must stay consistent. Needs plan revision.
+- 015 (cwd hardening) is the live-path counterpart to 013 (error-path). The two confinement rules must stay consistent.
 - 020 blocked on shared helper's non-nullable arg; revise to mirror stats/diff guard pattern.
 - 021 blocked on e2e architecture (crash test spawns prod exe, fragmenting comptime flag impossible). Needs build system change.
 - 028 depends on 016 (eval characterization tests) — 016 is done.

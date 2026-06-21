@@ -31,21 +31,43 @@ pub const NormalizeResolvedInput = struct {
     preferred_turn_id: ?[]const u8 = null,
 };
 
+pub const WorkspaceFallbackReason = enum {
+    open_failed,
+    no_store_ancestor,
+};
+
 pub const WorkspaceDir = struct {
     dir: std.Io.Dir,
     used_fallback: bool,
+    fallback_reason: ?WorkspaceFallbackReason = null,
 };
 
 pub fn openWorkspaceDir(io: std.Io, workspace_cwd: []const u8) !WorkspaceDir {
     const payload_dir = std.Io.Dir.cwd().openDir(io, workspace_cwd, .{}) catch {
-        return .{
-            .dir = try std.Io.Dir.cwd().openDir(io, ".", .{}),
-            .used_fallback = true,
-        };
+        return fallback(io, .open_failed);
     };
+    // Proactive safety: ensure the payload cwd leads to a real workspace.
+    // If no .agit/ ancestor exists, downstream Recorder.open would fail.
+    // Fall back to process cwd instead (fail-open per ADR 003).
+    var root_dir = recorder_mod.findStoreRoot(io, payload_dir) catch |err| {
+        payload_dir.close(io);
+        return fallback(io, switch (err) {
+            error.StoreNotFound => .no_store_ancestor,
+            else => .open_failed,
+        });
+    };
+    root_dir.close(io);
+    // findStoreRoot succeeded (has .agit/ ancestor) — keep the opened dir.
+    // Note: we do NOT check whether the .agit/ is in the SAME workspace as
+    // the process cwd; the payload is authoritative per ADR 024.
+    return .{ .dir = payload_dir, .used_fallback = false };
+}
+
+fn fallback(io: std.Io, reason: WorkspaceFallbackReason) !WorkspaceDir {
     return .{
-        .dir = payload_dir,
-        .used_fallback = false,
+        .dir = try std.Io.Dir.cwd().openDir(io, ".", .{}),
+        .used_fallback = true,
+        .fallback_reason = reason,
     };
 }
 
@@ -323,4 +345,104 @@ test "resolveTurnId creates recovery id when active turn is missing" {
     try std.testing.expect(!assistant.recovered);
     try std.testing.expectEqualStrings("agrecovery:1", assistant.turn_id);
     try std.testing.expect(state.active_turn_id == null);
+}
+
+test "openWorkspaceDir relative path inside workspace" {
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(io, ".agit");
+
+    var orig_buf: [std.fs.max_path_bytes + 1]u8 = undefined;
+    var orig_cwd = try std.Io.Dir.cwd().openDir(io, ".", .{});
+    defer orig_cwd.close(io);
+    const orig_len = try orig_cwd.realPath(io, orig_buf[0..std.fs.max_path_bytes]);
+    orig_buf[orig_len] = 0;
+    defer _ = std.c.chdir(@as([*:0]const u8, @ptrCast(&orig_buf[0])));
+
+    var tmp_buf: [std.fs.max_path_bytes + 1]u8 = undefined;
+    const tmp_len = try tmp.dir.realPath(io, tmp_buf[0..std.fs.max_path_bytes]);
+    tmp_buf[tmp_len] = 0;
+    if (std.c.chdir(@as([*:0]const u8, @ptrCast(&tmp_buf[0]))) != 0) return error.ChdirFailed;
+
+    const workspace = try openWorkspaceDir(io, ".");
+    defer workspace.dir.close(io);
+    try std.testing.expect(!workspace.used_fallback);
+}
+
+test "openWorkspaceDir absolute path to workspace" {
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(io, ".agit");
+
+    var tmp_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const tmp_len = try tmp.dir.realPath(io, &tmp_buf);
+    const abs_path = tmp_buf[0..tmp_len];
+
+    const workspace = try openWorkspaceDir(io, abs_path);
+    defer workspace.dir.close(io);
+    try std.testing.expect(!workspace.used_fallback);
+}
+
+test "openWorkspaceDir relative path outside workspace" {
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(io, "subdir");
+
+    var orig_buf: [std.fs.max_path_bytes + 1]u8 = undefined;
+    var orig_cwd = try std.Io.Dir.cwd().openDir(io, ".", .{});
+    defer orig_cwd.close(io);
+    const orig_len = try orig_cwd.realPath(io, orig_buf[0..std.fs.max_path_bytes]);
+    orig_buf[orig_len] = 0;
+    defer _ = std.c.chdir(@as([*:0]const u8, @ptrCast(&orig_buf[0])));
+
+    var tmp_buf: [std.fs.max_path_bytes + 1]u8 = undefined;
+    const tmp_len = try tmp.dir.realPath(io, tmp_buf[0..std.fs.max_path_bytes]);
+    tmp_buf[tmp_len] = 0;
+    if (std.c.chdir(@as([*:0]const u8, @ptrCast(&tmp_buf[0]))) != 0) return error.ChdirFailed;
+
+    const workspace = try openWorkspaceDir(io, "subdir");
+    defer workspace.dir.close(io);
+    try std.testing.expect(workspace.used_fallback);
+
+    var ret_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const ret_len = try workspace.dir.realPath(io, &ret_buf);
+    const ret_path = ret_buf[0..ret_len];
+
+    var expect_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var expect_cwd = try std.Io.Dir.cwd().openDir(io, ".", .{});
+    defer expect_cwd.close(io);
+    const expect_len = try expect_cwd.realPath(io, &expect_buf);
+    const expect_path = expect_buf[0..expect_len];
+
+    try std.testing.expectEqualStrings(expect_path, ret_path);
+}
+
+test "openWorkspaceDir absolute path outside workspace" {
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    // No .agit/ created.
+
+    var tmp_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const tmp_len = try tmp.dir.realPath(io, &tmp_buf);
+    const abs_path = tmp_buf[0..tmp_len];
+
+    var expect_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var expect_cwd = try std.Io.Dir.cwd().openDir(io, ".", .{});
+    defer expect_cwd.close(io);
+    const expect_len = try expect_cwd.realPath(io, &expect_buf);
+    const expect_path = expect_buf[0..expect_len];
+
+    const workspace = try openWorkspaceDir(io, abs_path);
+    defer workspace.dir.close(io);
+    try std.testing.expect(workspace.used_fallback);
+
+    var ret_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const ret_len = try workspace.dir.realPath(io, &ret_buf);
+    const ret_path = ret_buf[0..ret_len];
+
+    try std.testing.expectEqualStrings(expect_path, ret_path);
 }
