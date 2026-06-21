@@ -13,10 +13,10 @@ payload.
 
 The same adapters also pass an empty string as `turn_id`:
 
-- `src/cli/claude_hook.zig`
-- `src/cli/claude_tool_batch_hook.zig`
-- `src/cli/codex_hook.zig`
-- `src/cli/gemini_hook.zig`
+- `src/hook/adapters/claude.zig`
+- `src/hook/adapters/claude.zig`
+- `src/hook/adapters/codex.zig`
+- `src/hook/adapters/gemini.zig`
 
 The recorder treats `(origin, session_id, turn_id)` as the idempotency key. A
 stable empty turn id means a second finalized turn in the same agent session can

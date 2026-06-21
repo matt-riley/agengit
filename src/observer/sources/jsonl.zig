@@ -3,8 +3,8 @@ const source_mod = @import("../Source.zig");
 const checkpoint_mod = @import("../checkpoint.zig");
 const event_mod = @import("../../hook/event.zig");
 
-// Note: cap input at 4 MiB — matches the fixture safety cap; raise when a
-// real long-tailing workflow needs streaming reads past this size.
+// Note: cap input at 4 MiB; raise when a real long-tailing workflow needs
+// streaming reads past this size.
 const max_input_bytes = std.Io.Limit.limited(4 * 1024 * 1024);
 
 /// One line of the JSONL session log. `role` maps to a Record variant:

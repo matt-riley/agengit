@@ -6,9 +6,8 @@
 ## Context
 
 ADR 028 left the observer framework open for "genuinely hookless agents
-(file/log/IPC-only state)." Until now the registry shipped a single source,
-`fixture`, which replays a synthetic JSON document. That proves the framework
-but does not prove a real polling source over an append-only log.
+(file/log/IPC-only state)." Until now the registry had only synthetic coverage. That proved the framework
+but did not prove a real polling source over an append-only log.
 
 The adjacent possible is disproportionate: a real polling source is one
 `Source` implementation, not new infrastructure. This ADR records the first
@@ -55,9 +54,8 @@ or missing required field yields `InvalidObserverEvent`.
 
 ### Resume semantics
 
-On `--once`, the source reads the whole file (capped at 4 MiB, matching the
-fixture safety cap), skips blank lines and any line number `<=` the stored
-watermark, and emits the rest. There is deliberately **no
+On `--once`, the source reads the whole file (capped at 4 MiB), skips blank
+lines and any line number `<=` the stored watermark, and emits the rest. There is deliberately **no
 `ObserverWatermarkNotFound`** for a missing line: because line numbers are
 positional, a stale watermark simply yields zero new events when nothing was
 appended, and resumes at the next appended line otherwise. This is the
@@ -76,9 +74,9 @@ file-tail behavior the framework was designed for.
   `ObserverCheckpointInstanceMismatch` check against the path hash; if a user
   intentionally rotates a log in place, they delete
   `.agit/observers/jsonl.json` to reset.
-- **Whole-file read, not streaming.** The 4 MiB cap bounds memory and matches
-  the fixture source; long-tailing very large logs will need streaming reads
-  before this leaves experimental.
+- **Whole-file read, not streaming.** The 4 MiB cap bounds memory;
+  long-tailing very large logs will need streaming reads before this leaves
+  experimental.
 - **Self-selected schema, not a real agent's.** This is a reusable JSONL shape,
   chosen to prove the framework without hard-coding one agent's quirks, as
   ADR 028 step 4 directs ("add one thin adapter at a time").
@@ -93,8 +91,7 @@ monotonic positional watermark before specializing to a specific agent's log.
 
 ## Consequences
 
-- The observer registry now ships two sources: `fixture` (synthetic) and
-  `jsonl` (experimental).
+- The observer registry now ships `jsonl` (experimental).
 - `agit observe --once jsonl --input <log>` is usable today; `--once` only.
 - The source is marked `experimental: true` per ADR 028 step 6. Promotion out
   of experimental requires documenting a real agent's log format and adding

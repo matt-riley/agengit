@@ -14,17 +14,12 @@ test {
     _ = @import("uninstall/clean.zig");
     _ = @import("uninstall/malformed.zig");
 
-    _ = @import("hooks/claude_payloads.zig");
-    _ = @import("hooks/codex_payloads.zig");
-    _ = @import("hooks/gemini_payloads.zig");
-    _ = @import("hooks/copilot_payloads.zig");
-    _ = @import("hooks/pi_payloads.zig");
+    _ = @import("hooks/payloads.zig");
     _ = @import("hooks/payload_diagnostics.zig");
     _ = @import("hooks/model_attribution.zig");
     _ = @import("hooks/turn_identity_and_cwd.zig");
     _ = @import("privacy/capture_policy.zig");
     _ = @import("privacy/scan.zig");
-    _ = @import("observe/fixture.zig");
     _ = @import("observe/jsonl.zig");
 
     _ = @import("record_replay/concurrent_writers.zig");

@@ -1,4 +1,4 @@
-# ADR 043: Persist Session Evaluation Reports as Content-Addressed Objects
+# ADR 045: Persist Session Evaluation Reports as Content-Addressed Objects
 
 **Status:** accepted
 **Date:** 2025-06-21

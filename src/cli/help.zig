@@ -36,13 +36,12 @@ pub fn renderUsage(w: anytype, spec: UsageSpec) !void {
         try w.interface.print("DESCRIPTION:\n    {s}\n\n", .{spec.description});
     }
 
-    if (spec.options.len > 0) {
-        try w.interface.print("OPTIONS:\n", .{});
-        for (spec.options) |opt| {
-            try renderOption(w, opt);
-        }
-        try w.interface.print("\n", .{});
+    try w.interface.print("OPTIONS:\n", .{});
+    for (spec.options) |opt| {
+        try renderOption(w, opt);
     }
+    try renderOption(w, .{ .short = 'h', .long = "help", .description = "Display this help and exit." });
+    try w.interface.print("\n", .{});
 
     if (spec.examples.len > 0) {
         try w.interface.print("EXAMPLES:\n", .{});

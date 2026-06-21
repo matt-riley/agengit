@@ -7,9 +7,9 @@
 
 Hook commands read JSON from stdin and parse it with `std.json`:
 
-- `src/cli/claude_hook.zig:41`
-- `src/cli/codex_hook.zig:35`
-- `src/cli/gemini_hook.zig:35`
+- `src/cli/claude.zig:41`
+- `src/cli/codex.zig:35`
+- `src/cli/gemini.zig:35`
 
 When parsing fails, the call site bubbles a raw Zig error like
 `error.UnexpectedToken` up to `src/hook.zig:reportFailure` (lines ~98–129).
