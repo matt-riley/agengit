@@ -25,6 +25,7 @@ test {
     _ = @import("privacy/capture_policy.zig");
     _ = @import("privacy/scan.zig");
     _ = @import("observe/fixture.zig");
+    _ = @import("observe/jsonl.zig");
 
     _ = @import("record_replay/concurrent_writers.zig");
     _ = @import("record_replay/crash_recovery.zig");
