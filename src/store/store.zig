@@ -10,6 +10,9 @@ const outcome_mod = @import("outcome.zig");
 const snapshot_mod = @import("snapshot.zig");
 const blame_mod = @import("blame.zig");
 const zqlite = @import("zqlite");
+const blame_recorder_mod = @import("blame_recorder.zig");
+const reconcile_mod = @import("reconcile.zig");
+const audit_mod = @import("audit.zig");
 const preview_mod = @import("preview.zig");
 
 pub const Hash = hash_mod.Hash;
@@ -277,56 +280,7 @@ pub const Store = struct {
     };
 
     pub fn auditObjectIndex(self: *Store, io: std.Io, gpa: std.mem.Allocator) !ObjectIndexAudit {
-        const indexed_count: usize = @intCast(try self.index.countObjects());
-        var missing_rows: usize = 0;
-        var disk_hashes = std.AutoHashMap([hash_mod.hex_len]u8, void).init(gpa);
-        defer disk_hashes.deinit();
-
-        var obj_dir = self.root.openDir(io, "objects", .{ .iterate = true }) catch |err| switch (err) {
-            error.FileNotFound, error.NotDir => return .{
-                .indexed_complete = (try self.index.getObjectsComplete()) orelse false,
-                .disk_count = 0,
-                .indexed_count = indexed_count,
-                .missing_rows = 0,
-            },
-            else => return err,
-        };
-        defer obj_dir.close(io);
-
-        var walker = try obj_dir.walk(gpa);
-        defer walker.deinit();
-        while (try walker.next(io)) |entry| {
-            if (entry.kind != .file) continue;
-            if (entry.path.len != 65) continue;
-            var hex_buf: [64]u8 = undefined;
-            @memcpy(hex_buf[0..2], entry.path[0..2]);
-            @memcpy(hex_buf[2..64], entry.path[3..65]);
-            if (!disk_hashes.contains(hex_buf)) {
-                try disk_hashes.put(hex_buf, {});
-                if (!try self.index.hasObject(&hex_buf)) missing_rows += 1;
-            }
-        }
-
-        const pack_files = try pack_mod.listPackFiles(io, self.root, gpa);
-        defer pack_mod.freePackFiles(gpa, pack_files);
-        for (pack_files) |pack_name| {
-            const entries = try pack_mod.readPackEntries(io, self.root, gpa, pack_name);
-            defer pack_mod.freeParsedEntries(gpa, entries);
-            for (entries) |entry| {
-                const hex = entry.meta.hash.toHex();
-                if (!disk_hashes.contains(hex)) {
-                    try disk_hashes.put(hex, {});
-                    if (!try self.index.hasObject(&hex)) missing_rows += 1;
-                }
-            }
-        }
-
-        return .{
-            .indexed_complete = (try self.index.getObjectsComplete()) orelse false,
-            .disk_count = disk_hashes.count(),
-            .indexed_count = indexed_count,
-            .missing_rows = missing_rows,
-        };
+        return audit_mod.auditObjectIndex(self, io, gpa);
     }
 
     // ── Snapshot ─────────────────────────────────────────────────────────────
@@ -400,110 +354,12 @@ pub const Store = struct {
         max_changed_files: usize = blame_max_changed_files,
     };
 
-    const PendingBlameRow = struct {
-        path: []const u8,
-        blame_hex: [64]u8,
-        blob_hex: [64]u8,
-    };
-
     /// Compute and persist incremental blame for every changed text file in the
     /// given step's tree.  Blame objects are written content-addressed; the
     /// per-step `blame_maps` rows are inserted in a single transaction so a
     /// failure leaves no partial linkage.  Shared by finalize and reindex.
     pub fn recordStepBlame(self: *Store, io: std.Io, gpa: std.mem.Allocator, input: StepBlameInput) !void {
-        var arena_state = std.heap.ArenaAllocator.init(gpa);
-        defer arena_state.deinit();
-        const arena = arena_state.allocator();
-
-        const tree_hash = try Hash.fromHex(input.tree_hash);
-        var tree_parsed = try self.readTree(io, arena, tree_hash);
-        defer tree_parsed.deinit();
-
-        var pending: std.ArrayList(PendingBlameRow) = .empty;
-
-        for (tree_parsed.value.entries) |entry| {
-            if (entry.blob.len != 64) continue;
-            if (entry.size > input.max_file_bytes) continue;
-
-            const latest = try self.index.queryLatestBlame(entry.path);
-            if (latest) |prior| {
-                // Unchanged since the last recorded version: the latest row is
-                // still correct, so skip without reading the blob.
-                if (std.mem.eql(u8, entry.blob, prior.blob_hash[0..])) continue;
-            }
-
-            const new_blob_hash = try Hash.fromHex(entry.blob);
-            const new_blob = self.readBlob(io, arena, new_blob_hash) catch |err| {
-                try self.setBlameNeedsReindex(true);
-                return err;
-            };
-            if (new_blob.len > input.max_file_bytes) continue;
-            if (snapshot_mod.isBinary(new_blob)) continue;
-            if (snapshot_mod.isSnapshotPlaceholder(new_blob)) continue;
-
-            const new_lines = try snapshot_mod.splitLines(arena, new_blob);
-
-            var old_lines: []const []const u8 = &.{};
-            var old_blame: ?BlameMap = null;
-            if (latest) |prior| {
-                const loaded = self.loadPriorBlame(io, arena, prior) catch |err| {
-                    try self.setBlameNeedsReindex(true);
-                    return err;
-                };
-                if (loaded.lines.len == loaded.blame.lines.len) {
-                    old_lines = loaded.lines;
-                    old_blame = loaded.blame;
-                } else {
-                    try self.setBlameNeedsReindex(true);
-                    return error.BlameLengthMismatch;
-                }
-            }
-
-            const bm = try blame_mod.computeBlame(arena, entry.path, old_lines, new_lines, old_blame, input.step_hash);
-            const blame_hash = try self.writeBlame(io, arena, bm);
-
-            var row: PendingBlameRow = .{ .path = entry.path, .blame_hex = blame_hash.toHex(), .blob_hex = undefined };
-            @memcpy(row.blob_hex[0..], entry.blob);
-            try pending.append(arena, row);
-
-            if (input.max_changed_files != 0 and pending.items.len > input.max_changed_files) {
-                return error.BlameChangeLimitExceeded;
-            }
-        }
-
-        if (pending.items.len == 0) return;
-
-        try self.index.db.transaction();
-        errdefer self.index.db.rollback();
-        for (pending.items) |row| {
-            try self.index.insertBlameMap(
-                row.path,
-                input.step_hash,
-                row.blame_hex[0..],
-                row.blob_hex[0..],
-                input.session_origin,
-                input.session_id,
-                input.timestamp,
-            );
-        }
-        try self.index.db.commit();
-    }
-
-    const LoadedPriorBlame = struct {
-        lines: []const []const u8,
-        blame: BlameMap,
-    };
-
-    fn loadPriorBlame(self: *Store, io: std.Io, arena: std.mem.Allocator, prior: index_mod.Index.BlameRow) !LoadedPriorBlame {
-        const blob_hash = try Hash.fromHex(prior.blob_hash[0..]);
-        const blob = try self.readBlob(io, arena, blob_hash);
-        if (snapshot_mod.isBinary(blob) or snapshot_mod.isSnapshotPlaceholder(blob)) return error.PriorBlobNotText;
-        const lines = try snapshot_mod.splitLines(arena, blob);
-
-        const blame_hash = try Hash.fromHex(prior.blame_hash[0..]);
-        const blame_data = try self.readBlob(io, arena, blame_hash);
-        const parsed = try std.json.parseFromSlice(BlameMap, arena, blame_data, .{ .allocate = .alloc_always });
-        return .{ .lines = lines, .blame = parsed.value };
+        return blame_recorder_mod.recordStepBlame(self, io, gpa, input);
     }
 
     // ── Ref operations ───────────────────────────────────────────────────────
@@ -532,309 +388,20 @@ pub const Store = struct {
         index_ahead: usize = 0,
     };
 
-    const SessionIdent = struct {
-        origin: []const u8,
-        session_id: []const u8,
-    };
-
     pub fn reconcile(
         self: *Store,
         io: std.Io,
         gpa: std.mem.Allocator,
         mode: ReconcileMode,
     ) !ReconcileReport {
-        var report: ReconcileReport = .{};
-        const sessions = try self.collectKnownSessions(io, gpa);
-        defer freeSessionIdents(gpa, sessions);
-
-        for (sessions) |sess| {
-            report.sessions_checked += 1;
-            const outcome = try self.reconcileSession(io, gpa, mode, sess.origin, sess.session_id);
-            switch (outcome) {
-                .in_sync => report.in_sync += 1,
-                .repaired => report.repaired += 1,
-                .drifted => report.drifted += 1,
-                .index_ahead => report.index_ahead += 1,
-            }
-        }
-        return report;
-    }
-
-    const SessionOutcome = enum {
-        in_sync,
-        repaired,
-        drifted,
-        index_ahead,
-    };
-
-    fn reconcileSession(
-        self: *Store,
-        io: std.Io,
-        gpa: std.mem.Allocator,
-        mode: ReconcileMode,
-        origin: []const u8,
-        session_id: []const u8,
-    ) !SessionOutcome {
-        const path = try ref.buildRefPath(gpa, origin, session_id);
-        defer gpa.free(path);
-        const lock_path = try std.fmt.allocPrint(gpa, "{s}.lock", .{path});
-        defer gpa.free(lock_path);
-
-        const parent_end = std.mem.lastIndexOfScalar(u8, path, '/') orelse 0;
-        if (parent_end > 0) {
-            try self.root.createDirPath(io, path[0..parent_end]);
-        }
-
-        var lock = try file_lock.LockFile.acquire(io, self.root, lock_path, .{});
-        defer lock.release(io);
-
-        const ref_tip = try readRefAtPath(io, self.root, gpa, path);
-        const meta_ref = try self.readMetaRefTip(gpa, origin, session_id);
-
-        if (hashOptEq(ref_tip, meta_ref)) {
-            if (ref_tip == null) return .in_sync;
-            const tip_hex = ref_tip.?.toHex();
-            if (try self.index.hasStep(&tip_hex)) return .in_sync;
-            if (mode == .dry_run) return .drifted;
-            if (!try self.replaySessionChain(io, gpa, origin, session_id, null, ref_tip.?)) {
-                return .index_ahead;
-            }
-            return .repaired;
-        }
-
-        if (ref_tip == null and meta_ref != null) {
-            return .index_ahead;
-        }
-        if (ref_tip == null) return .in_sync;
-
-        const tip_hex = ref_tip.?.toHex();
-        const tip_in_index = try self.index.hasStep(&tip_hex);
-        if (!tip_in_index) {
-            if (mode == .dry_run) return .drifted;
-            if (!try self.replaySessionChain(io, gpa, origin, session_id, meta_ref, ref_tip.?)) {
-                return .index_ahead;
-            }
-            return .repaired;
-        }
-
-        if (meta_ref == null) {
-            if (mode == .dry_run) return .drifted;
-            try self.updateSessionMeta(gpa, origin, session_id, ref_tip.?);
-            return .repaired;
-        }
-
-        // ref_tip is set, indexed, and meta_ref is set but doesn't match ref_tip.
-        // The ref file is the source of truth; update the meta to catch up.
-        if (mode == .dry_run) return .drifted;
-        try self.updateSessionMeta(gpa, origin, session_id, ref_tip.?);
-        return .repaired;
-    }
-
-    fn replaySessionChain(
-        self: *Store,
-        io: std.Io,
-        gpa: std.mem.Allocator,
-        origin: []const u8,
-        session_id: []const u8,
-        stop_hash: ?Hash,
-        tip_hash: Hash,
-    ) !bool {
-        var chain: std.ArrayList(Hash) = .empty;
-        defer chain.deinit(gpa);
-
-        var cursor: ?Hash = tip_hash;
-        var reached_stop = stop_hash == null;
-        while (cursor) |h| {
-            if (stop_hash) |stop| {
-                if (h.eql(stop)) {
-                    reached_stop = true;
-                    break;
-                }
-            }
-
-            try chain.append(gpa, h);
-
-            var parsed = self.readStep(io, gpa, h) catch {
-                return false;
-            };
-            defer parsed.deinit();
-            cursor = if (parsed.value.parent) |parent_hex| try Hash.fromHex(parent_hex) else null;
-        }
-
-        if (stop_hash != null and !reached_stop) {
-            return false;
-        }
-
-        try self.index.db.transaction();
-        errdefer self.index.db.rollback();
-
-        const tip_hex = tip_hash.toHex();
-        try self.index.upsertSession(origin, session_id, &tip_hex);
-
-        var i = chain.items.len;
-        while (i > 0) : (i -= 1) {
-            const h = chain.items[i - 1];
-            const hex = h.toHex();
-            const raw = self.readBlob(io, gpa, h) catch {
-                return false;
-            };
-            defer gpa.free(raw);
-            var parsed = self.readStep(io, gpa, h) catch {
-                return false;
-            };
-            defer parsed.deinit();
-            const step = parsed.value;
-            try self.index.insertObject(&hex, "step", raw.len);
-            const preview_str = try preview_mod.computePreviewAlloc(gpa, step);
-            defer gpa.free(preview_str);
-            try self.index.insertStep(
-                &hex,
-                step.origin,
-                step.session_id,
-                step.turn_id,
-                step.parent,
-                step.tree,
-                step.timestamp,
-                step.model,
-                step.outcome,
-                step.git_commit,
-                step.git_branch,
-                step.git_dirty,
-                preview_str,
-            );
-            for (step.messages, 0..) |msg, seq| {
-                try self.index.insertMessage(&hex, @intCast(seq), msg.role, msg.content);
-            }
-            for (step.tool_calls, 0..) |tc, seq| {
-                try self.index.insertToolCall(&hex, @intCast(seq), tc.tool_name, tc.args, tc.result);
-            }
-        }
-
-        try self.updateSessionMetaLocked(gpa, origin, session_id, tip_hash);
-        try self.index.db.commit();
-        return true;
-    }
-
-    fn collectKnownSessions(self: *Store, io: std.Io, gpa: std.mem.Allocator) ![]const SessionIdent {
-        var list: std.ArrayList(SessionIdent) = .empty;
-        errdefer {
-            for (list.items) |sess| {
-                gpa.free(sess.origin);
-                gpa.free(sess.session_id);
-            }
-            list.deinit(gpa);
-        }
-        var seen = std.StringHashMap(void).init(gpa);
-        defer {
-            var it = seen.keyIterator();
-            while (it.next()) |k| gpa.free(k.*);
-            seen.deinit();
-        }
-
-        const rows = try self.index.listSessions(gpa);
-        defer freeSessionRows(gpa, rows);
-        for (rows) |row| {
-            try appendUniqueSession(gpa, &list, &seen, row.origin, row.session_id);
-        }
-
-        var refs_dir = self.root.openDir(io, "refs/sessions", .{ .iterate = true }) catch |err| switch (err) {
-            error.FileNotFound, error.NotDir => return list.toOwnedSlice(gpa),
-            else => return err,
-        };
-        defer refs_dir.close(io);
-
-        var walker = try refs_dir.walk(gpa);
-        defer walker.deinit();
-        while (try walker.next(io)) |entry| {
-            if (entry.kind != .file) continue;
-            const sep = std.mem.indexOfScalar(u8, entry.path, '/') orelse continue;
-            const origin_hex = entry.path[0..sep];
-            const session_hex = entry.path[sep + 1 ..];
-            const origin = decodeHexAlloc(gpa, origin_hex) catch continue;
-            errdefer gpa.free(origin);
-            const sess_id = decodeHexAlloc(gpa, session_hex) catch {
-                gpa.free(origin);
-                continue;
-            };
-            errdefer gpa.free(sess_id);
-            try appendUniqueSessionOwned(gpa, &list, &seen, origin, sess_id);
-        }
-
-        return list.toOwnedSlice(gpa);
-    }
-
-    fn appendUniqueSession(
-        gpa: std.mem.Allocator,
-        list: *std.ArrayList(SessionIdent),
-        seen: *std.StringHashMap(void),
-        origin: []const u8,
-        session_id: []const u8,
-    ) !void {
-        const origin_dup = try gpa.dupe(u8, origin);
-        errdefer gpa.free(origin_dup);
-        const sess_dup = try gpa.dupe(u8, session_id);
-        errdefer gpa.free(sess_dup);
-        try appendUniqueSessionOwned(gpa, list, seen, origin_dup, sess_dup);
-    }
-
-    fn appendUniqueSessionOwned(
-        gpa: std.mem.Allocator,
-        list: *std.ArrayList(SessionIdent),
-        seen: *std.StringHashMap(void),
-        origin_owned: []u8,
-        session_owned: []u8,
-    ) !void {
-        const key = try std.fmt.allocPrint(gpa, "{x}:{x}", .{ origin_owned, session_owned });
-        if (seen.contains(key)) {
-            gpa.free(key);
-            gpa.free(origin_owned);
-            gpa.free(session_owned);
-            return;
-        }
-        try seen.put(key, {});
-        try list.append(gpa, .{
-            .origin = origin_owned,
-            .session_id = session_owned,
-        });
-    }
-
-    fn decodeHexAlloc(gpa: std.mem.Allocator, hex: []const u8) ![]u8 {
-        if (hex.len == 0 or (hex.len % 2) != 0) return error.InvalidRefPath;
-        const out = try gpa.alloc(u8, hex.len / 2);
-        errdefer gpa.free(out);
-        _ = try std.fmt.hexToBytes(out, hex);
-        return out;
-    }
-
-    fn freeSessionIdents(gpa: std.mem.Allocator, rows: []const SessionIdent) void {
-        for (rows) |row| {
-            gpa.free(row.origin);
-            gpa.free(row.session_id);
-        }
-        gpa.free(rows);
-    }
-
-    fn readRefAtPath(io: std.Io, root: std.Io.Dir, gpa: std.mem.Allocator, path: []const u8) !?Hash {
-        const data = root.readFileAlloc(io, path, gpa, .unlimited) catch |err| switch (err) {
-            error.FileNotFound => return null,
-            else => return err,
-        };
-        defer gpa.free(data);
-        const trimmed = std.mem.trim(u8, data, " \r\n");
-        return try Hash.fromHex(trimmed);
-    }
-
-    fn hashOptEq(a: ?Hash, b: ?Hash) bool {
-        if (a == null and b == null) return true;
-        if (a == null or b == null) return false;
-        return a.?.eql(b.?);
+        return reconcile_mod.reconcile(self, io, gpa, mode);
     }
 
     fn metaKeyAlloc(gpa: std.mem.Allocator, origin: []const u8, session_id: []const u8, field: []const u8) ![]u8 {
         return std.fmt.allocPrint(gpa, "session::{x}:{x}::{s}", .{ origin, session_id, field });
     }
 
-    fn readMetaRefTip(
+    pub fn readMetaRefTip(
         self: *Store,
         gpa: std.mem.Allocator,
         origin: []const u8,
@@ -848,7 +415,7 @@ pub const Store = struct {
         return Hash.fromHex(value.?) catch null;
     }
 
-    fn updateSessionMeta(
+    pub fn updateSessionMeta(
         self: *Store,
         gpa: std.mem.Allocator,
         origin: []const u8,
@@ -861,7 +428,7 @@ pub const Store = struct {
         try self.index.db.commit();
     }
 
-    fn updateSessionMetaLocked(
+    pub fn updateSessionMetaLocked(
         self: *Store,
         gpa: std.mem.Allocator,
         origin: []const u8,
@@ -1017,10 +584,7 @@ pub const Store = struct {
     }
 
     fn ensureObjectIndexState(self: *Store, io: std.Io, gpa: std.mem.Allocator) !void {
-        if ((try self.index.getObjectsComplete()) != null) return;
-        const loose_objects = try countObjectFiles(io, gpa, self.root);
-        const packed_objects = try pack_mod.countEntries(io, self.root, gpa);
-        try self.index.setObjectsComplete(loose_objects == 0 and packed_objects == 0);
+        return audit_mod.ensureObjectIndexState(self, io, gpa);
     }
 
     fn shouldUseObjectIndex(self: *Store) !bool {
@@ -1092,9 +656,10 @@ pub const Store = struct {
 
         try self.index.upsertSession(origin, session_id, new_hex_str);
 
-        const parent_hex_buf = if (step.parent) |p| p else null;
         const preview_str = try preview_mod.computePreviewAlloc(gpa, step.*);
         defer gpa.free(preview_str);
+
+        const parent_hex_buf = if (step.parent) |p| p else null;
         try self.index.insertStep(
             new_hex_str,
             origin,
