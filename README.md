@@ -559,6 +559,11 @@ Lock acquisition timeout defaults to 10 seconds. Override with
 Large-file snapshot limits default to 16 MiB per file. Override with
 `AGIT_MAX_FILE_BYTES=<bytes>` when benchmarking or capturing larger text files.
 
+`AGIT_CRASH_AFTER=tmp_write` is a test-only knob that intentionally crashes
+mid hook-install/uninstall to exercise ADR 006's atomic config writes; the
+original config is preserved by design. See `.env.example` for the full list
+of environment variables.
+
 Regenerate e2e golden files intentionally:
 
 ```sh
