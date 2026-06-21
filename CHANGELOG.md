@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.23.0](https://github.com/matt-riley/agengit/compare/v1.22.3...v1.23.0) (2026-06-21)
+
+
+### Features
+
+* record per-step model attribution ([54e40a6](https://github.com/matt-riley/agengit/commit/54e40a6eee2dadbb8ef824c90bf15e340673acc3))
+
 ## [1.22.3](https://github.com/matt-riley/agengit/compare/v1.22.2...v1.22.3) (2026-06-20)
 
 
