@@ -242,19 +242,20 @@ fn parseStagingData(
     if (lines.items.len == 0) return null;
 
     var jsonl_ok = true;
+    var saw_event = false;
     for (lines.items, 0..) |line, i| {
-        var ev = std.json.parseFromSlice(StagingEvent, gpa, line, .{ .allocate = .alloc_always }) catch {
+        var ev = std.json.parseFromSlice(StagingEvent, gpa, line, .{ .allocate = .alloc_always, .ignore_unknown_fields = true }) catch {
             const is_last = (i == lines.items.len - 1);
-            const have_events = (msgs.items.len + tcs.items.len + causes.items.len) > 0;
             // Truncation tolerance: a partial trailing line is skippable only
-            // when we already have at least one complete event. Otherwise the
-            // file is garbage or an old-format single document — fall back to
-            // the full-document parse below.
-            if (is_last and have_events) break;
+            // when we already have at least one complete event line (regardless
+            // of op). Otherwise the file is garbage or an old-format single
+            // document — fall back to the full-document parse below.
+            if (is_last and saw_event) break;
             jsonl_ok = false;
             break;
         };
         defer ev.deinit();
+        saw_event = true;
 
         const op = ev.value.op;
         if (std.mem.eql(u8, op, "message")) {
