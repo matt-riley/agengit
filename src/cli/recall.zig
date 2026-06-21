@@ -327,6 +327,7 @@ fn previewAllocForMatch(
             .git_commit = row.git_commit,
             .git_branch = row.git_branch,
             .git_dirty = row.git_dirty,
+            .preview = row.preview,
         },
         usage.name,
         use_redaction,
@@ -482,6 +483,7 @@ fn dupRecallRow(gpa: std.mem.Allocator, row: index_mod.RecallRow) !index_mod.Rec
         .git_commit = if (row.git_commit) |value| try gpa.dupe(u8, value) else null,
         .git_branch = if (row.git_branch) |value| try gpa.dupe(u8, value) else null,
         .git_dirty = row.git_dirty,
+        .preview = if (row.preview) |value| try gpa.dupe(u8, value) else null,
     };
 }
 

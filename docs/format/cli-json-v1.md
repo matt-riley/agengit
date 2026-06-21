@@ -55,3 +55,31 @@ Doctor checks extend the same shape with a `status` field whose values are
 - `agit fsck --json`
 - `agit export --json <path>`
 - `agit import --json <path>`
+
+## Timeline / recall rows
+
+List-view row payloads emitted by the envelope (e.g. `between --json`, and the
+`step` events emitted by `watch --json`, plus `recall --json` matches) carry a
+`preview` field:
+
+```json
+{
+  "hash": "<64-char step hash>",
+  "origin": "codex",
+  "session_id": "abc123",
+  "turn_id": "turn-1",
+  "timestamp": 1769600000000,
+  "preview": "first user message of the turn, collapsed and truncated to 96..."
+}
+```
+
+- `preview` — the list-view row preview string, computed once at finalize time
+  and stored in the index. Identical to the on-screen preview a list command
+  renders for the same step: the first non-empty user message, else the first
+  assistant message, else the first tool result/args/name, else
+  `(no preview)`, with whitespace collapsed and truncated to 96 bytes (the
+  multi-byte ellipsis appended at the truncation point may extend the output
+  slightly). Stored unredacted; viewers apply redaction at display
+  time via their own privacy config. `null` only for steps recorded before this
+  column was added until `agit reindex` backfills them.
+
