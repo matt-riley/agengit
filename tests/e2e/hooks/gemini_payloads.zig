@@ -7,8 +7,8 @@ test "hooks/gemini_payloads" {
 
     try sandbox.writeRepoFile(".agit/.keep", "");
 
-    const tool_payload = @embedFile("../fixtures/hooks/gemini_after_tool.json");
-    const stop_payload = @embedFile("../fixtures/hooks/gemini_after_agent.json");
+    const tool_payload = @embedFile("../../../src/fixtures/hooks/gemini_after_tool.json");
+    const stop_payload = @embedFile("../../../src/fixtures/hooks/gemini_after_agent.json");
 
     var tool_res = try sandbox.run(&.{"gemini-hook"}, tool_payload);
     defer tool_res.deinit(std.testing.allocator);

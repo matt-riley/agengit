@@ -72,16 +72,6 @@ pub fn isValidId(id: []const u8) bool {
     return false;
 }
 
-/// Get agent metadata by id. Returns null if not found.
-pub fn getAgentById(id: []const u8) ?AgentMetadata {
-    for (all()) |agent| {
-        if (std.mem.eql(u8, agent.id, id)) {
-            return agent;
-        }
-    }
-    return null;
-}
-
 /// Represents the state of a single agent: binary found?, config path, current state, proposed writes.
 pub const AgentPlan = struct {
     pub const State = enum {
@@ -119,147 +109,111 @@ pub const Plan = struct {
     force: bool,
 };
 
-/// Builder for InitPlan.
-pub const Builder = struct {
+/// Build the complete install plan.
+///
+/// `selected_ids` restricts installation to those agent ids; an empty slice
+/// means "all ready agents". Unknown ids return `error.UnknownAgent` before
+/// any filesystem access.
+pub fn buildPlan(
     gpa: std.mem.Allocator,
     io: std.Io,
     environ: std.process.Environ,
     home: []const u8,
-    exe: []const u8,
+    selected_ids: []const []const u8,
     force: bool,
     dry_run: bool,
-    selected: ?std.StringHashMap(void),
-
-    pub fn init(
-        gpa: std.mem.Allocator,
-        io: std.Io,
-        environ: std.process.Environ,
-        home: []const u8,
-        exe: []const u8,
-        force: bool,
-        dry_run: bool,
-    ) Builder {
-        return .{
-            .gpa = gpa,
-            .io = io,
-            .environ = environ,
-            .home = home,
-            .exe = exe,
-            .force = force,
-            .dry_run = dry_run,
-            .selected = null,
-        };
+) !Plan {
+    for (selected_ids) |id| {
+        if (!isValidId(id)) return error.UnknownAgent;
     }
+    const select_all = selected_ids.len == 0;
 
-    /// Mark a specific agent as selected. Only selected agents will be installed.
-    /// Unknown agent names return error.UnknownAgent.
-    pub fn selectAgent(self: *Builder, agent_id: []const u8) !void {
-        if (!isValidId(agent_id)) {
-            return error.UnknownAgent;
-        }
-        if (self.selected == null) {
-            self.selected = std.StringHashMap(void).init(self.gpa);
-        }
-        try self.selected.?.put(agent_id, {});
-    }
+    var agent_plans = std.ArrayList(AgentPlan).empty;
+    defer agent_plans.deinit(gpa);
 
-    /// Check if an agent is selected (or if no agents have been explicitly selected).
-    fn isSelected(self: *const Builder, agent_id: []const u8) bool {
-        if (self.selected == null) {
-            return true; // No explicit selection means all are selected.
-        }
-        return self.selected.?.contains(agent_id);
-    }
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const aa = arena.allocator();
 
-    /// Build the complete plan.
-    pub fn build(self: *Builder) !Plan {
-        var agent_plans = std.ArrayList(AgentPlan).empty;
-        defer agent_plans.deinit(self.gpa);
+    for (all()) |agent| {
+        const config_path = try std.mem.concat(gpa, u8, &.{ home, "/", agent.config_path_rel });
+        defer gpa.free(config_path);
 
-        var arena = std.heap.ArenaAllocator.init(self.gpa);
-        defer arena.deinit();
-        const aa = arena.allocator();
+        const binary_found = path_lookup.hasExecutableInPath(io, gpa, environ, agent.id);
 
-        for (all()) |agent| {
-            const config_path = try std.mem.concat(self.gpa, u8, &.{ self.home, "/", agent.config_path_rel });
-            defer self.gpa.free(config_path);
-
-            const binary_found = path_lookup.hasExecutableInPath(self.io, self.gpa, self.environ, agent.id);
-
-            if (!binary_found) {
-                try agent_plans.append(self.gpa, .{
-                    .agent = agent,
-                    .state = .binary_missing,
-                    .config_path = try self.gpa.dupe(u8, config_path),
-                    .backup_path = null,
-                    .malformed_diag = null,
-                });
-                continue;
-            }
-
-            // JS-extension agents have no JSON config to load/merge; agit always
-            // (re)writes a self-contained extension file, so they are ready when
-            // the binary is present.
-            if (agent.install_kind == .js_extension) {
-                try agent_plans.append(self.gpa, .{
-                    .agent = agent,
-                    .state = .ready,
-                    .config_path = try self.gpa.dupe(u8, config_path),
-                    .backup_path = null,
-                    .malformed_diag = null,
-                });
-                continue;
-            }
-
-            const loaded = atomic_json_mod.loadObject(self.io, aa, config_path) catch |err| {
-                return err;
-            };
-
-            const state: AgentPlan.State = switch (loaded) {
-                .missing, .object => .ready,
-                .malformed => if (self.force) .ready else .config_malformed,
-                .not_object => if (self.force) .ready else .config_not_object,
-            };
-
-            const backup_path: ?[]const u8 = if (self.force and (loaded == .malformed or loaded == .not_object)) backup: {
-                // Build a backup path for dry-run display only (not written in dry-run).
-                const ts_ms = std.Io.Timestamp.now(self.io, .real).toMilliseconds();
-                const timestamp = std.fmt.allocPrint(self.gpa, "{d}", .{ts_ms}) catch return error.OutOfMemory;
-                defer self.gpa.free(timestamp);
-                break :backup try std.fmt.allocPrint(self.gpa, "{s}.backup-{s}", .{ config_path, timestamp });
-            } else null;
-
-            try agent_plans.append(self.gpa, .{
+        if (!binary_found) {
+            try agent_plans.append(gpa, .{
                 .agent = agent,
-                .state = state,
-                .config_path = try self.gpa.dupe(u8, config_path),
-                .backup_path = backup_path,
-                .malformed_diag = if (loaded == .malformed) loaded.malformed else null,
+                .state = .binary_missing,
+                .config_path = try gpa.dupe(u8, config_path),
+                .backup_path = null,
+                .malformed_diag = null,
             });
+            continue;
         }
 
-        // Collect selected agent ids that are ready.
-        var selected = std.ArrayList([]const u8).empty;
-        for (agent_plans.items) |agent_plan| {
-            if (self.isSelected(agent_plan.agent.id) and agent_plan.state == .ready) {
-                try selected.append(self.gpa, try self.gpa.dupe(u8, agent_plan.agent.id));
-            }
+        // JS-extension agents have no JSON config to load/merge; agit always
+        // (re)writes a self-contained extension file, so they are ready when
+        // the binary is present.
+        if (agent.install_kind == .js_extension) {
+            try agent_plans.append(gpa, .{
+                .agent = agent,
+                .state = .ready,
+                .config_path = try gpa.dupe(u8, config_path),
+                .backup_path = null,
+                .malformed_diag = null,
+            });
+            continue;
         }
 
-        return .{
-            .agents = try agent_plans.toOwnedSlice(self.gpa),
-            .selected_agent_ids = try selected.toOwnedSlice(self.gpa),
-            .dry_run = self.dry_run,
-            .force = self.force,
+        const loaded = atomic_json_mod.loadObject(io, aa, config_path) catch |err| {
+            return err;
         };
+
+        const state: AgentPlan.State = switch (loaded) {
+            .missing, .object => .ready,
+            .malformed => if (force) .ready else .config_malformed,
+            .not_object => if (force) .ready else .config_not_object,
+        };
+
+        const backup_path: ?[]const u8 = if (force and (loaded == .malformed or loaded == .not_object)) backup: {
+            // Build a backup path for dry-run display only (not written in dry-run).
+            const ts_ms = std.Io.Timestamp.now(io, .real).toMilliseconds();
+            const timestamp = std.fmt.allocPrint(gpa, "{d}", .{ts_ms}) catch return error.OutOfMemory;
+            defer gpa.free(timestamp);
+            break :backup try std.fmt.allocPrint(gpa, "{s}.backup-{s}", .{ config_path, timestamp });
+        } else null;
+
+        try agent_plans.append(gpa, .{
+            .agent = agent,
+            .state = state,
+            .config_path = try gpa.dupe(u8, config_path),
+            .backup_path = backup_path,
+            .malformed_diag = if (loaded == .malformed) loaded.malformed else null,
+        });
     }
 
-    pub fn deinit(self: *Builder) void {
-        if (self.selected) |*sel| {
-            sel.deinit();
+    // Collect selected agent ids that are ready.
+    var selected = std.ArrayList([]const u8).empty;
+    for (agent_plans.items) |agent_plan| {
+        const is_selected = select_all or blk: {
+            for (selected_ids) |id| {
+                if (std.mem.eql(u8, id, agent_plan.agent.id)) break :blk true;
+            }
+            break :blk false;
+        };
+        if (is_selected and agent_plan.state == .ready) {
+            try selected.append(gpa, try gpa.dupe(u8, agent_plan.agent.id));
         }
     }
-};
+
+    return .{
+        .agents = try agent_plans.toOwnedSlice(gpa),
+        .selected_agent_ids = try selected.toOwnedSlice(gpa),
+        .dry_run = dry_run,
+        .force = force,
+    };
+}
 
 test "isValidId recognizes all agents" {
     try std.testing.expect(isValidId("claude"));
@@ -270,15 +224,12 @@ test "isValidId recognizes all agents" {
     try std.testing.expect(!isValidId("unknown"));
 }
 
-test "Builder.selectAgent validates agent names" {
+test "buildPlan rejects unknown agent ids before touching the filesystem" {
     const gpa = std.testing.allocator;
     const environ = std.process.Environ.empty;
 
-    var builder = Builder.init(gpa, undefined, environ, "/tmp", "/bin/agit", false, false);
-    defer builder.deinit();
-
-    try builder.selectAgent("claude");
-    try builder.selectAgent("codex");
-
-    try std.testing.expectError(error.UnknownAgent, builder.selectAgent("invalid"));
+    try std.testing.expectError(
+        error.UnknownAgent,
+        buildPlan(gpa, undefined, environ, "/tmp", &.{"invalid"}, false, false),
+    );
 }

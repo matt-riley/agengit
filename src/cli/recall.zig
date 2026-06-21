@@ -5,6 +5,7 @@ const output_mod = @import("output.zig");
 const help_mod = @import("help.zig");
 const redact_mod = @import("../privacy/redact.zig");
 const session_arg = @import("session_arg.zig");
+const shared = @import("shared.zig");
 const specs = @import("specs.zig");
 const status = @import("status.zig");
 const step_line = @import("step_line.zig");
@@ -18,12 +19,6 @@ const default_limit: usize = 20;
 const search_context_tokens: usize = 12;
 const search_candidate_multiplier: usize = 8;
 
-const RedactionMode = enum {
-    auto,
-    redacted,
-    full,
-};
-
 const RecallOptions = struct {
     format: output_mod.Format = .human,
     origin: ?[:0]const u8 = null,
@@ -33,12 +28,7 @@ const RecallOptions = struct {
     limit: usize = default_limit,
     query: ?[:0]const u8 = null,
     judged: ?[:0]const u8 = null,
-    redaction_mode: RedactionMode = .auto,
-};
-
-const SessionFilter = struct {
-    origin: ?[]const u8 = null,
-    session_id: ?[]const u8 = null,
+    redaction_mode: shared.RedactionMode = .auto,
 };
 
 const RecallMatch = struct {
@@ -103,10 +93,10 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
         std.process.exit(1);
     };
     defer loaded_config.deinit();
-    const use_redaction = shouldUseRedaction(options.redaction_mode, loaded_config.value.privacy.display.redacted_by_default);
+    const use_redaction = shared.shouldUseRedaction(options.redaction_mode, loaded_config.value.privacy.display.redacted_by_default);
 
     const search_rows = if (trimmed_query) |query| blk: {
-        const match_query = try buildMatchQuery(gpa, query);
+        const match_query = try shared.buildMatchQuery(gpa, query);
         defer gpa.free(match_query);
         break :blk try store.index.searchEntries(gpa, .{
             .match_query = match_query,
@@ -444,24 +434,16 @@ fn parseOptions(iter: *std.process.Args.Iterator, stdout: *std.Io.File.Writer) !
     return options;
 }
 
-fn resolveSessionFilter(stdout: *std.Io.File.Writer, options: RecallOptions) !SessionFilter {
-    var filter: SessionFilter = .{ .origin = options.origin };
-    if (options.session) |session| {
-        if (std.mem.indexOfScalar(u8, session, '/')) |sep| {
-            const qualified_origin = session[0..sep];
-            if (filter.origin) |origin| {
-                if (!std.mem.eql(u8, origin, qualified_origin)) {
-                    try arg_parse.invalidArg(stdout, options.format, usage, "--origin does not match the origin prefix embedded in --session.");
-                    return error.InvalidArgument;
-                }
-            }
-            filter.origin = qualified_origin;
-            filter.session_id = session[sep + 1 ..];
-        } else {
-            filter.session_id = session;
-        }
-    }
-    return filter;
+fn resolveSessionFilter(stdout: *std.Io.File.Writer, options: RecallOptions) !shared.SessionFilter {
+    return shared.resolveSessionFilter(stdout, options.format, usage.name, options.origin, options.session) catch |err| switch (err) {
+        error.InvalidArgument => {
+            try stdout.interface.writeAll("\n");
+            try help_mod.renderUsage(stdout, usage);
+            try stdout.flush();
+            return err;
+        },
+        else => return err,
+    };
 }
 
 fn parseJudgedFilter(stdout: *std.Io.File.Writer, options: RecallOptions) !?[]const u8 {
@@ -480,35 +462,6 @@ fn parseOutcomeFilter(stdout: *std.Io.File.Writer, options: RecallOptions) !?[]c
     if (std.mem.eql(u8, raw, "unknown")) return "unknown";
     try arg_parse.invalidArg(stdout, options.format, usage, "Invalid --outcome value; use success, failure, or unknown.");
     return error.InvalidArgument;
-}
-
-fn buildMatchQuery(gpa: std.mem.Allocator, query: []const u8) ![]u8 {
-    var out: std.ArrayList(u8) = .empty;
-    errdefer out.deinit(gpa);
-
-    var tokens = std.mem.tokenizeAny(u8, query, " \t\r\n");
-    var count: usize = 0;
-    while (tokens.next()) |token| {
-        if (count > 0) try out.appendSlice(gpa, " AND ");
-        try appendQuotedToken(&out, gpa, token);
-        count += 1;
-    }
-
-    if (count == 0) return error.InvalidArgument;
-    return out.toOwnedSlice(gpa);
-}
-
-fn appendQuotedToken(out: *std.ArrayList(u8), gpa: std.mem.Allocator, token: []const u8) !void {
-    try out.append(gpa, '"');
-    for (token) |byte| {
-        if (byte == '"') {
-            try out.append(gpa, '"');
-            try out.append(gpa, '"');
-        } else {
-            try out.append(gpa, byte);
-        }
-    }
-    try out.append(gpa, '"');
 }
 
 fn containsRecallStep(matches: []const RecallMatch, hash: []const u8) bool {
@@ -558,14 +511,6 @@ fn outcomeRank(raw: ?[]const u8) u8 {
 
 fn outcomeLabel(raw: ?[]const u8) []const u8 {
     return outcome_mod.parseLabel(raw).label();
-}
-
-fn shouldUseRedaction(mode: RedactionMode, redacted_by_default: bool) bool {
-    return switch (mode) {
-        .auto => redacted_by_default,
-        .redacted => true,
-        .full => false,
-    };
 }
 
 test "outcomeRank: orders failure < unknown < success" {
