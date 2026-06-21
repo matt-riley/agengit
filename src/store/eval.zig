@@ -567,3 +567,341 @@ test "toolRelatedToPrompt compares meaningful prompt terms against tool activity
     try std.testing.expect(toolRelatedToPrompt("bash", "sed -n '1,80p' src/store/eval.zig", "Improve the eval scoring"));
     try std.testing.expect(!toolRelatedToPrompt("bash", "zig build test", "Improve the recall command"));
 }
+
+// Characterization tests below pin the six `score*` dimension functions and the
+// `evaluateSession` composition. They exercise current thresholds in isolation
+// so a silent drift surfaces here rather than in a coarse e2e golden.
+// `CollectedSignals` exposes a nested `counts` field (see struct above).
+
+const ToolCallSpec = struct {
+    name: []const u8,
+    args: []const u8,
+    result: ?[]const u8,
+};
+
+/// Build a `SessionStep` for eval characterization tests.
+///
+/// `prompt` becomes the single user message; `assistant` (when non-null and
+/// non-empty) becomes an assistant message. Each spec yields one tool call.
+/// All messages/tool_calls slices are allocator-owned and must be released via
+/// `freeStep`. Message/tool strings themselves are borrowed from the caller
+/// (typically string literals) and are not freed here.
+fn makeStep(
+    gpa: std.mem.Allocator,
+    hash: []const u8,
+    prompt: []const u8,
+    assistant: ?[]const u8,
+    tool_calls: []const ToolCallSpec,
+) !SessionStep {
+    var messages: std.ArrayList(object.StepMessage) = .empty;
+    defer messages.deinit(gpa);
+    try messages.append(gpa, .{ .role = "user", .content = prompt });
+    if (assistant) |content| {
+        if (content.len > 0) try messages.append(gpa, .{ .role = "assistant", .content = content });
+    }
+    const owned_messages = try messages.toOwnedSlice(gpa);
+    errdefer gpa.free(owned_messages);
+
+    const owned_calls = try gpa.alloc(object.StepToolCall, tool_calls.len);
+    errdefer gpa.free(owned_calls);
+    for (tool_calls, 0..) |spec, i| {
+        owned_calls[i] = .{
+            .tool_name = spec.name,
+            .args = spec.args,
+            .result = spec.result,
+        };
+    }
+
+    return .{
+        .hash = hash,
+        .timestamp = 0,
+        .step = .{
+            .parent = null,
+            .tree = "0" ** 64,
+            .session_id = "test-session",
+            .origin = "test",
+            .turn_id = "test-turn",
+            .causes = &.{},
+            .timestamp = 0,
+            .messages = owned_messages,
+            .tool_calls = owned_calls,
+        },
+    };
+}
+
+fn freeStep(gpa: std.mem.Allocator, step: SessionStep) void {
+    gpa.free(@constCast(step.step.messages));
+    gpa.free(@constCast(step.step.tool_calls));
+}
+
+test "makeStep builds a SessionStep with allocated messages and tool_calls" {
+    const gpa = std.testing.allocator;
+    const step = try makeStep(gpa, "abc", "implement the test", "done and verified", &.{
+        .{ .name = "bash", .args = "zig build test", .result = "ok" },
+    });
+    defer freeStep(gpa, step);
+    try std.testing.expectEqual(@as(usize, 2), step.step.messages.len);
+    try std.testing.expectEqualStrings("user", step.step.messages[0].role);
+    try std.testing.expectEqualStrings("implement the test", step.step.messages[0].content);
+    try std.testing.expectEqualStrings("assistant", step.step.messages[1].role);
+    try std.testing.expectEqual(@as(usize, 1), step.step.tool_calls.len);
+    try std.testing.expectEqualStrings("zig build test", step.step.tool_calls[0].args);
+    try std.testing.expect(step.step.tool_calls[0].result != null);
+}
+
+test "scoreGoalClarity thresholds: bad/mixed(30)/good(60) with 15/20 per-signal steps" {
+    const gpa = std.testing.allocator;
+    {
+        const signals = CollectedSignals{ .counts = .{ .concrete_terms = 0, .success_criteria_phrases = 0 } };
+        const report = try scoreGoalClarity(gpa, signals);
+        defer freeDimension(gpa, report);
+        try std.testing.expectEqualStrings("bad", report.rating);
+        try std.testing.expectEqual(@as(i64, 0), report.score);
+        try std.testing.expect(report.reasons.len > 0);
+    }
+    {
+        // 2*15 = 30 -> below 55 good band, at/above 25 mixed band.
+        const signals = CollectedSignals{ .counts = .{ .concrete_terms = 2, .success_criteria_phrases = 0 } };
+        const report = try scoreGoalClarity(gpa, signals);
+        defer freeDimension(gpa, report);
+        try std.testing.expectEqualStrings("mixed", report.rating);
+        try std.testing.expectEqual(@as(i64, 30), report.score);
+        try std.testing.expect(report.reasons.len > 0);
+    }
+    {
+        // 1*15 + 2*20 = 55 -> exactly at the good band threshold (>= 55).
+        const signals = CollectedSignals{ .counts = .{ .concrete_terms = 1, .success_criteria_phrases = 2 } };
+        const report = try scoreGoalClarity(gpa, signals);
+        defer freeDimension(gpa, report);
+        try std.testing.expectEqualStrings("good", report.rating);
+        try std.testing.expectEqual(@as(i64, 55), report.score);
+        try std.testing.expect(report.reasons.len > 0);
+    }
+    {
+        const signals = CollectedSignals{ .counts = .{ .concrete_terms = 4, .success_criteria_phrases = 0 } };
+        const report = try scoreGoalClarity(gpa, signals);
+        defer freeDimension(gpa, report);
+        try std.testing.expectEqualStrings("good", report.rating);
+        try std.testing.expectEqual(@as(i64, 60), report.score);
+        try std.testing.expect(report.reasons.len > 0);
+    }
+}
+
+test "scoreExecutionFocus thresholds: unknown/good(50)/mixed(30)" {
+    const gpa = std.testing.allocator;
+    {
+        const signals = CollectedSignals{ .counts = .{ .tool_calls = 0 } };
+        const report = try scoreExecutionFocus(gpa, signals);
+        defer freeDimension(gpa, report);
+        try std.testing.expectEqualStrings("unknown", report.rating);
+        try std.testing.expectEqual(@as(i64, 0), report.score);
+        try std.testing.expect(report.reasons.len > 0);
+    }
+    {
+        // 5/10 = 50 -> exactly at the good band threshold (>= 50).
+        const signals = CollectedSignals{ .counts = .{ .tool_calls = 10, .related_tool_calls = 5 } };
+        const report = try scoreExecutionFocus(gpa, signals);
+        defer freeDimension(gpa, report);
+        try std.testing.expectEqualStrings("good", report.rating);
+        try std.testing.expectEqual(@as(i64, 50), report.score);
+        try std.testing.expect(report.reasons.len > 0);
+    }
+    {
+        const signals = CollectedSignals{ .counts = .{ .tool_calls = 10, .related_tool_calls = 6 } };
+        const report = try scoreExecutionFocus(gpa, signals);
+        defer freeDimension(gpa, report);
+        try std.testing.expectEqualStrings("good", report.rating);
+        try std.testing.expectEqual(@as(i64, 60), report.score);
+        try std.testing.expect(report.reasons.len > 0);
+    }
+    {
+        // 3/10 = 30 -> mixed.
+        const signals = CollectedSignals{ .counts = .{ .tool_calls = 10, .related_tool_calls = 3 } };
+        const report = try scoreExecutionFocus(gpa, signals);
+        defer freeDimension(gpa, report);
+        try std.testing.expectEqualStrings("mixed", report.rating);
+        try std.testing.expectEqual(@as(i64, 30), report.score);
+        try std.testing.expect(report.reasons.len > 0);
+    }
+}
+
+test "scoreFailureRecovery thresholds: good/mixed(55)/bad/mixed(40)" {
+    const gpa = std.testing.allocator;
+    {
+        const signals = CollectedSignals{ .counts = .{ .error_results = 0 } };
+        const report = try scoreFailureRecovery(gpa, signals);
+        defer freeDimension(gpa, report);
+        try std.testing.expectEqualStrings("good", report.rating);
+        try std.testing.expectEqual(@as(i64, 90), report.score);
+        try std.testing.expect(report.reasons.len > 0);
+    }
+    {
+        // recovered_errors > 0 -> mixed at 55.
+        const signals = CollectedSignals{ .counts = .{ .error_results = 1, .recovered_errors = 1 } };
+        const report = try scoreFailureRecovery(gpa, signals);
+        defer freeDimension(gpa, report);
+        try std.testing.expectEqualStrings("mixed", report.rating);
+        try std.testing.expectEqual(@as(i64, 55), report.score);
+        try std.testing.expect(report.reasons.len > 0);
+    }
+    {
+        // repeated_failures > 0 -> bad at 15.
+        const signals = CollectedSignals{ .counts = .{ .error_results = 2, .repeated_failures = 1 } };
+        const report = try scoreFailureRecovery(gpa, signals);
+        defer freeDimension(gpa, report);
+        try std.testing.expectEqualStrings("bad", report.rating);
+        try std.testing.expectEqual(@as(i64, 15), report.score);
+        try std.testing.expect(report.reasons.len > 0);
+    }
+    {
+        // errors without recovery or repetition -> mixed at 40.
+        const signals = CollectedSignals{ .counts = .{ .error_results = 1 } };
+        const report = try scoreFailureRecovery(gpa, signals);
+        defer freeDimension(gpa, report);
+        try std.testing.expectEqualStrings("mixed", report.rating);
+        try std.testing.expectEqual(@as(i64, 40), report.score);
+        try std.testing.expect(report.reasons.len > 0);
+    }
+}
+
+test "scoreVerification thresholds: bad without commands, good with one" {
+    const gpa = std.testing.allocator;
+    {
+        const signals = CollectedSignals{ .counts = .{ .verification_commands = 0 } };
+        const report = try scoreVerification(gpa, signals);
+        defer freeDimension(gpa, report);
+        try std.testing.expectEqualStrings("bad", report.rating);
+        try std.testing.expectEqual(@as(i64, 10), report.score);
+        try std.testing.expect(report.reasons.len > 0);
+    }
+    {
+        const signals = CollectedSignals{ .counts = .{ .verification_commands = 1 } };
+        const report = try scoreVerification(gpa, signals);
+        defer freeDimension(gpa, report);
+        try std.testing.expectEqualStrings("good", report.rating);
+        try std.testing.expectEqual(@as(i64, 85), report.score);
+        try std.testing.expect(report.reasons.len > 0);
+    }
+}
+
+test "scoreCompletionSignal thresholds: bad/mixed(1)/good(2)" {
+    const gpa = std.testing.allocator;
+    {
+        const signals = CollectedSignals{ .counts = .{ .final_summary_terms = 0 } };
+        const report = try scoreCompletionSignal(gpa, signals);
+        defer freeDimension(gpa, report);
+        try std.testing.expectEqualStrings("bad", report.rating);
+        try std.testing.expectEqual(@as(i64, 10), report.score);
+        try std.testing.expect(report.reasons.len > 0);
+    }
+    {
+        const signals = CollectedSignals{ .counts = .{ .final_summary_terms = 1 } };
+        const report = try scoreCompletionSignal(gpa, signals);
+        defer freeDimension(gpa, report);
+        try std.testing.expectEqualStrings("mixed", report.rating);
+        try std.testing.expectEqual(@as(i64, 50), report.score);
+        try std.testing.expect(report.reasons.len > 0);
+    }
+    {
+        const signals = CollectedSignals{ .counts = .{ .final_summary_terms = 2 } };
+        const report = try scoreCompletionSignal(gpa, signals);
+        defer freeDimension(gpa, report);
+        try std.testing.expectEqualStrings("good", report.rating);
+        try std.testing.expectEqual(@as(i64, 80), report.score);
+        try std.testing.expect(report.reasons.len > 0);
+    }
+}
+
+test "scoreChurnRisk thresholds: good(0)/mixed(<=1)/bad(>=2)" {
+    const gpa = std.testing.allocator;
+    {
+        // risk = 0 + 0 + max(0, 2-3) = 0 -> good.
+        const signals = CollectedSignals{ .counts = .{ .steps = 2, .repeated_commands = 0, .repeated_failures = 0 } };
+        const report = try scoreChurnRisk(gpa, signals);
+        defer freeDimension(gpa, report);
+        try std.testing.expectEqualStrings("good", report.rating);
+        try std.testing.expectEqual(@as(i64, 90), report.score);
+        try std.testing.expect(report.reasons.len > 0);
+    }
+    {
+        // risk = 1 + 0 + max(0, 3-3) = 1 -> mixed.
+        const signals = CollectedSignals{ .counts = .{ .steps = 3, .repeated_commands = 1, .repeated_failures = 0 } };
+        const report = try scoreChurnRisk(gpa, signals);
+        defer freeDimension(gpa, report);
+        try std.testing.expectEqualStrings("mixed", report.rating);
+        try std.testing.expectEqual(@as(i64, 55), report.score);
+        try std.testing.expect(report.reasons.len > 0);
+    }
+    {
+        // risk = 2 + 0 + max(0, 3-3) = 2 -> bad.
+        const signals = CollectedSignals{ .counts = .{ .steps = 3, .repeated_commands = 2, .repeated_failures = 0 } };
+        const report = try scoreChurnRisk(gpa, signals);
+        defer freeDimension(gpa, report);
+        try std.testing.expectEqualStrings("bad", report.rating);
+        try std.testing.expectEqual(@as(i64, 20), report.score);
+        try std.testing.expect(report.reasons.len > 0);
+    }
+}
+
+test "evaluateSession composes six dimensions and classifies the session" {
+    const gpa = std.testing.allocator;
+    const steps = try gpa.alloc(SessionStep, 2);
+    errdefer gpa.free(steps);
+    var created: usize = 0;
+    errdefer for (steps[0..created]) |*step| freeStep(gpa, step.*);
+    steps[0] = try makeStep(
+        gpa,
+        "h1",
+        "Implement the test command and json workflow build",
+        "Implemented and verified the change.",
+        &.{
+            .{ .name = "bash", .args = "zig build test", .result = "ok" },
+            .{ .name = "bash", .args = "sed test", .result = "error: not found" },
+        },
+    );
+    created += 1;
+    steps[1] = try makeStep(
+        gpa,
+        "h2",
+        "that did not work",
+        "Fixed the failure and verified again.",
+        &.{
+            .{ .name = "bash", .args = "sed fix", .result = "panic: boom" },
+        },
+    );
+    defer {
+        freeStep(gpa, steps[0]);
+        freeStep(gpa, steps[1]);
+        gpa.free(steps);
+    }
+
+    // Expected collected signals (verify by hand):
+    //   concrete_terms=6, success_criteria=0 -> goal clarity good (90)
+    //   tool_calls=3, related=2 -> execution focus good (66)
+    //   error_results=2, recovered=0, repeated_failures=1 -> failure recovery bad (15)
+    //   verification_commands=1 -> verification good (85)
+    //   final_summary_terms=2 (fixed, verified) -> completion good (80)
+    //   churn risk = 0+1+max(0,2-3)=1 -> mixed (55)
+    //   good=4, bad=1 -> classify "mixed"; steps>=2 & tool_calls>=2 -> confidence "high".
+    const assessment = try evaluateSession(gpa, steps);
+    defer assessment.deinit(gpa);
+
+    try std.testing.expectEqualStrings("mixed", assessment.classification);
+    try std.testing.expectEqualStrings("high", assessment.confidence);
+
+    const dims = assessment.dimensions;
+    try std.testing.expectEqualStrings("good", dims.goal_clarity.rating);
+    try std.testing.expectEqualStrings("good", dims.execution_focus.rating);
+    try std.testing.expectEqualStrings("bad", dims.failure_recovery.rating);
+    try std.testing.expectEqualStrings("good", dims.verification.rating);
+    try std.testing.expectEqualStrings("good", dims.completion_signal.rating);
+    try std.testing.expectEqualStrings("mixed", dims.churn_risk.rating);
+
+    // Every dimension derived a concrete (non-unknown) rating for this input.
+    try std.testing.expect(dims.goal_clarity.reasons.len > 0);
+    try std.testing.expect(dims.execution_focus.reasons.len > 0);
+    try std.testing.expect(dims.failure_recovery.reasons.len > 0);
+    try std.testing.expect(dims.verification.reasons.len > 0);
+    try std.testing.expect(dims.completion_signal.reasons.len > 0);
+    try std.testing.expect(dims.churn_risk.reasons.len > 0);
+}
