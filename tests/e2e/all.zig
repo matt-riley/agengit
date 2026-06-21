@@ -46,6 +46,7 @@ test {
     _ = @import("blame/attribution.zig");
     _ = @import("watch/live_follow.zig");
     _ = @import("grep/search.zig");
+    _ = @import("grep/content.zig");
     _ = @import("recall/path_recall.zig");
     _ = @import("eval.zig");
     _ = @import("investigation/views.zig");

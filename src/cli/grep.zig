@@ -1,7 +1,9 @@
 const std = @import("std");
 const config_mod = @import("../store/config.zig");
 const index_mod = @import("../store/index.zig");
+const store_mod = @import("../store/store.zig");
 const redact_mod = @import("../privacy/redact.zig");
+const content_search = @import("../store/content_search.zig");
 const date_util = @import("../util/date.zig");
 const help_mod = @import("help.zig");
 const output_mod = @import("output.zig");
@@ -31,6 +33,7 @@ const GrepOptions = struct {
     context_tokens: usize = default_context_tokens,
     query: ?[:0]const u8 = null,
     redaction_mode: RedactionMode = .auto,
+    content: bool = false,
 };
 
 const SessionFilter = struct {
@@ -90,6 +93,22 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
     };
     defer loaded_config.deinit();
     const use_redaction = shouldUseRedaction(options.redaction_mode, loaded_config.value.privacy.display.redacted_by_default);
+
+    if (options.content) {
+        try runContentSearch(
+            io,
+            gpa,
+            &stdout,
+            &store,
+            &loaded_config,
+            trimmed_query,
+            session_filter,
+            options,
+            use_redaction,
+        );
+        try stdout.flush();
+        return;
+    }
 
     const match_query = try buildMatchQuery(gpa, trimmed_query);
     defer gpa.free(match_query);
@@ -157,6 +176,127 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
         },
     }
     try stdout.flush();
+}
+
+fn runContentSearch(
+    io: std.Io,
+    gpa: std.mem.Allocator,
+    stdout: *std.Io.File.Writer,
+    store: *store_mod.Store,
+    loaded_config: *config_mod.Loaded,
+    trimmed_query: []const u8,
+    session_filter: SessionFilter,
+    options: GrepOptions,
+    use_redaction: bool,
+) !void {
+    const content_matches = content_search.searchBlobContent(io, gpa, store, .{
+        .query = trimmed_query,
+        .origin = session_filter.origin,
+        .session_id = session_filter.session_id,
+        .since_ms = options.since_ms,
+        .until_ms_exclusive = options.until_ms_exclusive,
+        .limit = options.limit,
+        .context_tokens = options.context_tokens,
+    }) catch |err| {
+        try status.writeDiagnostic(stdout, options.format, usage.name, .{
+            .code = "content_search_failed",
+            .message = "Failed to search blob content.",
+            .hint = @errorName(err),
+        });
+        try stdout.flush();
+        std.process.exit(1);
+    };
+    defer content_search.freeContentMatches(gpa, content_matches);
+
+    switch (options.format) {
+        .human => try writeContentHuman(
+            stdout,
+            gpa,
+            trimmed_query,
+            content_matches,
+            use_redaction,
+            loaded_config.value.privacy.custom_literals,
+        ),
+        .json => {
+            const json_matches = try buildContentJsonMatches(
+                gpa,
+                content_matches,
+                loaded_config.value.privacy.custom_literals,
+            );
+            defer freeJsonMatches(gpa, json_matches);
+            try output_mod.writeEnvelope(stdout, usage.name, .{
+                .query = trimmed_query,
+                .origin = session_filter.origin,
+                .session = session_filter.session_id,
+                .since = options.since_raw,
+                .until = options.until_raw,
+                .limit = options.limit,
+                .context = options.context_tokens,
+                .redacted = use_redaction,
+                .content = true,
+                .matches = json_matches,
+            });
+        },
+    }
+}
+
+fn writeContentHuman(
+    stdout: *std.Io.File.Writer,
+    gpa: std.mem.Allocator,
+    query: []const u8,
+    matches: []const content_search.ContentMatch,
+    use_redaction: bool,
+    custom_literals: []const []const u8,
+) !void {
+    if (matches.len == 0) {
+        try stdout.interface.print("No content matches for \"{s}\".\n", .{query});
+        return;
+    }
+
+    var ts_buf: [32]u8 = undefined;
+    for (matches, 0..) |match, i| {
+        const rendered_snippet = if (use_redaction) try redact_mod.redactAlloc(gpa, match.snippet, .{
+            .custom_literals = custom_literals,
+        }) else match.snippet;
+        defer if (use_redaction) gpa.free(rendered_snippet);
+
+        if (i > 0) try stdout.interface.writeAll("\n");
+        try stdout.interface.print("{s}  {s}/{s}  turn {s}  content {s}  step {s}\n", .{
+            status.formatTimestamp(match.timestamp, &ts_buf),
+            match.origin,
+            match.session_id,
+            match.turn_id,
+            match.path,
+            match.step_hash[0..@min(12, match.step_hash.len)],
+        });
+        try stdout.interface.print("  {s}\n", .{rendered_snippet});
+    }
+}
+
+fn buildContentJsonMatches(
+    gpa: std.mem.Allocator,
+    matches: []const content_search.ContentMatch,
+    custom_literals: []const []const u8,
+) ![]const JsonMatch {
+    const json_matches = try gpa.alloc(JsonMatch, matches.len);
+    errdefer gpa.free(json_matches);
+
+    for (matches, 0..) |match, i| {
+        json_matches[i] = .{
+            .entry_kind = "content",
+            .origin = match.origin,
+            .session_id = match.session_id,
+            .turn_id = match.turn_id,
+            .step_hash = match.step_hash,
+            .timestamp = match.timestamp,
+            .label = match.path,
+            .snippet = try redact_mod.redactAlloc(gpa, match.snippet, .{
+                .custom_literals = custom_literals,
+            }),
+        };
+    }
+
+    return json_matches;
 }
 
 fn writeHuman(
@@ -230,6 +370,8 @@ fn parseOptions(iter: *std.process.Args.Iterator, stdout: *std.Io.File.Writer) !
     while (iter.next()) |arg| {
         if (std.mem.eql(u8, arg, "--json")) {
             options.format = .json;
+        } else if (std.mem.eql(u8, arg, "--content")) {
+            options.content = true;
         } else if (std.mem.eql(u8, arg, "--origin")) {
             options.origin = iter.next() orelse {
                 try invalidArgument(stdout, options.format, "--origin requires a value.");
