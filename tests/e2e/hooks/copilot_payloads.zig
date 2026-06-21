@@ -7,9 +7,9 @@ test "hooks/copilot_payloads" {
 
     try sandbox.writeRepoFile(".agit/.keep", "");
 
-    const user_payload = @embedFile("../../../src/fixtures/hooks/copilot_user_prompt.json");
-    const tool_payload = @embedFile("../../../src/fixtures/hooks/copilot_post_tool_use.json");
-    const stop_payload = @embedFile("../../../src/fixtures/hooks/copilot_stop.json");
+    const user_payload = @embedFile("../fixtures/hooks/copilot_user_prompt.json");
+    const tool_payload = @embedFile("../fixtures/hooks/copilot_post_tool_use.json");
+    const stop_payload = @embedFile("../fixtures/hooks/copilot_stop.json");
 
     var user_res = try sandbox.run(&.{"copilot-hook"}, user_payload);
     defer user_res.deinit(std.testing.allocator);

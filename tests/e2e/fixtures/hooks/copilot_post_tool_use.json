@@ -1,0 +1,12 @@
+{
+  "session_id": "copilot-sess-001",
+  "cwd": "/home/user/myproject",
+  "hook_event_name": "PostToolUse",
+  "timestamp": "2024-01-01T00:00:01.000Z",
+  "tool_name": "bash",
+  "tool_input": { "command": "cat src/auth.py" },
+  "tool_result": {
+    "result_type": "success",
+    "text_result_for_llm": "import hashlib\n\ndef authenticate(user, password):\n    return hashlib.sha256(password.encode()).hexdigest()\n"
+  }
+}
