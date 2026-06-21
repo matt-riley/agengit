@@ -61,7 +61,23 @@ pub fn auditObjectIndex(self: *Store, io: std.Io, gpa: std.mem.Allocator) !Store
 
 pub fn ensureObjectIndexState(self: *Store, io: std.Io, gpa: std.mem.Allocator) !void {
     if ((try self.index.getObjectsComplete()) != null) return;
-    const loose_objects = try store_mod.countObjectFiles(io, gpa, self.root);
+
+    // Count loose objects under objects/ (inline to avoid importing store.zig).
+    var loose_objects: usize = 0;
+    if (self.root.openDir(io, "objects", .{ .iterate = true })) |obj_dir| {
+        defer obj_dir.close(io);
+        var walker = try obj_dir.walk(gpa);
+        defer walker.deinit();
+        while (try walker.next(io)) |entry| {
+            if (entry.kind == .file and entry.path.len == 65 and entry.path[2] == '/') {
+                loose_objects += 1;
+            }
+        }
+    } else |err| switch (err) {
+        error.FileNotFound, error.NotDir => {},
+        else => return err,
+    }
+
     const packed_objects = try pack_mod.countEntries(io, self.root, gpa);
     try self.index.setObjectsComplete(loose_objects == 0 and packed_objects == 0);
 }

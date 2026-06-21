@@ -692,7 +692,7 @@ pub const Store = struct {
     }
 };
 
-pub fn countObjectFiles(io: std.Io, gpa: std.mem.Allocator, root: std.Io.Dir) !usize {
+fn countObjectFiles(io: std.Io, gpa: std.mem.Allocator, root: std.Io.Dir) !usize {
     var obj_dir = root.openDir(io, "objects", .{ .iterate = true }) catch |err| switch (err) {
         error.FileNotFound, error.NotDir => return 0,
         else => return err,
