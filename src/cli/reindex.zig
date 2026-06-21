@@ -7,6 +7,7 @@ const pack_mod = @import("../store/pack.zig");
 const help_mod = @import("help.zig");
 const specs = @import("specs.zig");
 const preview_mod = @import("../store/preview.zig");
+const arg_parse = @import("arg_parse.zig");
 
 pub const usage = specs.reindex_usage;
 
@@ -66,24 +67,18 @@ fn parseOptions(iter: *std.process.Args.Iterator, stdout: *std.Io.File.Writer) !
     while (iter.next()) |arg| {
         if (std.mem.eql(u8, arg, "--from")) {
             const value = iter.next() orelse {
-                try stdout.interface.writeAll("error: --from requires a 64-character hash\n\n");
-                try help_mod.renderUsage(stdout, usage);
-                try stdout.flush();
+                try arg_parse.invalidArg(stdout, .human, usage, "--from requires a 64-character hash.");
                 return error.InvalidArgument;
             };
             options.from = hash_mod.Hash.fromHex(value) catch {
-                try stdout.interface.print("error: invalid --from hash '{s}'\n\n", .{value});
-                try help_mod.renderUsage(stdout, usage);
-                try stdout.flush();
+                try arg_parse.invalidArg(stdout, .human, usage, "Invalid --from hash.");
                 return error.InvalidArgument;
             };
         } else if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
             try help_mod.renderUsage(stdout, usage);
             return error.HelpShown;
         } else {
-            try stdout.interface.print("error: unknown option '{s}'\n\n", .{arg});
-            try help_mod.renderUsage(stdout, usage);
-            try stdout.flush();
+            try arg_parse.invalidArg(stdout, .human, usage, "Unknown option.");
             return error.InvalidArgument;
         }
     }

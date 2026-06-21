@@ -9,6 +9,7 @@ const output_mod = @import("output.zig");
 const privacy_scan_mod = @import("../privacy/scan.zig");
 const specs = @import("specs.zig");
 const status_cmd = @import("status.zig");
+const arg_parse = @import("arg_parse.zig");
 const store_mod = @import("../store/store.zig");
 
 pub const usage = specs.export_usage;
@@ -30,12 +31,12 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
     };
 
     if (options.filters.since_ms != null and options.filters.until_ms_exclusive != null and options.filters.since_ms.? >= options.filters.until_ms_exclusive.?) {
-        try invalidArgument(&stdout, options.format, "--since must be earlier than --until (the --until date is exclusive).");
+        try arg_parse.invalidArg(&stdout, options.format, usage, "--since must be earlier than --until (the --until date is exclusive).");
         return;
     }
 
     const bundle_path = options.path orelse {
-        try invalidArgument(&stdout, options.format, "export requires a target directory path.");
+        try arg_parse.invalidArg(&stdout, options.format, usage, "export requires a target directory path.");
         return;
     };
 
@@ -138,37 +139,37 @@ fn parseOptions(iter: *std.process.Args.Iterator, stdout: *std.Io.File.Writer) !
             options.format = .json;
         } else if (std.mem.eql(u8, arg, "--origin")) {
             const value = iter.next() orelse {
-                try invalidArgument(stdout, options.format, "--origin requires a value.");
+                try arg_parse.invalidArg(stdout, options.format, usage, "--origin requires a value.");
                 return error.InvalidArgument;
             };
             options.filters.origin = value;
         } else if (std.mem.eql(u8, arg, "--session")) {
             const value = iter.next() orelse {
-                try invalidArgument(stdout, options.format, "--session requires an origin/session-id value.");
+                try arg_parse.invalidArg(stdout, options.format, usage, "--session requires an origin/session-id value.");
                 return error.InvalidArgument;
             };
             options.filters.session = parseSessionSpec(value) catch {
-                try invalidArgument(stdout, options.format, "Invalid --session value; use origin/session-id.");
+                try arg_parse.invalidArg(stdout, options.format, usage, "Invalid --session value; use origin/session-id.");
                 return error.InvalidArgument;
             };
             options.filters.session_text = value;
         } else if (std.mem.eql(u8, arg, "--since")) {
             const value = iter.next() orelse {
-                try invalidArgument(stdout, options.format, "--since requires a YYYY-MM-DD value.");
+                try arg_parse.invalidArg(stdout, options.format, usage, "--since requires a YYYY-MM-DD value.");
                 return error.InvalidArgument;
             };
             options.filters.since_ms = date_util.parseUtcDateMidnight(value) catch {
-                try invalidArgument(stdout, options.format, "Invalid --since date; use YYYY-MM-DD.");
+                try arg_parse.invalidArg(stdout, options.format, usage, "Invalid --since date; use YYYY-MM-DD.");
                 return error.InvalidArgument;
             };
             options.filters.since_text = value;
         } else if (std.mem.eql(u8, arg, "--until")) {
             const value = iter.next() orelse {
-                try invalidArgument(stdout, options.format, "--until requires a YYYY-MM-DD value.");
+                try arg_parse.invalidArg(stdout, options.format, usage, "--until requires a YYYY-MM-DD value.");
                 return error.InvalidArgument;
             };
             options.filters.until_ms_exclusive = date_util.parseUtcDateEndExclusive(value) catch {
-                try invalidArgument(stdout, options.format, "Invalid --until date; use YYYY-MM-DD.");
+                try arg_parse.invalidArg(stdout, options.format, usage, "Invalid --until date; use YYYY-MM-DD.");
                 return error.InvalidArgument;
             };
             options.filters.until_text = value;
@@ -179,12 +180,12 @@ fn parseOptions(iter: *std.process.Args.Iterator, stdout: *std.Io.File.Writer) !
             try stdout.flush();
             return error.HelpShown;
         } else if (std.mem.startsWith(u8, arg, "-")) {
-            try invalidArgument(stdout, options.format, "Unknown option.");
+            try arg_parse.invalidArg(stdout, options.format, usage, "Unknown option.");
             return error.InvalidArgument;
         } else if (options.path == null) {
             options.path = arg;
         } else {
-            try invalidArgument(stdout, options.format, "export accepts only one target directory path.");
+            try arg_parse.invalidArg(stdout, options.format, usage, "export accepts only one target directory path.");
             return error.InvalidArgument;
         }
     }
@@ -198,19 +199,6 @@ fn parseSessionSpec(raw: []const u8) !bundle_mod.SessionFilter {
         .origin = raw[0..sep],
         .session_id = raw[sep + 1 ..],
     };
-}
-
-fn invalidArgument(stdout: *std.Io.File.Writer, format: output_mod.Format, message: []const u8) !void {
-    try status_cmd.writeDiagnostic(stdout, format, usage.name, .{
-        .code = "invalid_argument",
-        .message = message,
-    });
-    if (format == .human) {
-        try stdout.interface.writeAll("\n");
-        try help_mod.renderUsage(stdout, usage);
-    }
-    try stdout.flush();
-    std.process.exit(1);
 }
 
 fn ensureFsckHealthy(

@@ -2,6 +2,7 @@ const std = @import("std");
 const help_mod = @import("help.zig");
 const output_mod = @import("output.zig");
 const specs = @import("specs.zig");
+const arg_parse = @import("arg_parse.zig");
 const status_cmd = @import("status.zig");
 const observer_source_mod = @import("../observer/Source.zig");
 const observer_checkpoint_mod = @import("../observer/checkpoint.zig");
@@ -155,22 +156,12 @@ fn parseOptions(iter: *std.process.Args.Iterator, stdout: *std.Io.File.Writer) !
             try stdout.flush();
             return error.HelpShown;
         } else if (std.mem.startsWith(u8, arg, "-")) {
-            try status_cmd.writeDiagnostic(stdout, options.format, usage.name, .{
-                .code = "invalid_argument",
-                .message = "Unknown option.",
-                .hint = arg,
-            });
-            try stdout.flush();
+            arg_parse.invalidArg(stdout, options.format, usage, "Unknown option.") catch {};
             std.process.exit(1);
         } else if (options.source_name == null) {
             options.source_name = arg;
         } else {
-            try status_cmd.writeDiagnostic(stdout, options.format, usage.name, .{
-                .code = "invalid_argument",
-                .message = "Unexpected argument.",
-                .hint = arg,
-            });
-            try stdout.flush();
+            arg_parse.invalidArg(stdout, options.format, usage, "Unexpected argument.") catch {};
             std.process.exit(1);
         }
     }
