@@ -721,6 +721,34 @@ fn shouldReplaceRef(replace_refs: []const SessionFilter, origin: []const u8, ses
     return false;
 }
 
+test "shouldReplaceRef with empty slice returns false" {
+    try std.testing.expect(!shouldReplaceRef(&.{}, "origin1", "session1"));
+}
+
+test "shouldReplaceRef with matching entry returns true" {
+    const filters = [_]SessionFilter{.{
+        .origin = "origin1",
+        .session_id = "session1",
+    }};
+    try std.testing.expect(shouldReplaceRef(&filters, "origin1", "session1"));
+}
+
+test "shouldReplaceRef with one non-matching and one matching entry returns true" {
+    const filters = [_]SessionFilter{
+        .{ .origin = "origin1", .session_id = "session1" },
+        .{ .origin = "origin2", .session_id = "session2" },
+    };
+    try std.testing.expect(shouldReplaceRef(&filters, "origin2", "session2"));
+}
+
+test "shouldReplaceRef with matching origin but different session_id returns false" {
+    const filters = [_]SessionFilter{.{
+        .origin = "origin1",
+        .session_id = "session1",
+    }};
+    try std.testing.expect(!shouldReplaceRef(&filters, "origin1", "session_different"));
+}
+
 fn namespacedSessionIdAlloc(gpa: std.mem.Allocator, session_id: []const u8, bundle_id: []const u8) ![]u8 {
     return std.fmt.allocPrint(gpa, "{s}@import-{s}", .{ session_id, bundle_id[0..12] });
 }
@@ -852,6 +880,55 @@ fn computeBundleId(
     return hash_mod.Hash.ofBytes(seed.items).toHex();
 }
 
+test "computeBundleId is deterministic with same inputs" {
+    const origin = try std.testing.allocator.dupe(u8, "origin");
+    defer std.testing.allocator.free(origin);
+    const session_id = try std.testing.allocator.dupe(u8, "session");
+    defer std.testing.allocator.free(session_id);
+    const path = try std.testing.allocator.dupe(u8, "refs/sessions/origin/session");
+    defer std.testing.allocator.free(path);
+    const head_hash = try std.testing.allocator.dupe(u8, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+    defer std.testing.allocator.free(head_hash);
+
+    var selected = [_]SelectedRef{
+        .{
+            .origin = origin,
+            .session_id = session_id,
+            .path = path,
+            .head_hash = head_hash,
+        },
+    };
+    const created_at_ms: i64 = 1234567890;
+
+    const hash1 = try computeBundleId(std.testing.allocator, &selected, created_at_ms);
+    const hash2 = try computeBundleId(std.testing.allocator, &selected, created_at_ms);
+    try std.testing.expectEqualSlices(u8, &hash1, &hash2);
+}
+
+test "computeBundleId differs with different created_at_ms" {
+    const origin = try std.testing.allocator.dupe(u8, "origin");
+    defer std.testing.allocator.free(origin);
+    const session_id = try std.testing.allocator.dupe(u8, "session");
+    defer std.testing.allocator.free(session_id);
+    const path = try std.testing.allocator.dupe(u8, "refs/sessions/origin/session");
+    defer std.testing.allocator.free(path);
+    const head_hash = try std.testing.allocator.dupe(u8, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+    defer std.testing.allocator.free(head_hash);
+
+    var selected = [_]SelectedRef{
+        .{
+            .origin = origin,
+            .session_id = session_id,
+            .path = path,
+            .head_hash = head_hash,
+        },
+    };
+
+    const hash1 = try computeBundleId(std.testing.allocator, &selected, 1000);
+    const hash2 = try computeBundleId(std.testing.allocator, &selected, 2000);
+    try std.testing.expect(!std.mem.eql(u8, &hash1, &hash2));
+}
+
 fn objectPathAlloc(gpa: std.mem.Allocator, hex_hash: []const u8) ![]u8 {
     if (hex_hash.len != hash_mod.hex_len) return error.InvalidHash;
     return std.fmt.allocPrint(gpa, "objects/{s}/{s}", .{ hex_hash[0..2], hex_hash[2..] });
@@ -866,6 +943,39 @@ fn isSafeRelativePath(path: []const u8) bool {
         if (std.mem.eql(u8, part, ".") or std.mem.eql(u8, part, "..")) return false;
     }
     return true;
+}
+
+test "isSafeRelativePath accepts valid safe paths" {
+    try std.testing.expect(isSafeRelativePath("objects/ab/cdef"));
+    try std.testing.expect(isSafeRelativePath("a"));
+}
+
+test "isSafeRelativePath rejects empty path" {
+    try std.testing.expect(!isSafeRelativePath(""));
+}
+
+test "isSafeRelativePath rejects absolute path" {
+    try std.testing.expect(!isSafeRelativePath("/etc/passwd"));
+}
+
+test "isSafeRelativePath rejects parent-dir segment at start" {
+    try std.testing.expect(!isSafeRelativePath("../escape"));
+}
+
+test "isSafeRelativePath rejects parent-dir segment in middle" {
+    try std.testing.expect(!isSafeRelativePath("a/../b"));
+}
+
+test "isSafeRelativePath rejects current-dir segment" {
+    try std.testing.expect(!isSafeRelativePath("a/./b"));
+}
+
+test "isSafeRelativePath rejects double slash (empty segment)" {
+    try std.testing.expect(!isSafeRelativePath("a//b"));
+}
+
+test "isSafeRelativePath rejects trailing slash" {
+    try std.testing.expect(!isSafeRelativePath("a/"));
 }
 
 test "namespacedSessionIdAlloc appends bundle prefix" {
