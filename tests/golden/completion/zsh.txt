@@ -23,7 +23,7 @@ _agit() {
         'diff:Show captured file diffs'
         'between:Show steps recorded between Git revisions'
         'recall:Retrieve prior recorded steps'
-        'grep:Search recorded messages and tool activity'
+        'grep:Search recorded messages, tool activity, and captured file content'
         'blame:Show per-line step attribution for a file'
         'watch:Follow newly recorded steps'
         'stats:Summarize recorded activity'
@@ -205,6 +205,7 @@ _agit() {
                         '--context[Use <N> snippet tokens around each match. Defaults to 12.]:N' \
                         '--redacted[Redact obvious secrets in rendered snippets.]' \
                         '--full[Render full snippets even when redaction is the repo default.]' \
+                        '--content[Search captured workspace file content instead of agent messages and tool activity.]' \
                         '--help[Display this help and exit.]'
                     ;;
                 blame)

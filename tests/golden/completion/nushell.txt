@@ -21,7 +21,7 @@ def "nu-complete agit command" [] {
         { value: 'diff', description: 'Show captured file diffs' }
         { value: 'between', description: 'Show steps recorded between Git revisions' }
         { value: 'recall', description: 'Retrieve prior recorded steps' }
-        { value: 'grep', description: 'Search recorded messages and tool activity' }
+        { value: 'grep', description: 'Search recorded messages, tool activity, and captured file content' }
         { value: 'blame', description: 'Show per-line step attribution for a file' }
         { value: 'watch', description: 'Follow newly recorded steps' }
         { value: 'stats', description: 'Summarize recorded activity' }
@@ -199,6 +199,7 @@ extern "agit grep" [
     --context: string
     --redacted
     --full
+    --content
     --help(-h)
 ]
 

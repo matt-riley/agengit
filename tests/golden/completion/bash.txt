@@ -76,7 +76,7 @@ _agit_complete() {
         COMPREPLY=($(compgen -W "--json --path --origin --session --outcome --limit --redacted --full -h --help " -- "$cur"))
         ;;
     grep)
-        COMPREPLY=($(compgen -W "--json --origin --session --since --until --limit --context --redacted --full -h --help " -- "$cur"))
+        COMPREPLY=($(compgen -W "--json --origin --session --since --until --limit --context --redacted --full --content -h --help " -- "$cur"))
         ;;
     blame)
         COMPREPLY=($(compgen -W "--json --step --no-limits -h --help " -- "$cur"))
