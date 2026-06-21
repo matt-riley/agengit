@@ -5,7 +5,9 @@ const store_mod = @import("../store/store.zig");
 const help_mod = @import("help.zig");
 const specs = @import("specs.zig");
 const step_line = @import("step_line.zig");
+const output_mod = @import("output.zig");
 const status = @import("status.zig");
+const arg_parse = @import("arg_parse.zig");
 
 pub const usage = specs.timeline_usage;
 
@@ -17,6 +19,7 @@ const RedactionMode = enum {
 };
 
 const TimelineOptions = struct {
+    format: output_mod.Format = .human,
     origin: ?[:0]const u8 = null,
     session: ?[:0]const u8 = null,
     since_raw: ?[:0]const u8 = null,
@@ -42,7 +45,7 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
     };
 
     if (options.since_ms != null and options.until_ms_exclusive != null and options.since_ms.? >= options.until_ms_exclusive.?) {
-        try invalidArgument(&stdout, "--since must be earlier than --until (the --until date is exclusive).");
+        try arg_parse.invalidArg(&stdout, options.format, usage, "--since must be earlier than --until (the --until date is exclusive).");
         return;
     }
 
@@ -118,45 +121,45 @@ fn parseOptions(iter: *std.process.Args.Iterator, stdout: *std.Io.File.Writer) !
     while (iter.next()) |arg| {
         if (std.mem.eql(u8, arg, "--origin")) {
             options.origin = iter.next() orelse {
-                try invalidArgument(stdout, "--origin requires a value.");
+                try arg_parse.invalidArg(stdout, options.format, usage, "--origin requires a value.");
                 return error.InvalidArgument;
             };
         } else if (std.mem.eql(u8, arg, "--session")) {
             options.session = iter.next() orelse {
-                try invalidArgument(stdout, "--session requires a value.");
+                try arg_parse.invalidArg(stdout, options.format, usage, "--session requires a value.");
                 return error.InvalidArgument;
             };
         } else if (std.mem.eql(u8, arg, "--since")) {
             const value = iter.next() orelse {
-                try invalidArgument(stdout, "--since requires a YYYY-MM-DD value.");
+                try arg_parse.invalidArg(stdout, options.format, usage, "--since requires a YYYY-MM-DD value.");
                 return error.InvalidArgument;
             };
             options.since_ms = date_util.parseUtcDateMidnight(value) catch {
-                try invalidArgument(stdout, "Invalid --since date; use YYYY-MM-DD.");
+                try arg_parse.invalidArg(stdout, options.format, usage, "Invalid --since date; use YYYY-MM-DD.");
                 return error.InvalidArgument;
             };
             options.since_raw = value;
         } else if (std.mem.eql(u8, arg, "--until")) {
             const value = iter.next() orelse {
-                try invalidArgument(stdout, "--until requires a YYYY-MM-DD value.");
+                try arg_parse.invalidArg(stdout, options.format, usage, "--until requires a YYYY-MM-DD value.");
                 return error.InvalidArgument;
             };
             options.until_ms_exclusive = date_util.parseUtcDateEndExclusive(value) catch {
-                try invalidArgument(stdout, "Invalid --until date; use YYYY-MM-DD.");
+                try arg_parse.invalidArg(stdout, options.format, usage, "Invalid --until date; use YYYY-MM-DD.");
                 return error.InvalidArgument;
             };
             options.until_raw = value;
         } else if (std.mem.eql(u8, arg, "--limit")) {
             const value = iter.next() orelse {
-                try invalidArgument(stdout, "--limit requires an integer value.");
+                try arg_parse.invalidArg(stdout, options.format, usage, "--limit requires an integer value.");
                 return error.InvalidArgument;
             };
             options.limit = std.fmt.parseUnsigned(usize, value, 10) catch {
-                try invalidArgument(stdout, "Invalid --limit value.");
+                try arg_parse.invalidArg(stdout, options.format, usage, "Invalid --limit value.");
                 return error.InvalidArgument;
             };
             if (options.limit == 0) {
-                try invalidArgument(stdout, "--limit must be greater than zero.");
+                try arg_parse.invalidArg(stdout, options.format, usage, "--limit must be greater than zero.");
                 return error.InvalidArgument;
             }
         } else if (std.mem.eql(u8, arg, "--redacted")) {
@@ -168,7 +171,7 @@ fn parseOptions(iter: *std.process.Args.Iterator, stdout: *std.Io.File.Writer) !
             try stdout.flush();
             return error.HelpShown;
         } else {
-            try invalidArgument(stdout, "Unexpected argument.");
+            try arg_parse.invalidArg(stdout, options.format, usage, "Unexpected argument.");
             return error.InvalidArgument;
         }
     }
@@ -182,7 +185,7 @@ fn resolveSessionFilter(stdout: *std.Io.File.Writer, options: TimelineOptions) !
             const qualified_origin = session[0..sep];
             if (filter.origin) |origin| {
                 if (!std.mem.eql(u8, origin, qualified_origin)) {
-                    try invalidArgument(stdout, "--origin does not match the origin prefix embedded in --session.");
+                    try arg_parse.invalidArg(stdout, options.format, usage, "--origin does not match the origin prefix embedded in --session.");
                     return error.InvalidArgument;
                 }
             }
@@ -193,16 +196,6 @@ fn resolveSessionFilter(stdout: *std.Io.File.Writer, options: TimelineOptions) !
         }
     }
     return filter;
-}
-
-fn invalidArgument(stdout: *std.Io.File.Writer, message: []const u8) !void {
-    try status.writeDiagnostic(stdout, .human, usage.name, .{
-        .code = "invalid_argument",
-        .message = message,
-    });
-    try stdout.interface.writeAll("\n");
-    try help_mod.renderUsage(stdout, usage);
-    try stdout.flush();
 }
 
 fn shouldUseRedaction(mode: RedactionMode, redacted_by_default: bool) bool {

@@ -6,6 +6,7 @@ const reindex_cmd = @import("reindex.zig");
 const specs = @import("specs.zig");
 const status_cmd = @import("status.zig");
 const store_mod = @import("../store/store.zig");
+const arg_parse = @import("arg_parse.zig");
 const integrity_mod = @import("../store/integrity.zig");
 
 pub const usage = specs.fsck_usage;
@@ -87,16 +88,7 @@ fn parseOptions(iter: *std.process.Args.Iterator, stdout: *std.Io.File.Writer) !
             try help_mod.renderUsage(stdout, usage);
             return error.HelpShown;
         } else {
-            try status_cmd.writeDiagnostic(stdout, if (options.json) .json else .human, usage.name, .{
-                .code = "invalid_argument",
-                .message = "Unknown option.",
-                .hint = arg,
-            });
-            if (!options.json) {
-                try stdout.interface.writeAll("\n");
-                try help_mod.renderUsage(stdout, usage);
-            }
-            try stdout.flush();
+            arg_parse.invalidArg(stdout, if (options.json) .json else .human, usage, "Unknown option.") catch {};
             std.process.exit(1);
         }
     }

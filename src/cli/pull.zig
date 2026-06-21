@@ -8,6 +8,7 @@ const remote_mod = @import("../store/remote.zig");
 const specs = @import("specs.zig");
 const status_cmd = @import("status.zig");
 const store_mod = @import("../store/store.zig");
+const arg_parse = @import("arg_parse.zig");
 
 pub const usage = specs.pull_usage;
 
@@ -114,29 +115,22 @@ fn parseOptions(iter: *std.process.Args.Iterator, stdout: *std.Io.File.Writer) !
         if (std.mem.eql(u8, arg, "--json")) {
             options.format = .json;
         } else if (std.mem.eql(u8, arg, "--remote")) {
-            options.remote_name = iter.next() orelse return invalidArgument(stdout, options.format, "--remote requires a name.");
+            const name = iter.next();
+            if (name == null) {
+                arg_parse.invalidArg(stdout, options.format, usage, "--remote requires a name.") catch {};
+                std.process.exit(1);
+            }
+            options.remote_name = name.?;
         } else if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
             try help_mod.renderUsage(stdout, usage);
             try stdout.flush();
             return error.HelpShown;
         } else {
-            return invalidArgument(stdout, options.format, "Unknown option.");
+            arg_parse.invalidArg(stdout, options.format, usage, "Unknown option.") catch {};
+            std.process.exit(1);
         }
     }
     return options;
-}
-
-fn invalidArgument(stdout: *std.Io.File.Writer, format: output_mod.Format, message: []const u8) !Options {
-    try status_cmd.writeDiagnostic(stdout, format, usage.name, .{
-        .code = "invalid_argument",
-        .message = message,
-    });
-    if (format == .human) {
-        try stdout.interface.writeAll("\n");
-        try help_mod.renderUsage(stdout, usage);
-    }
-    try stdout.flush();
-    std.process.exit(1);
 }
 
 fn remoteSelectionDiagnostic(err: anyerror) output_mod.Diagnostic {

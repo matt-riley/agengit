@@ -10,6 +10,7 @@ const help_mod = @import("help.zig");
 const output_mod = @import("output.zig");
 const specs = @import("specs.zig");
 const store_mod = @import("../store/store.zig");
+const arg_parse = @import("arg_parse.zig");
 
 pub const usage = specs.diff_usage;
 
@@ -83,7 +84,7 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
         return;
     }
     if (options.session != null and (options.left_hash_prefix != null or options.right_hash_prefix != null)) {
-        try invalidArgument(&stdout, options.format, "--session cannot be combined with step hash arguments.");
+        try arg_parse.invalidArg(&stdout, options.format, usage, "--session cannot be combined with step hash arguments.");
         return;
     }
 
@@ -626,7 +627,7 @@ fn parseOptions(iter: *std.process.Args.Iterator, stdout: *std.Io.File.Writer) !
     while (iter.next()) |arg| {
         if (path_mode) {
             if (options.path != null) {
-                try invalidArgument(stdout, options.format, "Only one path may follow `--`.");
+                try arg_parse.invalidArg(stdout, options.format, usage, "Only one path may follow `--`.");
                 return error.InvalidArgument;
             }
             options.path = arg;
@@ -639,7 +640,7 @@ fn parseOptions(iter: *std.process.Args.Iterator, stdout: *std.Io.File.Writer) !
             options.format = .json;
         } else if (std.mem.eql(u8, arg, "--session")) {
             options.session = iter.next() orelse {
-                try invalidArgument(stdout, options.format, "--session requires a value.");
+                try arg_parse.invalidArg(stdout, options.format, usage, "--session requires a value.");
                 return error.InvalidArgument;
             };
         } else if (std.mem.eql(u8, arg, "--redacted")) {
@@ -655,13 +656,13 @@ fn parseOptions(iter: *std.process.Args.Iterator, stdout: *std.Io.File.Writer) !
         } else if (options.right_hash_prefix == null) {
             options.right_hash_prefix = arg;
         } else {
-            try invalidArgument(stdout, options.format, "Unexpected argument.");
+            try arg_parse.invalidArg(stdout, options.format, usage, "Unexpected argument.");
             return error.InvalidArgument;
         }
     }
 
     if (path_mode and options.path == null) {
-        try invalidArgument(stdout, options.format, "`--` must be followed by a captured path.");
+        try arg_parse.invalidArg(stdout, options.format, usage, "`--` must be followed by a captured path.");
         return error.InvalidArgument;
     }
     return options;
@@ -678,18 +679,6 @@ fn missingTarget(stdout: *std.Io.File.Writer, format: output_mod.Format) !void {
     }
     try stdout.flush();
     std.process.exit(1);
-}
-
-fn invalidArgument(stdout: *std.Io.File.Writer, format: output_mod.Format, message: []const u8) !void {
-    try status.writeDiagnostic(stdout, format, usage.name, .{
-        .code = "invalid_argument",
-        .message = message,
-    });
-    if (format == .human) {
-        try stdout.interface.writeAll("\n");
-        try help_mod.renderUsage(stdout, usage);
-    }
-    try stdout.flush();
 }
 
 fn shouldUseRedaction(mode: RedactionMode, redacted_by_default: bool) bool {

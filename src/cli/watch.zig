@@ -7,6 +7,7 @@ const specs = @import("specs.zig");
 const status = @import("status.zig");
 const step_line = @import("step_line.zig");
 const store_mod = @import("../store/store.zig");
+const arg_parse = @import("arg_parse.zig");
 
 pub const usage = specs.watch_usage;
 
@@ -180,31 +181,31 @@ fn parseOptions(iter: *std.process.Args.Iterator, stdout: *std.Io.File.Writer) !
     while (iter.next()) |arg| {
         if (std.mem.eql(u8, arg, "--origin")) {
             options.origin = iter.next() orelse {
-                try invalidArgument(stdout, options.format, "--origin requires a value.");
+                try arg_parse.invalidArg(stdout, options.format, usage, "--origin requires a value.");
                 return error.InvalidArgument;
             };
         } else if (std.mem.eql(u8, arg, "--session")) {
             options.session = iter.next() orelse {
-                try invalidArgument(stdout, options.format, "--session requires a value.");
+                try arg_parse.invalidArg(stdout, options.format, usage, "--session requires a value.");
                 return error.InvalidArgument;
             };
         } else if (std.mem.eql(u8, arg, "--since")) {
             const value = iter.next() orelse {
-                try invalidArgument(stdout, options.format, "--since requires a YYYY-MM-DD value.");
+                try arg_parse.invalidArg(stdout, options.format, usage, "--since requires a YYYY-MM-DD value.");
                 return error.InvalidArgument;
             };
             options.since_ms = date_util.parseUtcDateMidnight(value) catch {
-                try invalidArgument(stdout, options.format, "Invalid --since date; use YYYY-MM-DD.");
+                try arg_parse.invalidArg(stdout, options.format, usage, "Invalid --since date; use YYYY-MM-DD.");
                 return error.InvalidArgument;
             };
             options.since_raw = value;
         } else if (std.mem.eql(u8, arg, "--interval")) {
             const value = iter.next() orelse {
-                try invalidArgument(stdout, options.format, "--interval requires a value like 1s or 250ms.");
+                try arg_parse.invalidArg(stdout, options.format, usage, "--interval requires a value like 1s or 250ms.");
                 return error.InvalidArgument;
             };
             options.interval_ms = parseIntervalMs(value) catch {
-                try invalidArgument(stdout, options.format, "Invalid --interval value; use 50ms..3600s.");
+                try arg_parse.invalidArg(stdout, options.format, usage, "Invalid --interval value; use 50ms..3600s.");
                 return error.InvalidArgument;
             };
         } else if (std.mem.eql(u8, arg, "--json")) {
@@ -218,7 +219,7 @@ fn parseOptions(iter: *std.process.Args.Iterator, stdout: *std.Io.File.Writer) !
             try stdout.flush();
             return error.HelpShown;
         } else {
-            try invalidArgument(stdout, options.format, "Unexpected argument.");
+            try arg_parse.invalidArg(stdout, options.format, usage, "Unexpected argument.");
             return error.InvalidArgument;
         }
     }
@@ -244,7 +245,7 @@ fn resolveSessionFilter(stdout: *std.Io.File.Writer, options: WatchOptions) !Ses
             const qualified_origin = session[0..sep];
             if (filter.origin) |origin| {
                 if (!std.mem.eql(u8, origin, qualified_origin)) {
-                    try invalidArgument(stdout, options.format, "--origin does not match the origin prefix embedded in --session.");
+                    try arg_parse.invalidArg(stdout, options.format, usage, "--origin does not match the origin prefix embedded in --session.");
                     return error.InvalidArgument;
                 }
             }
@@ -255,18 +256,6 @@ fn resolveSessionFilter(stdout: *std.Io.File.Writer, options: WatchOptions) !Ses
         }
     }
     return filter;
-}
-
-fn invalidArgument(stdout: *std.Io.File.Writer, format: output_mod.Format, message: []const u8) !void {
-    try status.writeDiagnostic(stdout, format, usage.name, .{
-        .code = "invalid_argument",
-        .message = message,
-    });
-    if (format == .human) {
-        try stdout.interface.writeAll("\n");
-        try help_mod.renderUsage(stdout, usage);
-    }
-    try stdout.flush();
 }
 
 fn shouldUseRedaction(mode: RedactionMode, redacted_by_default: bool) bool {

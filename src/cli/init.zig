@@ -6,6 +6,7 @@ const atomic_json_mod = @import("../util/atomic_json.zig");
 const help_mod = @import("help.zig");
 const copilot_extension = @import("copilot_extension.zig");
 const init_plan_mod = @import("init_plan.zig");
+const arg_parse = @import("arg_parse.zig");
 const pi_extension = @import("pi_extension.zig");
 const specs = @import("specs.zig");
 
@@ -105,9 +106,7 @@ fn parseOptions(gpa: std.mem.Allocator, iter: *std.process.Args.Iterator, stdout
             options.dry_run = true;
         } else if (std.mem.eql(u8, arg, "--agent")) {
             const agent_name = iter.next() orelse {
-                try stdout.interface.print("error: --agent requires an agent name\n\n", .{});
-                try help_mod.renderUsage(stdout, usage);
-                try stdout.flush();
+                try arg_parse.invalidArg(stdout, .human, usage, "--agent requires an agent name.");
                 return error.InvalidArgument;
             };
             try options.selected_agents.append(gpa, agent_name);
@@ -115,9 +114,7 @@ fn parseOptions(gpa: std.mem.Allocator, iter: *std.process.Args.Iterator, stdout
             try help_mod.renderUsage(stdout, usage);
             return error.HelpShown;
         } else {
-            try stdout.interface.print("error: unknown option '{s}'\n\n", .{arg});
-            try help_mod.renderUsage(stdout, usage);
-            try stdout.flush();
+            try arg_parse.invalidArg(stdout, .human, usage, "Unknown option.");
             return error.InvalidArgument;
         }
     }

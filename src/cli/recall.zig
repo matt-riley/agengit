@@ -9,6 +9,7 @@ const specs = @import("specs.zig");
 const status = @import("status.zig");
 const step_line = @import("step_line.zig");
 const store_mod = @import("../store/store.zig");
+const arg_parse = @import("arg_parse.zig");
 const outcome_mod = @import("../store/outcome.zig");
 
 pub const usage = specs.recall_usage;
@@ -75,11 +76,11 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
 
     const trimmed_query = if (options.query) |value| std.mem.trim(u8, value, " \t\r\n") else null;
     if (options.path == null and (trimmed_query == null or trimmed_query.?.len == 0)) {
-        try invalidArgument(&stdout, options.format, "Recall requires a query, a --path filter, or both.");
+        try arg_parse.invalidArg(&stdout, options.format, usage, "Recall requires a query, a --path filter, or both.");
         return;
     }
     if (trimmed_query != null and trimmed_query.?.len == 0) {
-        try invalidArgument(&stdout, options.format, "Query must not be empty.");
+        try arg_parse.invalidArg(&stdout, options.format, usage, "Query must not be empty.");
         return;
     }
 
@@ -342,35 +343,35 @@ fn parseOptions(iter: *std.process.Args.Iterator, stdout: *std.Io.File.Writer) !
             options.format = .json;
         } else if (std.mem.eql(u8, arg, "--origin")) {
             options.origin = iter.next() orelse {
-                try invalidArgument(stdout, options.format, "--origin requires a value.");
+                try arg_parse.invalidArg(stdout, options.format, usage, "--origin requires a value.");
                 return error.InvalidArgument;
             };
         } else if (std.mem.eql(u8, arg, "--session")) {
             options.session = iter.next() orelse {
-                try invalidArgument(stdout, options.format, "--session requires a value.");
+                try arg_parse.invalidArg(stdout, options.format, usage, "--session requires a value.");
                 return error.InvalidArgument;
             };
         } else if (std.mem.eql(u8, arg, "--path")) {
             options.path = iter.next() orelse {
-                try invalidArgument(stdout, options.format, "--path requires a file path.");
+                try arg_parse.invalidArg(stdout, options.format, usage, "--path requires a file path.");
                 return error.InvalidArgument;
             };
         } else if (std.mem.eql(u8, arg, "--outcome")) {
             options.outcome = iter.next() orelse {
-                try invalidArgument(stdout, options.format, "--outcome requires success, failure, or unknown.");
+                try arg_parse.invalidArg(stdout, options.format, usage, "--outcome requires success, failure, or unknown.");
                 return error.InvalidArgument;
             };
         } else if (std.mem.eql(u8, arg, "--limit")) {
             const value = iter.next() orelse {
-                try invalidArgument(stdout, options.format, "--limit requires an integer value.");
+                try arg_parse.invalidArg(stdout, options.format, usage, "--limit requires an integer value.");
                 return error.InvalidArgument;
             };
             options.limit = std.fmt.parseUnsigned(usize, value, 10) catch {
-                try invalidArgument(stdout, options.format, "Invalid --limit value.");
+                try arg_parse.invalidArg(stdout, options.format, usage, "Invalid --limit value.");
                 return error.InvalidArgument;
             };
             if (options.limit == 0) {
-                try invalidArgument(stdout, options.format, "--limit must be greater than zero.");
+                try arg_parse.invalidArg(stdout, options.format, usage, "--limit must be greater than zero.");
                 return error.InvalidArgument;
             }
         } else if (std.mem.eql(u8, arg, "--redacted")) {
@@ -407,7 +408,7 @@ fn resolveSessionFilter(stdout: *std.Io.File.Writer, options: RecallOptions) !Se
             const qualified_origin = session[0..sep];
             if (filter.origin) |origin| {
                 if (!std.mem.eql(u8, origin, qualified_origin)) {
-                    try invalidArgument(stdout, options.format, "--origin does not match the origin prefix embedded in --session.");
+                    try arg_parse.invalidArg(stdout, options.format, usage, "--origin does not match the origin prefix embedded in --session.");
                     return error.InvalidArgument;
                 }
             }
@@ -425,7 +426,7 @@ fn parseOutcomeFilter(stdout: *std.Io.File.Writer, options: RecallOptions) !?[]c
     if (std.mem.eql(u8, raw, "success")) return "success";
     if (std.mem.eql(u8, raw, "failure")) return "failure";
     if (std.mem.eql(u8, raw, "unknown")) return "unknown";
-    try invalidArgument(stdout, options.format, "Invalid --outcome value; use success, failure, or unknown.");
+    try arg_parse.invalidArg(stdout, options.format, usage, "Invalid --outcome value; use success, failure, or unknown.");
     return error.InvalidArgument;
 }
 
@@ -505,19 +506,6 @@ fn outcomeRank(raw: ?[]const u8) u8 {
 
 fn outcomeLabel(raw: ?[]const u8) []const u8 {
     return outcome_mod.parseLabel(raw).label();
-}
-
-fn invalidArgument(stdout: *std.Io.File.Writer, format: output_mod.Format, message: []const u8) !void {
-    try status.writeDiagnostic(stdout, format, usage.name, .{
-        .code = "invalid_argument",
-        .message = message,
-    });
-    if (format == .human) {
-        try stdout.interface.writeAll("\n");
-        try help_mod.renderUsage(stdout, usage);
-    }
-    try stdout.flush();
-    std.process.exit(1);
 }
 
 fn shouldUseRedaction(mode: RedactionMode, redacted_by_default: bool) bool {
