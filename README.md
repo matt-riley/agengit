@@ -395,12 +395,6 @@ agit completion bash
 
 ## Roadmap
 
-Planned but not shipped today:
-
-- content search across captured workspace blob bodies (activity search via
-  `agit grep` ships today; searching the content-addressed snapshot blobs is
-  the open item)
-
 Experimental today: `agit observe --once jsonl --input observer.jsonl` exercises
 the observer framework and persists replay checkpoints under
 `.agit/observers/`.
