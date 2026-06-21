@@ -23,9 +23,11 @@ pub fn choosePreview(step: object.Step) []const u8 {
     return "(no preview)";
 }
 
-/// Collapse whitespace and truncate to `limit` chars with a trailing `…`
-/// ellipsis. Mirrors what view-time rendering has always produced, so a stored
-/// preview is byte-identical to the historical on-the-fly output.
+/// Collapse whitespace and truncate to `limit` bytes with a trailing `…`
+/// ellipsis. The output may be slightly longer than `limit` bytes when the
+/// truncation point appends the multi-byte ellipsis. Mirrors what view-time
+/// rendering has always produced, so a stored preview is byte-identical to
+/// the historical on-the-fly output.
 pub fn normalizePreviewAlloc(gpa: std.mem.Allocator, text: []const u8, limit: usize) ![]u8 {
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(gpa);
