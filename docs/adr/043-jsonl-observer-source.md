@@ -44,10 +44,14 @@ or missing required field yields `InvalidObserverEvent`.
 - `watermark` = the **1-based line number** of the event in the file. Line
   numbers are monotonic across appends to the same file, so the runner's
   `updateCheckpoint` resumes strictly past the last processed line.
-- `instance_id` = the **Blake3 hex of the resolved absolute path** of the
-  input file — not mtime, not content. The runner errors
-  `ObserverCheckpointInstanceMismatch` if it changes between runs, so it must
-  be stable for the same logical log.
+- `instance_id` = the **Blake3 hex of the normalized input path** — not
+  mtime, not content. The runner errors `ObserverCheckpointInstanceMismatch`
+  if it changes between runs, so it must be stable for the same logical log.
+
+- **Truncation tolerance**: a trailing unterminated partial JSON line (common
+  during concurrent appends to the log file) does NOT fail the source — events
+  parsed before the partial line are committed and processing stops cleanly.
+  A malformed line earlier in the file still errors as `InvalidObserverEvent`.
 
 ### Resume semantics
 

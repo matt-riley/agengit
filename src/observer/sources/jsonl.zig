@@ -3,7 +3,7 @@ const source_mod = @import("../Source.zig");
 const checkpoint_mod = @import("../checkpoint.zig");
 const event_mod = @import("../../hook/event.zig");
 
-// ponytail: cap input at 4 MiB — matches the fixture safety cap; raise when a
+// Note: cap input at 4 MiB — matches the fixture safety cap; raise when a
 // real long-tailing workflow needs streaming reads past this size.
 const max_input_bytes = std.Io.Limit.limited(4 * 1024 * 1024);
 
@@ -64,23 +64,44 @@ fn loadEvents(
 
     var events: std.ArrayList(source_mod.Event) = .empty;
     var line_no: usize = 0;
-    var iter = std.mem.splitScalar(u8, raw, '\n');
-    while (iter.next()) |line| {
-        line_no += 1;
-        const trimmed = std.mem.trim(u8, line, " \r\t");
-        if (trimmed.len == 0) continue;
-        if (line_no <= start_line) continue;
 
-        const ev = std.json.parseFromSliceLeaky(LineEvent, arena, trimmed, .{
+    // Collect all non-empty trimmed lines first so we can detect the last
+    // line for truncation tolerance (a trailing unterminated partial line is
+    // a common append artifact, not a corrupt event — we stop processing rather
+    // than erroring once a prior complete event has been seen).
+    var trimmed_lines: std.ArrayList(struct { no: usize, text: []const u8 }) = .empty;
+    {
+        var iter = std.mem.splitScalar(u8, raw, '\n');
+        while (iter.next()) |line| {
+            line_no += 1;
+            const trimmed = std.mem.trim(u8, line, " \r\t");
+            if (trimmed.len == 0) continue;
+            try trimmed_lines.append(arena, .{ .no = line_no, .text = trimmed });
+        }
+    }
+
+    var saw_event = false;
+    for (trimmed_lines.items) |entry| {
+        if (entry.no <= start_line) continue;
+
+        const ev = std.json.parseFromSliceLeaky(LineEvent, arena, entry.text, .{
             .allocate = .alloc_always,
             .ignore_unknown_fields = true,
-        }) catch return error.InvalidObserverEvent;
+        }) catch {
+            // Trailing unterminated partial line (common during concurrent
+            // appends) is not a hard error — stop processing and commit
+            // events seen so far.
+            if (saw_event) return .{ .instance_id = instance_id, .events = try events.toOwnedSlice(arena) };
+            return error.InvalidObserverEvent;
+        };
+
+        saw_event = true;
 
         if (ev.session_id.len == 0 or ev.cwd.len == 0) return error.InvalidObserverEvent;
 
         const kind = kindForRole(ev.role) orelse return error.InvalidObserverEvent;
         const event_name = ev.event_name orelse defaultEventName(ev.role);
-        const watermark = try std.fmt.allocPrint(arena, "{d}", .{line_no});
+        const watermark = try std.fmt.allocPrint(arena, "{d}", .{entry.no});
 
         try events.append(arena, .{
             .origin = "jsonl",
@@ -104,7 +125,7 @@ fn resolveInputPath(arena: std.mem.Allocator, input_path: []const u8) ![]u8 {
     return std.fs.path.resolve(arena, &.{ ".", input_path });
 }
 
-/// instance_id = Blake3 hex of the resolved absolute path. Stable across runs
+/// instance_id = Blake3 hex of the normalized input path. Stable across runs
 /// for the same file (NOT mtime): the runner errors ObserverCheckpointInstanceMismatch
 /// if it changes between runs.
 fn hashPath(arena: std.mem.Allocator, resolved_path: []const u8) ![]u8 {
