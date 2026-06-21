@@ -86,7 +86,12 @@ When writing tests targeting `.agit/tmp/`, target only top-level `.agit/tmp/*.js
 | `AGIT_FSYNC=0` | fsync on | Disables directory fsync |
 | `AGIT_LOCK_TIMEOUT_MS=<ms>` | 10000 | Lock acquisition timeout |
 | `AGIT_HOOK_MAX_BYTES=<bytes>` | 16 MiB | Hook payload size cap |
-| `AGIT_UPDATE_GOLDEN=1` | off | Overwrites golden files during e2e run |
+| `AGIT_MAX_FILE_BYTES=<bytes>` | 16 MiB | Per-file snapshot size cap |
+| `AGIT_REMOTE_ACCESS_KEY` / `AGIT_REMOTE_SECRET_KEY` / `AGIT_REMOTE_SESSION_TOKEN` / `AGIT_REMOTE_ENCRYPTION_SECRET` | unset | S3 remote credentials (env var names configurable per remote in `.agit/config.json`) |
+| `AGIT_CRASH_AFTER=tmp_write` | off | Test-only: crash mid install/uninstall to exercise atomic writes (ADR 006) |
+| `AGIT_UPDATE_GOLDEN=1` | off | Test harness only: overwrites golden files during e2e run |
+
+See `.env.example` for the canonical list with one-line descriptions.
 
 ## Coding conventions
 
