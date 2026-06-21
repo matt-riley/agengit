@@ -387,9 +387,15 @@ test "openWorkspaceDir absolute path to workspace" {
 
 test "openWorkspaceDir relative path outside workspace" {
     const io = std.testing.io;
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    try tmp.dir.createDirPath(io, "subdir");
+    // Use OS temp dir to ensure no .agit/ ancestor exists
+    const tmp_dir_path = "/tmp/agit-event-test-outside-1";
+    try std.Io.Dir.cwd().createDirPath(io, tmp_dir_path);
+    defer std.Io.Dir.cwd().deleteTree(io, tmp_dir_path) catch {};
+
+    var tmp = try std.Io.Dir.cwd().openDir(io, tmp_dir_path, .{});
+    defer tmp.close(io);
+
+    try tmp.createDirPath(io, "subdir");
 
     var orig_buf: [std.fs.max_path_bytes + 1]u8 = undefined;
     var orig_cwd = try std.Io.Dir.cwd().openDir(io, ".", .{});
@@ -399,7 +405,7 @@ test "openWorkspaceDir relative path outside workspace" {
     defer _ = std.c.chdir(@as([*:0]const u8, @ptrCast(&orig_buf[0])));
 
     var tmp_buf: [std.fs.max_path_bytes + 1]u8 = undefined;
-    const tmp_len = try tmp.dir.realPath(io, tmp_buf[0..std.fs.max_path_bytes]);
+    const tmp_len = try tmp.realPath(io, tmp_buf[0..std.fs.max_path_bytes]);
     tmp_buf[tmp_len] = 0;
     if (std.c.chdir(@as([*:0]const u8, @ptrCast(&tmp_buf[0]))) != 0) return error.ChdirFailed;
 
@@ -422,12 +428,16 @@ test "openWorkspaceDir relative path outside workspace" {
 
 test "openWorkspaceDir absolute path outside workspace" {
     const io = std.testing.io;
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    // No .agit/ created.
+    // Use OS temp dir to ensure no .agit/ ancestor exists
+    const tmp_dir_path = "/tmp/agit-event-test-outside-2";
+    try std.Io.Dir.cwd().createDirPath(io, tmp_dir_path);
+    defer std.Io.Dir.cwd().deleteTree(io, tmp_dir_path) catch {};
+
+    var tmp = try std.Io.Dir.cwd().openDir(io, tmp_dir_path, .{});
+    defer tmp.close(io);
 
     var tmp_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const tmp_len = try tmp.dir.realPath(io, &tmp_buf);
+    const tmp_len = try tmp.realPath(io, &tmp_buf);
     const abs_path = tmp_buf[0..tmp_len];
 
     var expect_buf: [std.fs.max_path_bytes]u8 = undefined;
