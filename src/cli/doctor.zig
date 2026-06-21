@@ -641,16 +641,68 @@ fn collectStagingDiagnostics(
         };
         defer gpa.free(data);
 
-        var parsed = std.json.parseFromSlice(std.json.Value, gpa, data, .{
-            .allocate = .alloc_always,
-        }) catch {
+        if (isValidStagingData(gpa, data)) {
+            diag.pending_json += 1;
+        } else {
             diag.corrupt_json += 1;
-            continue;
-        };
-        defer parsed.deinit();
-        diag.pending_json += 1;
+        }
     }
     return diag;
+}
+
+/// A staging file is valid if it is either a single legacy JSON document
+/// (e.g. `{}`) or a newline-delimited JSONL event log with at least one
+/// complete event line. A trailing partial line (a mid-append crash) is
+/// tolerated once at least one prior complete event parsed — mirroring
+/// `recorder.parseStagingData`. Empty/whitespace-only data is invalid.
+fn isValidStagingData(gpa: std.mem.Allocator, data: []const u8) bool {
+    if (std.mem.trim(u8, data, " \t\r\n").len == 0) return false;
+
+    var lines: std.ArrayList([]const u8) = .empty;
+    defer lines.deinit(gpa);
+    var it = std.mem.splitScalar(u8, data, '\n');
+    while (it.next()) |raw| {
+        const trimmed = std.mem.trim(u8, raw, " \t\r");
+        if (trimmed.len == 0) continue;
+        lines.append(gpa, trimmed) catch return false;
+    }
+    if (lines.items.len == 0) return false;
+
+    // JSONL interpretation: tolerate a trailing partial line once a prior
+    // complete event parsed (truncation tolerance).
+    var saw_event = false;
+    var jsonl_ok = true;
+    for (lines.items, 0..) |line, i| {
+        var parsed = std.json.parseFromSlice(std.json.Value, gpa, line, .{
+            .allocate = .alloc_always,
+        }) catch {
+            const is_last = (i == lines.items.len - 1);
+            if (is_last and saw_event) break;
+            jsonl_ok = false;
+            break;
+        };
+        const is_object = parsed.value == .object and
+            (if (parsed.value.object.get("op")) |op_val| op_val == .string else false);
+        parsed.deinit();
+        if (!is_object) {
+            jsonl_ok = false;
+            break;
+        }
+        saw_event = true;
+    }
+    if (jsonl_ok and saw_event) return true;
+
+    // Legacy single-document interpretation (pre-026 read-modify-write
+    // format, or a hand-written `{}`).
+    if (std.json.parseFromSlice(std.json.Value, gpa, data, .{
+        .allocate = .alloc_always,
+    })) |parsed| {
+        const is_object = parsed.value == .object;
+        parsed.deinit();
+        if (is_object) return true;
+    } else |_| {}
+
+    return false;
 }
 
 fn appendConfigTmpCheck(
@@ -1200,6 +1252,39 @@ test "collectStagingDiagnostics counts pending corrupt and quarantined files" {
     try std.testing.expectEqual(@as(usize, 1), diag.pending_json);
     try std.testing.expectEqual(@as(usize, 1), diag.corrupt_json);
     try std.testing.expectEqual(@as(usize, 1), diag.quarantined);
+    try std.testing.expectEqual(@as(usize, 0), diag.unreadable);
+}
+
+test "collectStagingDiagnostics treats JSONL staging files as pending" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+
+    // Multi-event newline-delimited staging file (post-026 format).
+    try writeTestFile(io, tmp.dir, "tmp/multievent.json",
+        \\{"op":"message","role":"user","content":"hi"}
+        \\{"op":"tool_call","tool_name":"bash","args":"{}"}
+        \\
+    );
+    // Single-event JSONL.
+    try writeTestFile(io, tmp.dir, "tmp/single.json",
+        \\{"op":"message","role":"assistant","content":"ok"}
+        \\
+    );
+    // Truncated final line: one good event + one partial (mid-append crash).
+    try writeTestFile(io, tmp.dir, "tmp/truncated.json",
+        \\{"op":"message","role":"user","content":"hello"}
+        \\{"op":"tool_call","tool_name":"ba
+    );
+    // Legacy single-document format and genuine corruption.
+    try writeTestFile(io, tmp.dir, "tmp/legacy.json", "{}");
+    try writeTestFile(io, tmp.dir, "tmp/corrupt.json", "{not-json");
+
+    const diag = try collectStagingDiagnostics(io, gpa, tmp.dir);
+    try std.testing.expectEqual(@as(usize, 4), diag.pending_json);
+    try std.testing.expectEqual(@as(usize, 1), diag.corrupt_json);
+    try std.testing.expectEqual(@as(usize, 0), diag.quarantined);
     try std.testing.expectEqual(@as(usize, 0), diag.unreadable);
 }
 
