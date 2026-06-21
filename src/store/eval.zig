@@ -1,5 +1,45 @@
 const std = @import("std");
+const hash_mod = @import("hash.zig");
 const object = @import("object.zig");
+
+pub const EvalScope = struct {
+    kind: []const u8,
+    origin: ?[]const u8 = null,
+    session_id: ?[]const u8 = null,
+    rev: ?[]const u8 = null,
+    range: ?[]const u8 = null,
+    since: ?[]const u8 = null,
+    until: ?[]const u8 = null,
+};
+
+pub const EvalObject = struct {
+    type: []const u8 = "eval",
+    assessment: Assessment,
+    evaluation_scope: EvalScope,
+    evaluated_at: i64,
+    agit_version: []const u8,
+    captured_evidence_hash: []const u8,
+};
+
+/// Compute a deterministic BLAKE3 hash over sorted step hashes.
+/// Returns a 64-char lowercase hex string. Caller owns the returned memory.
+pub fn capturedEvidenceHash(gpa: std.mem.Allocator, step_hashes: []const []const u8) ![]const u8 {
+    const sorted = try gpa.alloc([]const u8, step_hashes.len);
+    defer gpa.free(sorted);
+    @memcpy(sorted, step_hashes);
+    std.mem.sort([]const u8, sorted, {}, struct {
+        fn less(_: void, a: []const u8, b: []const u8) bool {
+            return std.mem.lessThan(u8, a, b);
+        }
+    }.less);
+
+    var hasher = std.crypto.hash.Blake3.init(.{});
+    for (sorted) |h| hasher.update(h);
+    var digest: [hash_mod.digest_len]u8 = undefined;
+    hasher.final(&digest);
+    const hex = std.fmt.bytesToHex(digest, .lower);
+    return try gpa.dupe(u8, &hex);
+}
 
 pub const Rating = enum {
     good,
@@ -904,4 +944,64 @@ test "evaluateSession composes six dimensions and classifies the session" {
     try std.testing.expect(dims.verification.reasons.len > 0);
     try std.testing.expect(dims.completion_signal.reasons.len > 0);
     try std.testing.expect(dims.churn_risk.reasons.len > 0);
+}
+
+// ── Eval object persistence ───────────────────────────────────────────────
+
+/// Serialize an EvalObject as JSON and write it to the object store.
+/// Returns the BLAKE3 hash.
+pub fn writeEvalDetailed(
+    io: std.Io,
+    root: std.Io.Dir,
+    gpa: std.mem.Allocator,
+    eval: EvalObject,
+) !object.WriteDetails {
+    var aw: std.Io.Writer.Allocating = .init(gpa);
+    defer aw.deinit();
+    try std.json.Stringify.value(eval, .{}, &aw.writer);
+    return object.writeDetailed(io, root, aw.writer.buffered());
+}
+
+pub fn writeEval(
+    io: std.Io,
+    root: std.Io.Dir,
+    gpa: std.mem.Allocator,
+    eval: EvalObject,
+) !object.Hash {
+    return (try writeEvalDetailed(io, root, gpa, eval)).hash;
+}
+
+/// Read and deserialize an EvalObject from the object store.
+/// Caller must call `.deinit()` on the returned value.
+pub fn readEval(
+    io: std.Io,
+    root: std.Io.Dir,
+    gpa: std.mem.Allocator,
+    h: object.Hash,
+) !std.json.Parsed(EvalObject) {
+    const data = try object.read(io, root, gpa, h);
+    defer gpa.free(data);
+    return std.json.parseFromSlice(EvalObject, gpa, data, .{ .allocate = .alloc_always });
+}
+
+test "capturedEvidenceHash is deterministic and sorted" {
+    const gpa = std.testing.allocator;
+    const hashes = [_][]const u8{ "c" ** 64, "a" ** 64, "b" ** 64 };
+    const h1 = try capturedEvidenceHash(gpa, &hashes);
+    defer gpa.free(@constCast(h1));
+
+    const reordered = [_][]const u8{ "b" ** 64, "a" ** 64, "c" ** 64 };
+    const h2 = try capturedEvidenceHash(gpa, &reordered);
+    defer gpa.free(@constCast(h2));
+
+    try std.testing.expectEqualStrings(h1, h2);
+    try std.testing.expectEqual(@as(usize, 64), h1.len);
+}
+
+test "capturedEvidenceHash empty input" {
+    const gpa = std.testing.allocator;
+    const empty: [0][]const u8 = .{};
+    const h = try capturedEvidenceHash(gpa, &empty);
+    defer gpa.free(@constCast(h));
+    try std.testing.expectEqual(@as(usize, 64), h.len);
 }

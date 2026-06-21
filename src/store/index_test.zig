@@ -78,7 +78,7 @@ test "index migrate creates query-path indexes" {
     const user_ver = try idx.db.row("pragma user_version", .{});
     try std.testing.expect(user_ver != null);
     defer user_ver.?.deinit();
-    try std.testing.expectEqual(@as(i64, 12), user_ver.?.get(i64, 0));
+    try std.testing.expectEqual(@as(i64, 13), user_ver.?.get(i64, 0));
 }
 
 test "index upsertSession and insertStep" {

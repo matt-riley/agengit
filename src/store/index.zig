@@ -5,7 +5,7 @@ const zqlite = @import("zqlite");
 pub const Index = struct {
     db: zqlite.Conn,
 
-    pub const current_schema_version: i64 = 12;
+    pub const current_schema_version: i64 = 13;
     pub const objects_complete_meta_key = "index.objects.complete";
 
     pub const ObjectPrefixMatches = struct {
@@ -99,6 +99,9 @@ pub const Index = struct {
         }
         if (current_version < 12) {
             try self.applyMigration12();
+        }
+        if (current_version < 13) {
+            try self.applyMigration13();
         }
     }
 
@@ -400,6 +403,7 @@ pub const Index = struct {
         try self.db.execNoArgs("delete from blame_maps");
         try self.db.execNoArgs("delete from packed_objects");
         try self.db.execNoArgs("delete from objects");
+        try self.db.execNoArgs("delete from evaluations");
         try self.db.execNoArgs("delete from meta");
         try self.db.commit();
     }
@@ -628,6 +632,33 @@ pub const Index = struct {
         try self.db.commit();
     }
 
+    fn applyMigration13(self: Index) !void {
+        try self.db.transaction();
+        errdefer self.db.rollback();
+
+        try self.db.execNoArgs(
+            \\create table if not exists evaluations (
+            \\  hash                      text primary key,
+            \\  scope_type                text not null,
+            \\  scope_key                 text not null,
+            \\  classification            text not null,
+            \\  captured_evidence_hash    text not null,
+            \\  evaluated_at              integer not null
+            \\)
+        );
+        try self.db.execNoArgs(
+            "create index if not exists evaluations_scope_latest on evaluations(scope_type, scope_key, evaluated_at desc)",
+        );
+
+        try self.db.exec(
+            "insert into schema_migrations (version) values (?)",
+            .{@as(i64, 13)},
+        );
+
+        try self.db.execNoArgs("pragma user_version = 13");
+        try self.db.commit();
+    }
+
     /// Insert or update the blame_maps row for (path, step_hash).
     pub fn insertBlameMap(
         self: Index,
@@ -648,6 +679,116 @@ pub const Index = struct {
             \\  blob_hash  = excluded.blob_hash,
             \\  timestamp  = excluded.timestamp
         , .{ path, step_hash, blame_hash, blob_hash, session_origin, session_id, timestamp });
+    }
+
+    /// Insert an evaluation row for a persisted eval object.
+    pub fn insertEvaluation(
+        self: Index,
+        hash: []const u8,
+        scope_type: []const u8,
+        scope_key: []const u8,
+        classification: []const u8,
+        captured_evidence_hash: []const u8,
+        evaluated_at: i64,
+    ) !void {
+        try self.db.exec(
+            "insert or ignore into evaluations (hash, scope_type, scope_key, classification, captured_evidence_hash, evaluated_at) values (?, ?, ?, ?, ?, ?)",
+            .{ hash, scope_type, scope_key, classification, captured_evidence_hash, evaluated_at },
+        );
+    }
+
+    /// Return the 64-char hex hash of the latest evaluation for the given scope, or null.
+    pub fn queryLatestEvalHash(
+        self: Index,
+        scope_type: []const u8,
+        scope_key: []const u8,
+    ) !?[64]u8 {
+        const row = try self.db.row(
+            "select hash from evaluations where scope_type=? and scope_key=? order by evaluated_at desc limit 1",
+            .{ scope_type, scope_key },
+        ) orelse return null;
+        defer row.deinit();
+        const hash_str = row.get([]const u8, 0);
+        if (hash_str.len != 64) return null;
+        var buf: [64]u8 = undefined;
+        @memcpy(&buf, hash_str);
+        return buf;
+    }
+
+    /// Return all session-level scopes whose latest evaluation classification matches.
+    pub fn listSessionsByEvalClassification(
+        self: Index,
+        gpa: std.mem.Allocator,
+        classification: []const u8,
+        limit: usize,
+    ) ![]const [64]u8 {
+        var list: std.ArrayList([64]u8) = .empty;
+        errdefer list.deinit(gpa);
+
+        var rs = try self.db.rows(
+            \\select e.hash
+            \\from evaluations e
+            \\inner join (
+            \\  select scope_type, scope_key, max(evaluated_at) as max_at
+            \\  from evaluations
+            \\  where scope_type = 'session'
+            \\  group by scope_type, scope_key
+            \\) latest on latest.scope_type = e.scope_type
+            \\  and latest.scope_key = e.scope_key
+            \\  and latest.max_at = e.evaluated_at
+            \\where e.classification = ?
+            \\order by e.evaluated_at desc
+            \\limit ?
+        , .{ classification, @as(i64, @intCast(limit)) });
+        defer rs.deinit();
+
+        while (rs.next()) |row| {
+            const hash_str = row.get([]const u8, 0);
+            if (hash_str.len != 64) continue;
+            var buf: [64]u8 = undefined;
+            @memcpy(&buf, hash_str);
+            try list.append(gpa, buf);
+        }
+        if (rs.err) |err| return err;
+        return list.toOwnedSlice(gpa);
+    }
+
+    /// Return all session scope keys (origin/session_id) whose latest eval classification matches.
+    pub fn listSessionScopeKeysByEvalClass(
+        self: Index,
+        gpa: std.mem.Allocator,
+        classification: []const u8,
+        limit: usize,
+    ) ![]const []const u8 {
+        var list: std.ArrayList([]const u8) = .empty;
+        errdefer {
+            for (list.items) |item| gpa.free(item);
+            list.deinit(gpa);
+        }
+
+        var rs = try self.db.rows(
+            \\select e.scope_key
+            \\from evaluations e
+            \\inner join (
+            \\  select scope_type, scope_key, max(evaluated_at) as max_at
+            \\  from evaluations
+            \\  where scope_type = 'session'
+            \\  group by scope_type, scope_key
+            \\) latest on latest.scope_type = e.scope_type
+            \\  and latest.scope_key = e.scope_key
+            \\  and latest.max_at = e.evaluated_at
+            \\where e.classification = ?
+            \\order by e.evaluated_at desc
+            \\limit ?
+        , .{ classification, @as(i64, @intCast(limit)) });
+        defer rs.deinit();
+
+        while (rs.next()) |row| {
+            const key = row.get([]const u8, 0);
+            try list.append(gpa, try gpa.dupe(u8, key));
+        }
+        if (rs.err) |err| return err;
+        return list.toOwnedSlice(gpa);
     }
 
     pub const BlameRow = struct {

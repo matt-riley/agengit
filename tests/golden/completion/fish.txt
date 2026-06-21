@@ -118,6 +118,7 @@ complete -c agit -f -n '__fish_seen_subcommand_from recall' -l origin -r -d 'Onl
 complete -c agit -f -n '__fish_seen_subcommand_from recall' -l session -r -d 'Only return steps from one session id, or pass origin/session-id to disambiguate.'
 complete -c agit -f -n '__fish_seen_subcommand_from recall' -l outcome -r -d 'Only return steps with outcome success, failure, or unknown.'
 complete -c agit -f -n '__fish_seen_subcommand_from recall' -l limit -r -d 'Return at most <N> recall matches. Defaults to 20.'
+complete -c agit -f -n '__fish_seen_subcommand_from recall' -l judged -r -d 'Only return steps from sessions whose latest eval classification is good, bad, or mixed.'
 complete -c agit -f -n '__fish_seen_subcommand_from recall' -l redacted -d 'Redact obvious secrets in rendered previews.'
 complete -c agit -f -n '__fish_seen_subcommand_from recall' -l full -d 'Render full previews even when redaction is the repo default.'
 complete -c agit -f -n '__fish_seen_subcommand_from recall' -s h -l help -d 'Display this help and exit.'

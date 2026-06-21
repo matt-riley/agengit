@@ -190,6 +190,7 @@ _agit() {
                         '--session[Only return steps from one session id, or pass origin/session-id to disambiguate.]:id' \
                         '--outcome[Only return steps with outcome success, failure, or unknown.]:kind' \
                         '--limit[Return at most <N> recall matches. Defaults to 20.]:N' \
+                        '--judged[Only return steps from sessions whose latest eval classification is good, bad, or mixed.]:kind' \
                         '--redacted[Redact obvious secrets in rendered previews.]' \
                         '--full[Render full previews even when redaction is the repo default.]' \
                         '--help[Display this help and exit.]'

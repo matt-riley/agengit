@@ -131,6 +131,7 @@ pub fn detectKind(data: []const u8) []const u8 {
     if (std.mem.indexOf(u8, data, "\"type\":\"tree\"") != null and jsonTopLevelTypeIs(data, "tree")) return "tree";
     if (std.mem.indexOf(u8, data, "\"type\":\"step\"") != null and jsonTopLevelTypeIs(data, "step")) return "step";
     if (std.mem.indexOf(u8, data, "\"type\":\"blame\"") != null and jsonTopLevelTypeIs(data, "blame")) return "blame";
+    if (std.mem.indexOf(u8, data, "\"type\":\"eval\"") != null and jsonTopLevelTypeIs(data, "eval")) return "eval";
     return "blob";
 }
 
@@ -411,10 +412,53 @@ test "detectKind classifies structured and raw objects" {
     try std.testing.expectEqualStrings("blame", detectKind("{\"type\":\"blame\"}"));
     try std.testing.expectEqualStrings("step", detectKind("{\"type\":\"step\",\"timestamp\":1}"));
     try std.testing.expectEqualStrings("blame", detectKind("{\"type\":\"blame\",\"lines\":[]}"));
+    try std.testing.expectEqualStrings("eval", detectKind("{\"type\":\"eval\"}"));
+    try std.testing.expectEqualStrings("eval", detectKind("{\"type\":\"eval\",\"assessment\":{}}"));
     try std.testing.expectEqualStrings("blob", detectKind("plain text"));
 }
 
 test "detectKind ignores literal type string inside a blob" {
     const blob = "// hook payload contains \"type\":\"step\" for routing\nfunction record() {}";
     try std.testing.expectEqualStrings("blob", detectKind(blob));
+}
+
+/// Serialize an eval object and write it to the content-addressed store.
+pub fn writeEvalDetailed(io: std.Io, root: std.Io.Dir, gpa: std.mem.Allocator, eval: anytype) !WriteDetails {
+    var aw: std.Io.Writer.Allocating = .init(gpa);
+    defer aw.deinit();
+    try std.json.Stringify.value(eval, .{}, &aw.writer);
+    return writeDetailed(io, root, aw.writer.buffered());
+}
+
+pub fn writeEval(io: std.Io, root: std.Io.Dir, gpa: std.mem.Allocator, eval: anytype) !Hash {
+    return (try writeEvalDetailed(io, root, gpa, eval)).hash;
+}
+
+/// Read and deserialize an EvalObject from the object store.
+/// Caller must call `.deinit()` on the returned value.
+pub fn readEval(io: std.Io, root: std.Io.Dir, gpa: std.mem.Allocator, h: Hash, comptime T: type) !std.json.Parsed(T) {
+    const data = try read(io, root, gpa, h);
+    defer gpa.free(data);
+    return std.json.parseFromSlice(T, gpa, data, .{ .allocate = .alloc_always });
+}
+
+test "writeEval and readEval round-trip" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = std.testing.io;
+
+    const EvalTest = struct {
+        type: []const u8 = "eval",
+        classification: []const u8,
+        score: i64,
+    };
+    const eval_obj = EvalTest{ .classification = "good", .score = 85 };
+
+    const h = try writeEval(io, tmp.dir, std.testing.allocator, eval_obj);
+    var parsed = try readEval(io, tmp.dir, std.testing.allocator, h, EvalTest);
+    defer parsed.deinit();
+
+    try std.testing.expectEqualStrings("eval", parsed.value.type);
+    try std.testing.expectEqualStrings("good", parsed.value.classification);
+    try std.testing.expectEqual(@as(i64, 85), parsed.value.score);
 }

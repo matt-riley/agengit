@@ -41,6 +41,55 @@ test "recall/path returns prior path-scoped steps with outcome-aware ranking" {
     try std.testing.expectEqualStrings("turn-1", failure_matches[0].object.get("turn_id").?.string);
 }
 
+test "recall/judged filters sessions by latest eval classification" {
+    var sandbox = try harness.Sandbox.init(std.testing.allocator);
+    defer sandbox.deinit();
+
+    try sandbox.writeRepoFile(".agit/.keep", "");
+    try sandbox.writeRepoFile("src/a.zig", "const a = 1;\n");
+
+    // Record a "good" session.
+    try recordTurn(&sandbox, "good-sess", "good-turn", "Implement the feature and run zig build test", "All 42 tests passed");
+    // Record a "bad" session.
+    try recordTurn(&sandbox, "bad-sess", "bad-turn", "Fix it", "error: workflow failed");
+    try recordTurn(&sandbox, "bad-sess", "bad-turn2", "Try again", "error: workflow failed");
+
+    // Run eval for both sessions to produce eval objects.
+    var eval_good = try sandbox.run(&.{ "eval", "--json", "--session", "codex/good-sess", "--no-lookahead" }, null);
+    defer eval_good.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(u8, 0), eval_good.exit_code);
+
+    var eval_bad = try sandbox.run(&.{ "eval", "--json", "--session", "codex/bad-sess", "--no-lookahead" }, null);
+    defer eval_bad.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(u8, 0), eval_bad.exit_code);
+
+    // recall --judged good should return only the good session.
+    var recall_good = try sandbox.run(&.{ "recall", "--json", "--path", "src/a.zig", "--judged", "good" }, null);
+    defer recall_good.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(u8, 0), recall_good.exit_code);
+
+    var good_json = try parseJson(recall_good.stdout);
+    defer good_json.deinit();
+    const good_matches = good_json.value.object.get("data").?.object.get("matches").?.array.items;
+    for (good_matches) |match| {
+        try std.testing.expectEqualStrings("codex", match.object.get("origin").?.string);
+        try std.testing.expect(!std.mem.eql(u8, match.object.get("session_id").?.string, "bad-sess"));
+    }
+
+    // recall --judged bad should return only the bad session.
+    var recall_bad = try sandbox.run(&.{ "recall", "--json", "--path", "src/a.zig", "--judged", "bad" }, null);
+    defer recall_bad.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(u8, 0), recall_bad.exit_code);
+
+    var bad_json = try parseJson(recall_bad.stdout);
+    defer bad_json.deinit();
+    const bad_matches = bad_json.value.object.get("data").?.object.get("matches").?.array.items;
+    for (bad_matches) |match| {
+        try std.testing.expectEqualStrings("codex", match.object.get("origin").?.string);
+        try std.testing.expect(!std.mem.eql(u8, match.object.get("session_id").?.string, "good-sess"));
+    }
+}
+
 fn recordTurn(
     sandbox: *harness.Sandbox,
     session_id: []const u8,

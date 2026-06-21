@@ -15,6 +15,7 @@ const CanonicalIndex = struct {
     messages: []u8,
     tool_calls: []u8,
     meta: []u8,
+    evaluations: []u8,
 
     fn deinit(self: *CanonicalIndex, gpa: std.mem.Allocator) void {
         gpa.free(self.objects);
@@ -23,6 +24,7 @@ const CanonicalIndex = struct {
         gpa.free(self.messages);
         gpa.free(self.tool_calls);
         gpa.free(self.meta);
+        gpa.free(self.evaluations);
         self.* = undefined;
     }
 
@@ -33,6 +35,7 @@ const CanonicalIndex = struct {
         try std.testing.expectEqualStrings(self.messages, other.messages);
         try std.testing.expectEqualStrings(self.tool_calls, other.tool_calls);
         try std.testing.expectEqualStrings(self.meta, other.meta);
+        try std.testing.expectEqualStrings(self.evaluations, other.evaluations);
     }
 };
 
@@ -163,6 +166,7 @@ fn captureCanonicalIndex(gpa: std.mem.Allocator, store: *store_mod.Store) !Canon
         .messages = try captureMessages(gpa, store),
         .tool_calls = try captureToolCalls(gpa, store),
         .meta = try captureMeta(gpa, store),
+        .evaluations = try captureEvaluations(gpa, store),
     };
 }
 
@@ -286,6 +290,29 @@ fn captureMeta(gpa: std.mem.Allocator, store: *store_mod.Store) ![]u8 {
         try aw.writer.print("{s}\t{s}\n", .{
             row.get([]const u8, 0),
             row.get([]const u8, 1),
+        });
+    }
+    if (rows.err) |err| return err;
+    return try gpa.dupe(u8, aw.writer.buffered());
+}
+
+fn captureEvaluations(gpa: std.mem.Allocator, store: *store_mod.Store) ![]u8 {
+    var aw: std.Io.Writer.Allocating = .init(gpa);
+    defer aw.deinit();
+
+    var rows = try store.index.db.rows(
+        "select hash, scope_type, scope_key, classification, captured_evidence_hash, evaluated_at from evaluations order by hash",
+        .{},
+    );
+    defer rows.deinit();
+    while (rows.next()) |row| {
+        try aw.writer.print("{s}\t{s}\t{s}\t{s}\t{s}\t{d}\n", .{
+            row.get([]const u8, 0),
+            row.get([]const u8, 1),
+            row.get([]const u8, 2),
+            row.get([]const u8, 3),
+            row.get([]const u8, 4),
+            row.get(i64, 5),
         });
     }
     if (rows.err) |err| return err;

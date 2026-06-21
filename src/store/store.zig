@@ -9,6 +9,7 @@ const ignore_mod = @import("ignore.zig");
 const outcome_mod = @import("outcome.zig");
 const snapshot_mod = @import("snapshot.zig");
 const blame_mod = @import("blame.zig");
+const eval_mod = @import("eval.zig");
 const zqlite = @import("zqlite");
 const blame_recorder_mod = @import("blame_recorder.zig");
 const reconcile_mod = @import("reconcile.zig");
@@ -312,6 +313,33 @@ pub const Store = struct {
         const data = try self.readBlob(io, gpa, h);
         defer gpa.free(data);
         return std.json.parseFromSlice(BlameMap, gpa, data, .{ .allocate = .alloc_always });
+    }
+
+    // ── Eval ─────────────────────────────────────────────────────────────────
+
+    /// Write an EvalObject to the object store. Returns its hash.
+    pub fn writeEval(self: *Store, io: std.Io, gpa: std.mem.Allocator, eval: eval_mod.EvalObject) !Hash {
+        const written = try eval_mod.writeEvalDetailed(io, self.root, gpa, eval);
+        const hex = written.hash.toHex();
+        try self.index.insertObject(&hex, "eval", written.size);
+
+        // Build scope_key and insert evaluation row.
+        const scope_key = try evalScopeKey(gpa, eval.evaluation_scope);
+        defer gpa.free(scope_key);
+        try self.index.insertEvaluation(
+            &hex,
+            eval.evaluation_scope.kind,
+            scope_key,
+            eval.assessment.classification,
+            eval.captured_evidence_hash,
+            eval.evaluated_at,
+        );
+        return written.hash;
+    }
+
+    /// Read an EvalObject from the object store. Caller calls `parsed.deinit()`.
+    pub fn readEval(self: *Store, io: std.Io, gpa: std.mem.Allocator, h: Hash) !std.json.Parsed(eval_mod.EvalObject) {
+        return eval_mod.readEval(io, self.root, gpa, h);
     }
 
     // ── Blame recording ─────────────────────────────────────────────────────
@@ -691,6 +719,20 @@ pub const Store = struct {
         return true;
     }
 };
+
+pub fn evalScopeKeyPublic(gpa: std.mem.Allocator, scope: eval_mod.EvalScope) ![]u8 {
+    return evalScopeKey(gpa, scope);
+}
+
+fn evalScopeKey(gpa: std.mem.Allocator, scope: eval_mod.EvalScope) ![]u8 {
+    return switch (scope.kind[0]) {
+        's' => std.fmt.allocPrint(gpa, "{s}/{s}", .{ scope.origin orelse "", scope.session_id orelse "" }),
+        'c' => std.fmt.allocPrint(gpa, "commit {s}", .{scope.rev orelse ""}),
+        'r' => std.fmt.allocPrint(gpa, "range {s}", .{scope.range orelse ""}),
+        'w' => std.fmt.allocPrint(gpa, "window {s}..{s}", .{ scope.since orelse "", scope.until orelse "" }),
+        else => error.InvalidArgument,
+    };
+}
 
 fn countObjectFiles(io: std.Io, gpa: std.mem.Allocator, root: std.Io.Dir) !usize {
     var obj_dir = root.openDir(io, "objects", .{ .iterate = true }) catch |err| switch (err) {

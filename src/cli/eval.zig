@@ -4,6 +4,7 @@ const eval_mod = @import("../store/eval.zig");
 const git_mod = @import("../util/git.zig");
 const store_mod = @import("../store/store.zig");
 const arg_parse = @import("arg_parse.zig");
+const version_mod = @import("../version.zig");
 const help_mod = @import("help.zig");
 const output_mod = @import("output.zig");
 const specs = @import("specs.zig");
@@ -123,9 +124,29 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
 
     const scope = resolved_scope.scope;
 
+    // Compute captured evidence hash and persist eval object.
+    const step_hashes = try gpa.alloc([]const u8, scoped_steps.inputs.len);
+    defer gpa.free(step_hashes);
+    for (scoped_steps.inputs, 0..) |input, i| {
+        step_hashes[i] = input.hash;
+    }
+    const evidence_hash = try eval_mod.capturedEvidenceHash(gpa, step_hashes);
+    defer gpa.free(evidence_hash);
+
+    const eval_obj = eval_mod.EvalObject{
+        .assessment = in_scope,
+        .evaluation_scope = scopeToEvalScope(scope),
+        .evaluated_at = nowMs(),
+        .agit_version = version_mod.value,
+        .captured_evidence_hash = evidence_hash,
+    };
+    const eval_obj_hash = try store.writeEval(io, gpa, eval_obj);
+    const eval_hash_hex = eval_obj_hash.toHex();
+
     switch (options.format) {
         .json => try output_mod.writeEnvelope(&stdout, usage.name, .{
             .scope = scope,
+            .eval_hash = &eval_hash_hex,
             .association_confidence = resolved_scope.association_confidence,
             .in_scope_assessment = in_scope,
             .follow_up_assessment = follow_up,
@@ -566,6 +587,24 @@ fn lessByTimeThenHash(_: void, a: store_mod.TimelineRow, b: store_mod.TimelineRo
     return std.mem.lessThan(u8, a.hash, b.hash);
 }
 
+fn nowMs() i64 {
+    var tv: std.posix.timeval = undefined;
+    _ = std.c.gettimeofday(&tv, null);
+    return @as(i64, tv.sec) * 1000 + @divTrunc(@as(i64, tv.usec), 1000);
+}
+
+fn scopeToEvalScope(scope: Scope) eval_mod.EvalScope {
+    return .{
+        .kind = scope.kind,
+        .origin = scope.origin,
+        .session_id = scope.session_id,
+        .rev = scope.rev,
+        .range = scope.range,
+        .since = scope.since,
+        .until = scope.until,
+    };
+}
+
 fn countSessions(rows: []const store_mod.TimelineRow) i64 {
     var count: i64 = 0;
     for (rows, 0..) |row, i| {
@@ -595,51 +634,51 @@ fn parseOptions(iter: *std.process.Args.Iterator, stdout: *std.Io.File.Writer) !
             options.format = .json;
         } else if (std.mem.eql(u8, arg, "--origin")) {
             options.origin = iter.next() orelse {
-                try arg_parse.invalidArg(stdout, options.format, usage, "--origin requires a value.");
+                try invalidArgument(stdout, options.format, "--origin requires a value.");
                 return error.InvalidArgument;
             };
         } else if (std.mem.eql(u8, arg, "--session")) {
             options.session = iter.next() orelse {
-                try arg_parse.invalidArg(stdout, options.format, usage, "--session requires a value.");
+                try invalidArgument(stdout, options.format, "--session requires a value.");
                 return error.InvalidArgument;
             };
         } else if (std.mem.eql(u8, arg, "--commit")) {
             options.commit_rev = iter.next() orelse {
-                try arg_parse.invalidArg(stdout, options.format, usage, "--commit requires a git revision.");
+                try invalidArgument(stdout, options.format, "--commit requires a git revision.");
                 return error.InvalidArgument;
             };
         } else if (std.mem.eql(u8, arg, "--range")) {
             options.range_spec = iter.next() orelse {
-                try arg_parse.invalidArg(stdout, options.format, usage, "--range requires a git revision range.");
+                try invalidArgument(stdout, options.format, "--range requires a git revision range.");
                 return error.InvalidArgument;
             };
         } else if (std.mem.eql(u8, arg, "--since")) {
             const value = iter.next() orelse {
-                try arg_parse.invalidArg(stdout, options.format, usage, "--since requires a YYYY-MM-DD value.");
+                try invalidArgument(stdout, options.format, "--since requires a YYYY-MM-DD value.");
                 return error.InvalidArgument;
             };
             options.since_ms = date_util.parseUtcDateMidnight(value) catch {
-                try arg_parse.invalidArg(stdout, options.format, usage, "Invalid --since date; use YYYY-MM-DD.");
+                try invalidArgument(stdout, options.format, "Invalid --since date; use YYYY-MM-DD.");
                 return error.InvalidArgument;
             };
             options.since_raw = value;
         } else if (std.mem.eql(u8, arg, "--until")) {
             const value = iter.next() orelse {
-                try arg_parse.invalidArg(stdout, options.format, usage, "--until requires a YYYY-MM-DD value.");
+                try invalidArgument(stdout, options.format, "--until requires a YYYY-MM-DD value.");
                 return error.InvalidArgument;
             };
             options.until_ms_exclusive = date_util.parseUtcDateEndExclusive(value) catch {
-                try arg_parse.invalidArg(stdout, options.format, usage, "Invalid --until date; use YYYY-MM-DD.");
+                try invalidArgument(stdout, options.format, "Invalid --until date; use YYYY-MM-DD.");
                 return error.InvalidArgument;
             };
             options.until_raw = value;
         } else if (std.mem.eql(u8, arg, "--lookahead")) {
             const value = iter.next() orelse {
-                try arg_parse.invalidArg(stdout, options.format, usage, "--lookahead requires a duration like 24h or 0.");
+                try invalidArgument(stdout, options.format, "--lookahead requires a duration like 24h or 0.");
                 return error.InvalidArgument;
             };
             options.lookahead_ms = parseLookahead(value) catch {
-                try arg_parse.invalidArg(stdout, options.format, usage, "Invalid --lookahead value; use Nh, Nd, or 0.");
+                try invalidArgument(stdout, options.format, "Invalid --lookahead value; use Nh, Nd, or 0.");
                 return error.InvalidArgument;
             };
         } else if (std.mem.eql(u8, arg, "--no-lookahead")) {
@@ -649,11 +688,23 @@ fn parseOptions(iter: *std.process.Args.Iterator, stdout: *std.Io.File.Writer) !
             try stdout.flush();
             return error.HelpShown;
         } else {
-            try arg_parse.invalidArg(stdout, options.format, usage, "Unknown option.");
+            try invalidArgument(stdout, options.format, "Unknown option.");
             return error.InvalidArgument;
         }
     }
     return options;
+}
+
+fn invalidArgument(stdout: *std.Io.File.Writer, format: output_mod.Format, message: []const u8) !void {
+    try status.writeDiagnostic(stdout, format, usage.name, .{
+        .code = "invalid_argument",
+        .message = message,
+    });
+    if (format == .human) {
+        try stdout.interface.writeAll("\n");
+        try help_mod.renderUsage(stdout, usage);
+    }
+    try stdout.flush();
 }
 
 fn parseLookahead(value: []const u8) !i64 {
