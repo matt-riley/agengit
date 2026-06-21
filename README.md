@@ -397,8 +397,9 @@ agit completion bash
 
 Planned but not shipped today:
 
-- historical content search
-- portable export/import bundles
+- content search across captured workspace blob bodies (activity search via
+  `agit grep` ships today; searching the content-addressed snapshot blobs is
+  the open item)
 
 Experimental today: `agit observe --once fixture --input observer.json` exercises
 the observer framework and persists replay checkpoints under
