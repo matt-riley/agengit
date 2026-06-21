@@ -9,11 +9,11 @@ your row when done.
 
 | Plan | Title | Priority | Effort | Depends on | Status |
 |------|-------|----------|--------|------------|--------|
-| 001 | Fix `openWorkspaceDir` fallback tests so `zig build test` passes again | P1 | S | — | TODO |
+| 001 | Fix `openWorkspaceDir` fallback tests so `zig build test` passes again | P1 | S | — | DONE |
 | 002 | Cache repeated tree reads in `agit stats` file-tally loop | P2 | M | — | DONE |
-| 003 | Extract shared store-open/config-load/redaction setup from query commands | P2 | M | — | TODO |
-| 004 | Remove stale "planned" roadmap entry for already-shipped blob content search | P3 | S | — | TODO |
-| 005 | Add unit tests for `bundle.zig`'s untested pure helper functions | P2 | S | — | TODO |
+| 003 | Extract shared store-open/config-load/redaction setup from query commands | P2 | M | — | DONE |
+| 004 | Remove stale "planned" roadmap entry for already-shipped blob content search | P3 | S | — | DONE |
+| 005 | Add unit tests for `bundle.zig`'s untested pure helper functions | P2 | S | — | DONE |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) | REJECTED (with one-line rationale)
 
