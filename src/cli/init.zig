@@ -36,15 +36,7 @@ pub fn run(
     defer gpa.free(exe);
     const crash_after_tmp_write = shouldCrashAfterTmpWrite(environ);
 
-    var builder = init_plan_mod.Builder.init(gpa, io, environ, home, exe, options.force, options.dry_run);
-    defer builder.deinit();
-
-    // Apply agent selections if any were specified.
-    for (options.selected_agents.items) |agent_id| {
-        try builder.selectAgent(agent_id);
-    }
-
-    const plan = try builder.build();
+    const plan = try init_plan_mod.buildPlan(gpa, io, environ, home, options.selected_agents.items, options.force, options.dry_run);
     defer deinitPlan(gpa, plan);
 
     if (options.dry_run) {

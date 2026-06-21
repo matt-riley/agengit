@@ -1,7 +1,0 @@
-{
-  "session_id": "pi-sess-001",
-  "cwd": "/home/user/myproject",
-  "hook_event_name": "agent_end",
-  "turn_id": "agturn:pi-1",
-  "response": "I've refactored the auth module to use JWT tokens with proper expiry handling."
-}

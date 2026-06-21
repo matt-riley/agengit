@@ -1,6 +1,0 @@
-{
-  "session_id": "gemini-sess-001",
-  "cwd": "/home/user/myproject",
-  "hook_event_name": "AfterAgent",
-  "response": "I've updated the main.go file to print a personalised greeting based on the hostname."
-}

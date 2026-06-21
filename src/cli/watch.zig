@@ -3,6 +3,7 @@ const config_mod = @import("../store/config.zig");
 const date_util = @import("../util/date.zig");
 const help_mod = @import("help.zig");
 const output_mod = @import("output.zig");
+const shared = @import("shared.zig");
 const specs = @import("specs.zig");
 const status = @import("status.zig");
 const step_line = @import("step_line.zig");
@@ -19,25 +20,14 @@ const batch_limit: usize = 100;
 
 var stop_requested = std.atomic.Value(bool).init(false);
 
-const RedactionMode = enum {
-    auto,
-    redacted,
-    full,
-};
-
 const WatchOptions = struct {
     origin: ?[:0]const u8 = null,
     session: ?[:0]const u8 = null,
     since_raw: ?[:0]const u8 = null,
     since_ms: ?i64 = null,
     interval_ms: u64 = default_interval_ms,
-    redaction_mode: RedactionMode = .auto,
+    redaction_mode: shared.RedactionMode = .auto,
     format: output_mod.Format = .human,
-};
-
-const SessionFilter = struct {
-    origin: ?[]const u8 = null,
-    session_id: ?[]const u8 = null,
 };
 
 const SignalGuards = struct {
@@ -76,7 +66,7 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
         std.process.exit(1);
     };
     defer loaded_config.deinit();
-    const use_redaction = shouldUseRedaction(options.redaction_mode, loaded_config.value.privacy.display.redacted_by_default);
+    const use_redaction = shared.shouldUseRedaction(options.redaction_mode, loaded_config.value.privacy.display.redacted_by_default);
 
     stop_requested.store(false, .release);
     const guards = installStopHandlers();
@@ -238,31 +228,15 @@ fn parseIntervalMs(value: []const u8) !u64 {
     return raw_ms;
 }
 
-fn resolveSessionFilter(stdout: *std.Io.File.Writer, options: WatchOptions) !SessionFilter {
-    var filter: SessionFilter = .{ .origin = options.origin };
-    if (options.session) |session| {
-        if (std.mem.indexOfScalar(u8, session, '/')) |sep| {
-            const qualified_origin = session[0..sep];
-            if (filter.origin) |origin| {
-                if (!std.mem.eql(u8, origin, qualified_origin)) {
-                    try arg_parse.invalidArg(stdout, options.format, usage, "--origin does not match the origin prefix embedded in --session.");
-                    return error.InvalidArgument;
-                }
-            }
-            filter.origin = qualified_origin;
-            filter.session_id = session[sep + 1 ..];
-        } else {
-            filter.session_id = session;
-        }
-    }
-    return filter;
-}
-
-fn shouldUseRedaction(mode: RedactionMode, redacted_by_default: bool) bool {
-    return switch (mode) {
-        .auto => redacted_by_default,
-        .redacted => true,
-        .full => false,
+fn resolveSessionFilter(stdout: *std.Io.File.Writer, options: WatchOptions) !shared.SessionFilter {
+    return shared.resolveSessionFilter(stdout, options.format, usage.name, options.origin, options.session) catch |err| switch (err) {
+        error.InvalidArgument => {
+            try stdout.interface.writeAll("\n");
+            try help_mod.renderUsage(stdout, usage);
+            try stdout.flush();
+            return err;
+        },
+        else => return err,
     };
 }
 

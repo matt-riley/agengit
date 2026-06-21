@@ -3,15 +3,10 @@ const config_mod = @import("../store/config.zig");
 const redact_mod = @import("../privacy/redact.zig");
 const status = @import("status.zig");
 const help_mod = @import("help.zig");
+const shared = @import("shared.zig");
 const specs = @import("specs.zig");
 
 pub const usage = specs.cat_usage;
-
-const RedactionMode = enum {
-    auto,
-    redacted,
-    full,
-};
 
 // Phase 6 implementation: print a raw CAS object by its BLAKE3 hash.
 pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator) !void {
@@ -20,7 +15,7 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
 
     // Parse --help and hash prefix
     var help_requested = false;
-    var redaction_mode: RedactionMode = .auto;
+    var redaction_mode: shared.RedactionMode = .auto;
     var hash_prefix: ?[:0]const u8 = null;
     while (iter.next()) |arg| {
         if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
@@ -60,11 +55,7 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
         std.process.exit(1);
     };
     defer loaded_config.deinit();
-    const use_redaction = switch (redaction_mode) {
-        .auto => loaded_config.value.privacy.display.redacted_by_default,
-        .redacted => true,
-        .full => false,
-    };
+    const use_redaction = shared.shouldUseRedaction(redaction_mode, loaded_config.value.privacy.display.redacted_by_default);
 
     const resolution = store.resolvePrefix(io, gpa, prefix) catch |err| {
         try status.writeDiagnostic(&stdout, .human, usage.name, .{

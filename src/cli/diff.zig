@@ -8,6 +8,7 @@ const snapshot_mod = @import("../store/snapshot.zig");
 const status = @import("status.zig");
 const help_mod = @import("help.zig");
 const output_mod = @import("output.zig");
+const shared = @import("shared.zig");
 const specs = @import("specs.zig");
 const store_mod = @import("../store/store.zig");
 const arg_parse = @import("arg_parse.zig");
@@ -16,19 +17,13 @@ pub const usage = specs.diff_usage;
 
 const default_display_max_bytes: u64 = 16 * 1024 * 1024;
 
-const RedactionMode = enum {
-    auto,
-    redacted,
-    full,
-};
-
 const DiffOptions = struct {
     format: output_mod.Format = .human,
     left_hash_prefix: ?[:0]const u8 = null,
     right_hash_prefix: ?[:0]const u8 = null,
     session: ?[:0]const u8 = null,
     path: ?[:0]const u8 = null,
-    redaction_mode: RedactionMode = .auto,
+    redaction_mode: shared.RedactionMode = .auto,
 };
 
 const BaselineKind = enum {
@@ -102,7 +97,7 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
         std.process.exit(1);
     };
     defer loaded_config.deinit();
-    const use_redaction = shouldUseRedaction(options.redaction_mode, loaded_config.value.privacy.display.redacted_by_default);
+    const use_redaction = shared.shouldUseRedaction(options.redaction_mode, loaded_config.value.privacy.display.redacted_by_default);
 
     var context = try resolveDiffContext(io, gpa, &store, &stdout, options);
     defer context.deinit();
@@ -679,12 +674,4 @@ fn missingTarget(stdout: *std.Io.File.Writer, format: output_mod.Format) !void {
     }
     try stdout.flush();
     std.process.exit(1);
-}
-
-fn shouldUseRedaction(mode: RedactionMode, redacted_by_default: bool) bool {
-    return switch (mode) {
-        .auto => redacted_by_default,
-        .redacted => true,
-        .full => false,
-    };
 }

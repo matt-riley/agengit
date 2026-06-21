@@ -8,22 +8,17 @@ const status = @import("status.zig");
 const arg_parse = @import("arg_parse.zig");
 const help_mod = @import("help.zig");
 const output_mod = @import("output.zig");
+const shared = @import("shared.zig");
 const specs = @import("specs.zig");
 
 pub const usage = specs.show_usage;
-
-const RedactionMode = enum {
-    auto,
-    redacted,
-    full,
-};
 
 const ShowOptions = struct {
     format: output_mod.Format = .human,
     hash_prefix: ?[:0]const u8 = null,
     show_files: bool = false,
     show_stat: bool = false,
-    redaction_mode: RedactionMode = .auto,
+    redaction_mode: shared.RedactionMode = .auto,
 };
 
 const StatPath = struct {
@@ -75,7 +70,7 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
         std.process.exit(1);
     };
     defer loaded_config.deinit();
-    const use_redaction = shouldUseRedaction(options.redaction_mode, loaded_config.value.privacy.display.redacted_by_default);
+    const use_redaction = shared.shouldUseRedaction(options.redaction_mode, loaded_config.value.privacy.display.redacted_by_default);
 
     const resolution = store.resolvePrefix(io, gpa, prefix) catch |err| {
         try status.writeDiagnostic(&stdout, options.format, usage.name, .{
@@ -330,14 +325,6 @@ fn parseOptions(iter: *std.process.Args.Iterator, stdout: *std.Io.File.Writer) !
         }
     }
     return options;
-}
-
-fn shouldUseRedaction(mode: RedactionMode, redacted_by_default: bool) bool {
-    return switch (mode) {
-        .auto => redacted_by_default,
-        .redacted => true,
-        .full => false,
-    };
 }
 
 fn readTreeFromHex(

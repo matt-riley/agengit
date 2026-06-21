@@ -7,20 +7,14 @@ const content_search = @import("../store/content_search.zig");
 const date_util = @import("../util/date.zig");
 const help_mod = @import("help.zig");
 const output_mod = @import("output.zig");
+const shared = @import("shared.zig");
 const specs = @import("specs.zig");
 const status = @import("status.zig");
-const arg_parse = @import("arg_parse.zig");
 
 pub const usage = specs.grep_usage;
 
 const default_limit: usize = 20;
 const default_context_tokens: usize = 12;
-
-const RedactionMode = enum {
-    auto,
-    redacted,
-    full,
-};
 
 const GrepOptions = struct {
     format: output_mod.Format = .human,
@@ -33,13 +27,8 @@ const GrepOptions = struct {
     limit: usize = default_limit,
     context_tokens: usize = default_context_tokens,
     query: ?[:0]const u8 = null,
-    redaction_mode: RedactionMode = .auto,
+    redaction_mode: shared.RedactionMode = .auto,
     content: bool = false,
-};
-
-const SessionFilter = struct {
-    origin: ?[]const u8 = null,
-    session_id: ?[]const u8 = null,
 };
 
 const JsonMatch = struct {
@@ -68,12 +57,12 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
 
     const trimmed_query = std.mem.trim(u8, raw_query, " \t\r\n");
     if (trimmed_query.len == 0) {
-        try arg_parse.invalidArg(&stdout, options.format, usage, "Query must not be empty.");
+        try invalidArgument(&stdout, options.format, "Query must not be empty.");
         return;
     }
 
     if (options.since_ms != null and options.until_ms_exclusive != null and options.since_ms.? >= options.until_ms_exclusive.?) {
-        try arg_parse.invalidArg(&stdout, options.format, usage, "--since must be earlier than or equal to --until.");
+        try invalidArgument(&stdout, options.format, "--since must be earlier than or equal to --until.");
         return;
     }
 
@@ -93,7 +82,7 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
         std.process.exit(1);
     };
     defer loaded_config.deinit();
-    const use_redaction = shouldUseRedaction(options.redaction_mode, loaded_config.value.privacy.display.redacted_by_default);
+    const use_redaction = shared.shouldUseRedaction(options.redaction_mode, loaded_config.value.privacy.display.redacted_by_default);
 
     if (options.content) {
         try runContentSearch(
@@ -111,7 +100,7 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
         return;
     }
 
-    const match_query = try buildMatchQuery(gpa, trimmed_query);
+    const match_query = try shared.buildMatchQuery(gpa, trimmed_query);
     defer gpa.free(match_query);
 
     const matches = store.index.searchEntries(gpa, .{
@@ -186,7 +175,7 @@ fn runContentSearch(
     store: *store_mod.Store,
     loaded_config: *config_mod.Loaded,
     trimmed_query: []const u8,
-    session_filter: SessionFilter,
+    session_filter: shared.SessionFilter,
     options: GrepOptions,
     use_redaction: bool,
 ) !void {
@@ -375,58 +364,58 @@ fn parseOptions(iter: *std.process.Args.Iterator, stdout: *std.Io.File.Writer) !
             options.content = true;
         } else if (std.mem.eql(u8, arg, "--origin")) {
             options.origin = iter.next() orelse {
-                try arg_parse.invalidArg(stdout, options.format, usage, "--origin requires a value.");
+                try invalidArgument(stdout, options.format, "--origin requires a value.");
                 return error.InvalidArgument;
             };
         } else if (std.mem.eql(u8, arg, "--session")) {
             options.session = iter.next() orelse {
-                try arg_parse.invalidArg(stdout, options.format, usage, "--session requires a value.");
+                try invalidArgument(stdout, options.format, "--session requires a value.");
                 return error.InvalidArgument;
             };
         } else if (std.mem.eql(u8, arg, "--since")) {
             const value = iter.next() orelse {
-                try arg_parse.invalidArg(stdout, options.format, usage, "--since requires a YYYY-MM-DD value.");
+                try invalidArgument(stdout, options.format, "--since requires a YYYY-MM-DD value.");
                 return error.InvalidArgument;
             };
             options.since_ms = date_util.parseUtcDateMidnight(value) catch {
-                try arg_parse.invalidArg(stdout, options.format, usage, "Invalid --since date; use YYYY-MM-DD.");
+                try invalidArgument(stdout, options.format, "Invalid --since date; use YYYY-MM-DD.");
                 return error.InvalidArgument;
             };
             options.since_raw = value;
         } else if (std.mem.eql(u8, arg, "--until")) {
             const value = iter.next() orelse {
-                try arg_parse.invalidArg(stdout, options.format, usage, "--until requires a YYYY-MM-DD value.");
+                try invalidArgument(stdout, options.format, "--until requires a YYYY-MM-DD value.");
                 return error.InvalidArgument;
             };
             options.until_ms_exclusive = date_util.parseUtcDateEndExclusive(value) catch {
-                try arg_parse.invalidArg(stdout, options.format, usage, "Invalid --until date; use YYYY-MM-DD.");
+                try invalidArgument(stdout, options.format, "Invalid --until date; use YYYY-MM-DD.");
                 return error.InvalidArgument;
             };
             options.until_raw = value;
         } else if (std.mem.eql(u8, arg, "--limit")) {
             const value = iter.next() orelse {
-                try arg_parse.invalidArg(stdout, options.format, usage, "--limit requires an integer value.");
+                try invalidArgument(stdout, options.format, "--limit requires an integer value.");
                 return error.InvalidArgument;
             };
             options.limit = std.fmt.parseUnsigned(usize, value, 10) catch {
-                try arg_parse.invalidArg(stdout, options.format, usage, "Invalid --limit value.");
+                try invalidArgument(stdout, options.format, "Invalid --limit value.");
                 return error.InvalidArgument;
             };
             if (options.limit == 0) {
-                try arg_parse.invalidArg(stdout, options.format, usage, "--limit must be greater than zero.");
+                try invalidArgument(stdout, options.format, "--limit must be greater than zero.");
                 return error.InvalidArgument;
             }
         } else if (std.mem.eql(u8, arg, "--context")) {
             const value = iter.next() orelse {
-                try arg_parse.invalidArg(stdout, options.format, usage, "--context requires an integer value.");
+                try invalidArgument(stdout, options.format, "--context requires an integer value.");
                 return error.InvalidArgument;
             };
             options.context_tokens = std.fmt.parseUnsigned(usize, value, 10) catch {
-                try arg_parse.invalidArg(stdout, options.format, usage, "Invalid --context value.");
+                try invalidArgument(stdout, options.format, "Invalid --context value.");
                 return error.InvalidArgument;
             };
             if (options.context_tokens == 0) {
-                try arg_parse.invalidArg(stdout, options.format, usage, "--context must be greater than zero.");
+                try invalidArgument(stdout, options.format, "--context must be greater than zero.");
                 return error.InvalidArgument;
             }
         } else if (std.mem.eql(u8, arg, "--redacted")) {
@@ -456,53 +445,16 @@ fn parseOptions(iter: *std.process.Args.Iterator, stdout: *std.Io.File.Writer) !
     return options;
 }
 
-fn resolveSessionFilter(stdout: *std.Io.File.Writer, options: GrepOptions) !SessionFilter {
-    var filter: SessionFilter = .{ .origin = options.origin };
-    if (options.session) |session| {
-        if (std.mem.indexOfScalar(u8, session, '/')) |sep| {
-            const qualified_origin = session[0..sep];
-            if (filter.origin) |origin| {
-                if (!std.mem.eql(u8, origin, qualified_origin)) {
-                    try arg_parse.invalidArg(stdout, options.format, usage, "--origin does not match the origin prefix embedded in --session.");
-                    return error.InvalidArgument;
-                }
-            }
-            filter.origin = qualified_origin;
-            filter.session_id = session[sep + 1 ..];
-        } else {
-            filter.session_id = session;
-        }
-    }
-    return filter;
-}
-
-fn buildMatchQuery(gpa: std.mem.Allocator, query: []const u8) ![]u8 {
-    var out: std.ArrayList(u8) = .empty;
-    errdefer out.deinit(gpa);
-
-    var tokens = std.mem.tokenizeAny(u8, query, " \t\r\n");
-    var count: usize = 0;
-    while (tokens.next()) |token| {
-        if (count > 0) try out.appendSlice(gpa, " AND ");
-        try appendQuotedToken(&out, gpa, token);
-        count += 1;
-    }
-
-    if (count == 0) return error.InvalidArgument;
-    return out.toOwnedSlice(gpa);
-}
-
-fn appendQuotedToken(out: *std.ArrayList(u8), gpa: std.mem.Allocator, token: []const u8) !void {
-    try out.append(gpa, '"');
-    for (token) |byte| {
-        if (byte == '"') {
-            try out.append(gpa, '"');
-            try out.append(gpa, '"');
-        } else {
-            try out.append(gpa, byte);
-        }
-    }
-    try out.append(gpa, '"');
+fn resolveSessionFilter(stdout: *std.Io.File.Writer, options: GrepOptions) !shared.SessionFilter {
+    return shared.resolveSessionFilter(stdout, options.format, usage.name, options.origin, options.session) catch |err| switch (err) {
+        error.InvalidArgument => {
+            try stdout.interface.writeAll("\n");
+            try help_mod.renderUsage(stdout, usage);
+            try stdout.flush();
+            return err;
+        },
+        else => return err,
+    };
 }
 
 fn describeEntry(entry_kind: []const u8, label: []const u8) []const u8 {
@@ -532,41 +484,17 @@ fn missingQuery(stdout: *std.Io.File.Writer, format: output_mod.Format) !void {
     std.process.exit(1);
 }
 
-fn shouldUseRedaction(mode: RedactionMode, redacted_by_default: bool) bool {
-    return switch (mode) {
-        .auto => redacted_by_default,
-        .redacted => true,
-        .full => false,
-    };
-}
-
-test "buildMatchQuery: single token becomes quoted" {
-    const gpa = std.testing.allocator;
-    const result = try buildMatchQuery(gpa, "hello");
-    defer gpa.free(result);
-    try std.testing.expectEqualStrings("\"hello\"", result);
-}
-
-test "buildMatchQuery: multiple tokens joined with AND" {
-    const gpa = std.testing.allocator;
-    const result = try buildMatchQuery(gpa, "hello world");
-    defer gpa.free(result);
-    try std.testing.expectEqualStrings("\"hello\" AND \"world\"", result);
-}
-
-test "buildMatchQuery: empty string returns InvalidArgument" {
-    const gpa = std.testing.allocator;
-    try std.testing.expectError(error.InvalidArgument, buildMatchQuery(gpa, ""));
-}
-
-test "appendQuotedToken: escapes embedded quotes" {
-    const gpa = std.testing.allocator;
-    var out: std.ArrayList(u8) = .empty;
-    errdefer out.deinit(gpa);
-    try appendQuotedToken(&out, gpa, "a\"b");
-    const result = try out.toOwnedSlice(gpa);
-    defer gpa.free(result);
-    try std.testing.expectEqualStrings("\"a\"\"b\"", result);
+fn invalidArgument(stdout: *std.Io.File.Writer, format: output_mod.Format, message: []const u8) !void {
+    try status.writeDiagnostic(stdout, format, usage.name, .{
+        .code = "invalid_argument",
+        .message = message,
+    });
+    if (format == .human) {
+        try stdout.interface.writeAll("\n");
+        try help_mod.renderUsage(stdout, usage);
+    }
+    try stdout.flush();
+    std.process.exit(1);
 }
 
 test "describeEntry: maps known entry kinds" {

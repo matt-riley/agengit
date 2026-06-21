@@ -7,9 +7,9 @@ test "hooks/pi_payloads" {
 
     try sandbox.writeRepoFile(".agit/.keep", "");
 
-    const input_payload = @embedFile("../fixtures/hooks/pi_input.json");
-    const tool_payload = @embedFile("../fixtures/hooks/pi_tool_execution_end.json");
-    const end_payload = @embedFile("../fixtures/hooks/pi_agent_end.json");
+    const input_payload = @embedFile("../../../src/fixtures/hooks/pi_input.json");
+    const tool_payload = @embedFile("../../../src/fixtures/hooks/pi_tool_execution_end.json");
+    const end_payload = @embedFile("../../../src/fixtures/hooks/pi_agent_end.json");
 
     var input_res = try sandbox.run(&.{"pi-hook"}, input_payload);
     defer input_res.deinit(std.testing.allocator);

@@ -1,7 +1,0 @@
-{
-  "session_id": "copilot-sess-001",
-  "cwd": "/home/user/myproject",
-  "hook_event_name": "UserPromptSubmit",
-  "timestamp": "2024-01-01T00:00:00.000Z",
-  "prompt": "Refactor the auth module to use JWT tokens"
-}
