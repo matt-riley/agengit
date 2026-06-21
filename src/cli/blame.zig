@@ -106,13 +106,32 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
     }
     const lines = try snapshot_mod.splitLines(arena, content);
 
+    // Collect the distinct step hashes once and resolve their meta in a single
+    // batched query so blame rendering hits the index in one round trip instead
+    // of one query per line.
+    var seen = std.StringHashMap(void).init(arena);
+    for (blame_map.lines[0..@min(blame_map.lines.len, lines.len)]) |bl| {
+        try seen.put(bl.step, {});
+    }
+    var distinct = try arena.alloc([]const u8, seen.count());
+    {
+        var it = seen.iterator();
+        var k: usize = 0;
+        while (it.next()) |entry| : (k += 1) {
+            distinct[k] = entry.key_ptr.*;
+        }
+    }
+
+    var meta_map = try store.index.queryStepMetaBatch(arena, distinct);
+    defer meta_map.deinit();
+
     // Attribution lines come from the blame map; if it diverges from the stored
     // content (should not happen) fall back to the shorter length.
     const count = @min(lines.len, blame_map.lines.len);
     var rendered = try arena.alloc(RenderedLine, count);
     for (0..count) |i| {
         const step_hex = blame_map.lines[i].step;
-        const meta = try store.index.queryStepMeta(arena, step_hex);
+        const meta = meta_map.get(step_hex);
         rendered[i] = .{
             .step = step_hex,
             .origin = if (meta) |m| m.origin else "unknown",

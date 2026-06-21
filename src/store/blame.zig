@@ -26,15 +26,13 @@ pub const BlameMap = struct {
 /// Free all memory allocated by `computeBlame`.
 /// Do NOT call on BlameMap values from `readBlame`; use `parsed.deinit()`.
 pub fn freeBlameMap(gpa: std.mem.Allocator, bm: BlameMap) void {
-    for (bm.lines, 0..) |e, i| {
-        var seen = false;
-        for (bm.lines[0..i]) |prior| {
-            if (prior.step.ptr == e.step.ptr) {
-                seen = true;
-                break;
-            }
-        }
-        if (!seen) gpa.free(@constCast(e.step));
+    var seen = std.AutoHashMap(usize, void).init(gpa);
+    defer seen.deinit();
+    for (bm.lines) |e| {
+        const ptr = @intFromPtr(e.step.ptr);
+        if (seen.contains(ptr)) continue;
+        seen.put(ptr, {}) catch {};
+        gpa.free(@constCast(e.step));
     }
     gpa.free(@constCast(bm.lines));
     gpa.free(@constCast(bm.path));
@@ -66,12 +64,13 @@ pub fn computeBlame(
     defer allocator.free(edits);
 
     var entries: std.ArrayList(BlameEntry) = .empty;
-    var interned_steps: std.ArrayList([]const u8) = .empty;
+    var interned: std.StringHashMap([]const u8) = .init(allocator);
+    defer interned.deinit();
     errdefer {
-        for (interned_steps.items) |step| allocator.free(@constCast(step));
-        interned_steps.deinit(allocator);
-        entries.deinit(allocator);
+        var it = interned.valueIterator();
+        while (it.next()) |v| allocator.free(@constCast(v.*));
     }
+    errdefer entries.deinit(allocator);
 
     const owned_path = try allocator.dupe(u8, path);
     errdefer allocator.free(owned_path);
@@ -81,11 +80,11 @@ pub fn computeBlame(
         switch (edit.op) {
             .equal => {
                 const src = if (old_blame) |ob| ob.lines[old_idx].step else step_hex;
-                try entries.append(allocator, .{ .step = try internStep(allocator, &interned_steps, src) });
+                try entries.append(allocator, .{ .step = try internStep(allocator, &interned, src) });
                 old_idx += 1;
             },
             .insert => {
-                try entries.append(allocator, .{ .step = try internStep(allocator, &interned_steps, step_hex) });
+                try entries.append(allocator, .{ .step = try internStep(allocator, &interned, step_hex) });
             },
             .delete => {
                 old_idx += 1;
@@ -93,7 +92,6 @@ pub fn computeBlame(
         }
     }
 
-    interned_steps.deinit(allocator);
     return BlameMap{
         .path = owned_path,
         .lines = try entries.toOwnedSlice(allocator),
@@ -102,15 +100,13 @@ pub fn computeBlame(
 
 fn internStep(
     allocator: std.mem.Allocator,
-    interned_steps: *std.ArrayList([]const u8),
+    interned: *std.StringHashMap([]const u8),
     src: []const u8,
 ) ![]const u8 {
-    for (interned_steps.items) |existing| {
-        if (std.mem.eql(u8, existing, src)) return existing;
-    }
+    if (interned.get(src)) |existing| return existing;
     const owned = try allocator.dupe(u8, src);
     errdefer allocator.free(owned);
-    try interned_steps.append(allocator, owned);
+    try interned.put(owned, owned);
     return owned;
 }
 
@@ -228,4 +224,20 @@ test "computeBlame: deduplicates repeated step ids" {
 
     try std.testing.expectEqual(@intFromPtr(bm.lines[0].step.ptr), @intFromPtr(bm.lines[1].step.ptr));
     try std.testing.expectEqual(@intFromPtr(bm.lines[1].step.ptr), @intFromPtr(bm.lines[2].step.ptr));
+}
+
+test "computeBlame: no leak on large all-same-step input" {
+    const gpa = std.testing.allocator;
+    var lines_buf: [2000][]const u8 = undefined;
+    for (&lines_buf) |*l| l.* = "same";
+    const step_hex = "e" ** 64;
+    const bm = try computeBlame(gpa, "big.zig", &.{}, &lines_buf, null, step_hex);
+    defer freeBlameMap(gpa, bm);
+
+    try std.testing.expectEqual(@as(usize, 2000), bm.lines.len);
+    // Interning: every step pointer must be identical.
+    const first = @intFromPtr(bm.lines[0].step.ptr);
+    for (bm.lines[1..]) |e| {
+        try std.testing.expectEqual(first, @intFromPtr(e.step.ptr));
+    }
 }

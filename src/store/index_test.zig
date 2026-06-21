@@ -175,6 +175,60 @@ test "blame_maps insert and query helpers" {
     try std.testing.expect((try idx.queryLatestBlame("file.txt")) == null);
 }
 
+test "index queryStepMetaBatch resolves and falls back" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = std.testing.io;
+
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const n = try tmp.dir.realPath(io, &path_buf);
+    var db_path_buf: [std.fs.max_path_bytes + 12]u8 = undefined;
+    const db_path = try std.fmt.bufPrintZ(&db_path_buf, "{s}/index.db", .{path_buf[0..n]});
+
+    const idx = try Index.open(db_path);
+    defer idx.close();
+    try idx.migrate();
+
+    try idx.upsertSession("origin", "s1", null);
+
+    const step_a = "a" ** 64;
+    const step_b = "b" ** 64;
+    const step_c = "c" ** 64; // known only via blame_maps fallback
+    const step_x = "x" ** 64; // absent everywhere
+
+    try idx.insertStep(step_a, "origin", "s1", "t1", null, "o" ** 64, 1000, "gpt-5-codex", null, null, null, null, null);
+    try idx.insertStep(step_b, "origin", "s1", "t2", step_a, "p" ** 64, 2000, null, null, null, null, null, null);
+
+    // step_c has no steps row; only a blame_maps entry.
+    try idx.insertBlameMap("file.txt", step_c, "1" ** 64, "3" ** 64, "claude", "s2", 300);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const hashes = [_][]const u8{ step_a, step_b, step_c, step_x };
+    var map = try idx.queryStepMetaBatch(arena, &hashes);
+    defer map.deinit();
+
+    const meta_a = map.get(step_a).?;
+    try std.testing.expectEqualStrings("origin", meta_a.origin);
+    try std.testing.expect(meta_a.model != null);
+    try std.testing.expectEqualStrings("gpt-5-codex", meta_a.model.?);
+    try std.testing.expectEqual(@as(i64, 1000), meta_a.timestamp);
+
+    const meta_b = map.get(step_b).?;
+    try std.testing.expectEqualStrings("origin", meta_b.origin);
+    try std.testing.expect(meta_b.model == null);
+    try std.testing.expectEqual(@as(i64, 2000), meta_b.timestamp);
+
+    const meta_c = map.get(step_c).?;
+    try std.testing.expectEqualStrings("claude", meta_c.origin);
+    try std.testing.expect(meta_c.model == null);
+    try std.testing.expectEqual(@as(i64, 300), meta_c.timestamp);
+
+    try std.testing.expect(map.get(step_x) == null);
+}
+
 test "insertStep is idempotent for duplicate turn ids" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
