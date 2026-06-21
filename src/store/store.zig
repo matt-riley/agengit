@@ -692,6 +692,7 @@ pub const Store = struct {
                 step.parent,
                 step.tree,
                 step.timestamp,
+                step.model,
                 step.outcome,
                 step.git_commit,
                 step.git_branch,
@@ -895,6 +896,7 @@ pub const Store = struct {
         git_commit: ?[]const u8 = null,
         git_branch: ?[]const u8 = null,
         git_dirty: ?bool = null,
+        model: ?[]const u8 = null,
     };
 
     pub const FinalizeCommitResult = union(enum) {
@@ -955,6 +957,7 @@ pub const Store = struct {
             .tree = input.tree_hash,
             .session_id = input.session_id,
             .origin = input.origin,
+            .model = input.model,
             .turn_id = input.turn_id,
             .causes = input.causes,
             .timestamp = input.timestamp,
@@ -982,6 +985,7 @@ pub const Store = struct {
             parent_str,
             input.tree_hash,
             input.timestamp,
+            input.model,
             input.outcome,
             input.git_commit,
             input.git_branch,
@@ -1090,6 +1094,7 @@ pub const Store = struct {
             parent_hex_buf,
             step.tree,
             step.timestamp,
+            step.model,
             step.outcome,
             step.git_commit,
             step.git_branch,

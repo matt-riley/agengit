@@ -10,6 +10,7 @@ pub const EventKind = enum {
     user_prompt,
     tool_use,
     assistant,
+    metadata,
 };
 
 pub const NormalizeInput = struct {
@@ -182,6 +183,16 @@ fn resolveTurnId(
             const turn_id = try std.fmt.allocPrint(gpa, "agrecovery:{d}", .{state.next_seq});
             state.next_seq += 1;
             return .{ .turn_id = turn_id, .recovered = true };
+        },
+        .metadata => {
+            if (preferred_turn_id) |provided| {
+                if (provided.len > 0) {
+                    const turn_id = try gpa.dupe(u8, provided);
+                    try setActiveTurnId(gpa, state, provided);
+                    return .{ .turn_id = turn_id, .recovered = false };
+                }
+            }
+            return .{ .turn_id = try gpa.dupe(u8, ""), .recovered = false };
         },
     }
 }

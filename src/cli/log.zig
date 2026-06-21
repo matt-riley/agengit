@@ -70,6 +70,9 @@ fn writeHuman(stdout: *std.Io.File.Writer, resolved: SessionTarget, steps: []con
             step.turn_id,
             ts,
         });
+        if (step.model) |model| {
+            try stdout.interface.print("  model {s}\n", .{model});
+        }
     }
 }
 

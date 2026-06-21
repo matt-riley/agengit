@@ -64,6 +64,7 @@ pub const Step = struct {
     tree: []const u8, // 64-char hex
     session_id: []const u8,
     origin: []const u8,
+    model: ?[]const u8 = null,
     turn_id: []const u8,
     causes: []const Cause,
     timestamp: i64,
@@ -265,6 +266,27 @@ test "write is idempotent" {
     const h1 = try write(io, tmp.dir, data);
     const h2 = try write(io, tmp.dir, data);
     try std.testing.expect(h1.eql(h2));
+}
+
+test "step JSON without model parses with null model" {
+    const gpa = std.testing.allocator;
+    const raw =
+        \\{
+        \\  "type": "step",
+        \\  "parent": null,
+        \\  "tree": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        \\  "session_id": "sess-1",
+        \\  "origin": "codex",
+        \\  "turn_id": "turn-1",
+        \\  "causes": [],
+        \\  "timestamp": 1000
+        \\}
+    ;
+
+    var parsed = try std.json.parseFromSlice(Step, gpa, raw, .{ .allocate = .alloc_always });
+    defer parsed.deinit();
+
+    try std.testing.expect(parsed.value.model == null);
 }
 
 test "write and read Tree" {

@@ -1501,7 +1501,7 @@ test "scan reports index drift as warning" {
     try store.index.insertObject(&step_hex, "step", step_write.size);
     try ref_mod.writeSessionRef(io, store.root, gpa, "claude", "session-1", step_write.hash);
     try store.index.upsertSession("claude", "session-1", &step_hex);
-    try store.index.insertStep(&step_hex, "claude", "session-1", "turn-1", null, &tree_hex, 1, null, null, null, null);
+    try store.index.insertStep(&step_hex, "claude", "session-1", "turn-1", null, &tree_hex, 1, null, null, null, null, null);
     try store.index.db.exec("delete from steps where hash=?", .{&step_hex});
 
     var root_path_buf: [std.fs.max_path_bytes]u8 = undefined;

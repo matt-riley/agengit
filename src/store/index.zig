@@ -5,7 +5,7 @@ const zqlite = @import("zqlite");
 pub const Index = struct {
     db: zqlite.Conn,
 
-    pub const current_schema_version: i64 = 10;
+    pub const current_schema_version: i64 = 11;
     pub const objects_complete_meta_key = "index.objects.complete";
 
     pub const ObjectPrefixMatches = struct {
@@ -93,6 +93,9 @@ pub const Index = struct {
         }
         if (current_version < 10) {
             try self.applyMigration10();
+        }
+        if (current_version < 11) {
+            try self.applyMigration11();
         }
     }
 
@@ -367,6 +370,7 @@ pub const Index = struct {
         parent_hash: ?[]const u8,
         tree_hash: []const u8,
         timestamp: i64,
+        model: ?[]const u8,
         outcome: ?[]const u8,
         git_commit: ?[]const u8,
         git_branch: ?[]const u8,
@@ -375,9 +379,9 @@ pub const Index = struct {
         const git_dirty_int: ?i64 = if (git_dirty) |dirty| if (dirty) 1 else 0 else null;
         try self.db.exec(
             \\insert or ignore into steps
-            \\  (hash, session_origin, session_id, turn_id, parent_hash, tree_hash, timestamp, outcome, git_commit, git_branch, git_dirty)
-            \\values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        , .{ hash, session_origin, session_id, turn_id, parent_hash, tree_hash, timestamp, outcome, git_commit, git_branch, git_dirty_int });
+            \\  (hash, session_origin, session_id, turn_id, parent_hash, tree_hash, timestamp, model, outcome, git_commit, git_branch, git_dirty)
+            \\values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        , .{ hash, session_origin, session_id, turn_id, parent_hash, tree_hash, timestamp, model, outcome, git_commit, git_branch, git_dirty_int });
     }
 
     /// Remove all step and session rows (used by reindex).
@@ -587,6 +591,24 @@ pub const Index = struct {
         try self.db.commit();
     }
 
+    fn applyMigration11(self: Index) !void {
+        try self.db.transaction();
+        errdefer self.db.rollback();
+
+        try self.db.execNoArgs("alter table steps add column model text");
+        try self.db.execNoArgs(
+            "create index if not exists steps_model_timestamp on steps(model, timestamp desc) where model is not null",
+        );
+
+        try self.db.exec(
+            "insert into schema_migrations (version) values (?)",
+            .{@as(i64, 11)},
+        );
+
+        try self.db.execNoArgs("pragma user_version = 11");
+        try self.db.commit();
+    }
+
     /// Insert or update the blame_maps row for (path, step_hash).
     pub fn insertBlameMap(
         self: Index,
@@ -655,12 +677,30 @@ pub const Index = struct {
 
     pub const StepMeta = struct {
         origin: []const u8,
+        model: ?[]const u8 = null,
         timestamp: i64,
+
+        pub fn deinit(self: *StepMeta, gpa: std.mem.Allocator) void {
+            gpa.free(self.origin);
+            if (self.model) |value| gpa.free(value);
+            self.* = undefined;
+        }
     };
 
-    /// Origin and timestamp for an attributing step, looked up from any
-    /// blame_maps row it produced. `origin` is duplicated into `gpa`.
+    /// Origin, model, and timestamp for an attributing step.
     pub fn queryStepMeta(self: Index, gpa: std.mem.Allocator, step_hash: []const u8) !?StepMeta {
+        if (try self.db.row(
+            "select session_origin, model, timestamp from steps where hash=? limit 1",
+            .{step_hash},
+        )) |row| {
+            defer row.deinit();
+            return StepMeta{
+                .origin = try gpa.dupe(u8, row.get([]const u8, 0)),
+                .model = if (row.get(?[]const u8, 1)) |value| try gpa.dupe(u8, value) else null,
+                .timestamp = row.get(i64, 2),
+            };
+        }
+
         const row = try self.db.row(
             "select session_origin, timestamp from blame_maps where step_hash=? limit 1",
             .{step_hash},
@@ -968,7 +1008,7 @@ pub const Index = struct {
         }
 
         var rs = try self.db.rows(
-            \\select hash, turn_id, parent_hash, tree_hash, timestamp, git_commit, git_branch, coalesce(git_dirty, -1)
+            \\select hash, turn_id, parent_hash, tree_hash, timestamp, model, git_commit, git_branch, coalesce(git_dirty, -1)
             \\from steps
             \\where (? is null or session_origin = ?)
             \\  and (? is null or session_id = ?)
@@ -990,9 +1030,10 @@ pub const Index = struct {
                 .parent_hash = if (row.get(?[]const u8, 2)) |p| try gpa.dupe(u8, p) else null,
                 .tree_hash = try gpa.dupe(u8, row.get([]const u8, 3)),
                 .timestamp = row.get(i64, 4),
-                .git_commit = if (row.get(?[]const u8, 5)) |commit| try gpa.dupe(u8, commit) else null,
-                .git_branch = if (row.get(?[]const u8, 6)) |branch| try gpa.dupe(u8, branch) else null,
-                .git_dirty = dirtyFromInt(row.get(i64, 7)),
+                .model = if (row.get(?[]const u8, 5)) |model| try gpa.dupe(u8, model) else null,
+                .git_commit = if (row.get(?[]const u8, 6)) |commit| try gpa.dupe(u8, commit) else null,
+                .git_branch = if (row.get(?[]const u8, 7)) |branch| try gpa.dupe(u8, branch) else null,
+                .git_dirty = dirtyFromInt(row.get(i64, 8)),
             });
         }
         if (rs.err) |err| return err;
@@ -1038,7 +1079,7 @@ pub const Index = struct {
             list.deinit(gpa);
         }
         var rs = try self.db.rows(
-            \\select hash, turn_id, parent_hash, tree_hash, timestamp, git_commit, git_branch, coalesce(git_dirty, -1)
+            \\select hash, turn_id, parent_hash, tree_hash, timestamp, model, git_commit, git_branch, coalesce(git_dirty, -1)
             \\from steps where session_origin=? and session_id=?
             \\order by timestamp asc
         , .{ origin, session_id });
@@ -1050,9 +1091,10 @@ pub const Index = struct {
                 .parent_hash = if (row.get(?[]const u8, 2)) |p| try gpa.dupe(u8, p) else null,
                 .tree_hash = try gpa.dupe(u8, row.get([]const u8, 3)),
                 .timestamp = row.get(i64, 4),
-                .git_commit = if (row.get(?[]const u8, 5)) |commit| try gpa.dupe(u8, commit) else null,
-                .git_branch = if (row.get(?[]const u8, 6)) |branch| try gpa.dupe(u8, branch) else null,
-                .git_dirty = dirtyFromInt(row.get(i64, 7)),
+                .model = if (row.get(?[]const u8, 5)) |model| try gpa.dupe(u8, model) else null,
+                .git_commit = if (row.get(?[]const u8, 6)) |commit| try gpa.dupe(u8, commit) else null,
+                .git_branch = if (row.get(?[]const u8, 7)) |branch| try gpa.dupe(u8, branch) else null,
+                .git_dirty = dirtyFromInt(row.get(i64, 8)),
             });
         }
         if (rs.err) |err| return err;
@@ -1071,7 +1113,7 @@ pub const Index = struct {
         }
 
         var rs = try self.db.rows(
-            \\select hash, session_origin, session_id, turn_id, timestamp, git_commit, git_branch, coalesce(git_dirty, -1)
+            \\select hash, session_origin, session_id, turn_id, timestamp, model, git_commit, git_branch, coalesce(git_dirty, -1)
             \\from steps
             \\where (? is null or session_origin = ?)
             \\  and (? is null or session_id = ?)
@@ -1099,9 +1141,10 @@ pub const Index = struct {
                 .session_id = try gpa.dupe(u8, row.get([]const u8, 2)),
                 .turn_id = try gpa.dupe(u8, row.get([]const u8, 3)),
                 .timestamp = row.get(i64, 4),
-                .git_commit = if (row.get(?[]const u8, 5)) |commit| try gpa.dupe(u8, commit) else null,
-                .git_branch = if (row.get(?[]const u8, 6)) |branch| try gpa.dupe(u8, branch) else null,
-                .git_dirty = dirtyFromInt(row.get(i64, 7)),
+                .model = if (row.get(?[]const u8, 5)) |model| try gpa.dupe(u8, model) else null,
+                .git_commit = if (row.get(?[]const u8, 6)) |commit| try gpa.dupe(u8, commit) else null,
+                .git_branch = if (row.get(?[]const u8, 7)) |branch| try gpa.dupe(u8, branch) else null,
+                .git_dirty = dirtyFromInt(row.get(i64, 8)),
             });
         }
         if (rs.err) |err| return err;
@@ -1138,7 +1181,7 @@ pub const Index = struct {
         }
 
         var rs = try self.db.rows(
-            \\select rowid, hash, session_origin, session_id, turn_id, timestamp, git_commit, git_branch, coalesce(git_dirty, -1)
+            \\select rowid, hash, session_origin, session_id, turn_id, timestamp, model, git_commit, git_branch, coalesce(git_dirty, -1)
             \\from steps
             \\where rowid > ?
             \\  and (? is null or session_origin = ?)
@@ -1166,9 +1209,10 @@ pub const Index = struct {
                 .session_id = try gpa.dupe(u8, row.get([]const u8, 3)),
                 .turn_id = try gpa.dupe(u8, row.get([]const u8, 4)),
                 .timestamp = row.get(i64, 5),
-                .git_commit = if (row.get(?[]const u8, 6)) |commit| try gpa.dupe(u8, commit) else null,
-                .git_branch = if (row.get(?[]const u8, 7)) |branch| try gpa.dupe(u8, branch) else null,
-                .git_dirty = dirtyFromInt(row.get(i64, 8)),
+                .model = if (row.get(?[]const u8, 6)) |model| try gpa.dupe(u8, model) else null,
+                .git_commit = if (row.get(?[]const u8, 7)) |commit| try gpa.dupe(u8, commit) else null,
+                .git_branch = if (row.get(?[]const u8, 8)) |branch| try gpa.dupe(u8, branch) else null,
+                .git_dirty = dirtyFromInt(row.get(i64, 9)),
             });
         }
         if (rs.err) |err| return err;
@@ -1240,7 +1284,7 @@ pub const Index = struct {
         }
 
         var rs = try self.db.rows(
-            \\select s.hash, s.session_origin, s.session_id, s.turn_id, s.timestamp, s.outcome,
+            \\select s.hash, s.session_origin, s.session_id, s.turn_id, s.timestamp, s.model, s.outcome,
             \\       s.git_commit, s.git_branch, coalesce(s.git_dirty, -1)
             \\from blame_maps b
             \\join steps s on s.hash = b.step_hash
@@ -1269,10 +1313,11 @@ pub const Index = struct {
                 .session_id = try gpa.dupe(u8, row.get([]const u8, 2)),
                 .turn_id = try gpa.dupe(u8, row.get([]const u8, 3)),
                 .timestamp = row.get(i64, 4),
-                .outcome = if (row.get(?[]const u8, 5)) |value| try gpa.dupe(u8, value) else null,
-                .git_commit = if (row.get(?[]const u8, 6)) |value| try gpa.dupe(u8, value) else null,
-                .git_branch = if (row.get(?[]const u8, 7)) |value| try gpa.dupe(u8, value) else null,
-                .git_dirty = dirtyFromInt(row.get(i64, 8)),
+                .model = if (row.get(?[]const u8, 5)) |value| try gpa.dupe(u8, value) else null,
+                .outcome = if (row.get(?[]const u8, 6)) |value| try gpa.dupe(u8, value) else null,
+                .git_commit = if (row.get(?[]const u8, 7)) |value| try gpa.dupe(u8, value) else null,
+                .git_branch = if (row.get(?[]const u8, 8)) |value| try gpa.dupe(u8, value) else null,
+                .git_dirty = dirtyFromInt(row.get(i64, 9)),
             });
         }
         if (rs.err) |err| return err;
@@ -1281,7 +1326,7 @@ pub const Index = struct {
 
     pub fn getRecallStepByHash(self: Index, gpa: std.mem.Allocator, hash: []const u8) !?RecallRow {
         const row = try self.db.row(
-            \\select hash, session_origin, session_id, turn_id, timestamp, outcome,
+            \\select hash, session_origin, session_id, turn_id, timestamp, model, outcome,
             \\       git_commit, git_branch, coalesce(git_dirty, -1)
             \\from steps
             \\where hash = ?
@@ -1295,10 +1340,11 @@ pub const Index = struct {
             .session_id = try gpa.dupe(u8, row.get([]const u8, 2)),
             .turn_id = try gpa.dupe(u8, row.get([]const u8, 3)),
             .timestamp = row.get(i64, 4),
-            .outcome = if (row.get(?[]const u8, 5)) |value| try gpa.dupe(u8, value) else null,
-            .git_commit = if (row.get(?[]const u8, 6)) |value| try gpa.dupe(u8, value) else null,
-            .git_branch = if (row.get(?[]const u8, 7)) |value| try gpa.dupe(u8, value) else null,
-            .git_dirty = dirtyFromInt(row.get(i64, 8)),
+            .model = if (row.get(?[]const u8, 5)) |value| try gpa.dupe(u8, value) else null,
+            .outcome = if (row.get(?[]const u8, 6)) |value| try gpa.dupe(u8, value) else null,
+            .git_commit = if (row.get(?[]const u8, 7)) |value| try gpa.dupe(u8, value) else null,
+            .git_branch = if (row.get(?[]const u8, 8)) |value| try gpa.dupe(u8, value) else null,
+            .git_dirty = dirtyFromInt(row.get(i64, 9)),
         };
     }
 
@@ -1321,7 +1367,7 @@ pub const Index = struct {
 
     pub fn mostRecentStep(self: Index, gpa: std.mem.Allocator) !?TimelineRow {
         const row = try self.db.row(
-            \\select hash, session_origin, session_id, turn_id, timestamp, git_commit, git_branch, coalesce(git_dirty, -1)
+            \\select hash, session_origin, session_id, turn_id, timestamp, model, git_commit, git_branch, coalesce(git_dirty, -1)
             \\from steps
             \\order by timestamp desc, hash desc
             \\limit 1
@@ -1333,9 +1379,10 @@ pub const Index = struct {
             .session_id = try gpa.dupe(u8, row.get([]const u8, 2)),
             .turn_id = try gpa.dupe(u8, row.get([]const u8, 3)),
             .timestamp = row.get(i64, 4),
-            .git_commit = if (row.get(?[]const u8, 5)) |commit| try gpa.dupe(u8, commit) else null,
-            .git_branch = if (row.get(?[]const u8, 6)) |branch| try gpa.dupe(u8, branch) else null,
-            .git_dirty = dirtyFromInt(row.get(i64, 7)),
+            .model = if (row.get(?[]const u8, 5)) |model| try gpa.dupe(u8, model) else null,
+            .git_commit = if (row.get(?[]const u8, 6)) |commit| try gpa.dupe(u8, commit) else null,
+            .git_branch = if (row.get(?[]const u8, 7)) |branch| try gpa.dupe(u8, branch) else null,
+            .git_dirty = dirtyFromInt(row.get(i64, 8)),
         };
     }
 
@@ -1347,7 +1394,7 @@ pub const Index = struct {
         }
 
         var rs = try self.db.rows(
-            \\select hash, session_origin, session_id, turn_id, timestamp, git_commit, git_branch, coalesce(git_dirty, -1)
+            \\select hash, session_origin, session_id, turn_id, timestamp, model, git_commit, git_branch, coalesce(git_dirty, -1)
             \\from steps
             \\where git_commit = ?
             \\order by timestamp asc, hash asc
@@ -1361,9 +1408,10 @@ pub const Index = struct {
                 .session_id = try gpa.dupe(u8, row.get([]const u8, 2)),
                 .turn_id = try gpa.dupe(u8, row.get([]const u8, 3)),
                 .timestamp = row.get(i64, 4),
-                .git_commit = if (row.get(?[]const u8, 5)) |value| try gpa.dupe(u8, value) else null,
-                .git_branch = if (row.get(?[]const u8, 6)) |value| try gpa.dupe(u8, value) else null,
-                .git_dirty = dirtyFromInt(row.get(i64, 7)),
+                .model = if (row.get(?[]const u8, 5)) |model| try gpa.dupe(u8, model) else null,
+                .git_commit = if (row.get(?[]const u8, 6)) |value| try gpa.dupe(u8, value) else null,
+                .git_branch = if (row.get(?[]const u8, 7)) |value| try gpa.dupe(u8, value) else null,
+                .git_dirty = dirtyFromInt(row.get(i64, 8)),
             });
         }
         if (rs.err) |err| return err;
@@ -1412,6 +1460,7 @@ pub const StepRow = struct {
     parent_hash: ?[]const u8,
     tree_hash: []const u8,
     timestamp: i64,
+    model: ?[]const u8 = null,
     git_commit: ?[]const u8 = null,
     git_branch: ?[]const u8 = null,
     git_dirty: ?bool = null,
@@ -1467,6 +1516,7 @@ pub const TimelineRow = struct {
     session_id: []const u8,
     turn_id: []const u8,
     timestamp: i64,
+    model: ?[]const u8 = null,
     git_commit: ?[]const u8 = null,
     git_branch: ?[]const u8 = null,
     git_dirty: ?bool = null,
@@ -1499,6 +1549,7 @@ pub const RecallRow = struct {
     session_id: []const u8,
     turn_id: []const u8,
     timestamp: i64,
+    model: ?[]const u8 = null,
     outcome: ?[]const u8 = null,
     git_commit: ?[]const u8 = null,
     git_branch: ?[]const u8 = null,
@@ -1524,6 +1575,7 @@ pub fn freeStepRow(gpa: std.mem.Allocator, r: StepRow) void {
     gpa.free(r.turn_id);
     if (r.parent_hash) |p| gpa.free(p);
     gpa.free(r.tree_hash);
+    if (r.model) |value| gpa.free(value);
     if (r.git_commit) |value| gpa.free(value);
     if (r.git_branch) |value| gpa.free(value);
 }
@@ -1533,6 +1585,7 @@ pub fn freeTimelineRow(gpa: std.mem.Allocator, row: TimelineRow) void {
     gpa.free(row.origin);
     gpa.free(row.session_id);
     gpa.free(row.turn_id);
+    if (row.model) |value| gpa.free(value);
     if (row.git_commit) |value| gpa.free(value);
     if (row.git_branch) |value| gpa.free(value);
 }
@@ -1542,6 +1595,7 @@ pub fn freeRecallRow(gpa: std.mem.Allocator, row: RecallRow) void {
     gpa.free(row.origin);
     gpa.free(row.session_id);
     gpa.free(row.turn_id);
+    if (row.model) |value| gpa.free(value);
     if (row.outcome) |value| gpa.free(value);
     if (row.git_commit) |value| gpa.free(value);
     if (row.git_branch) |value| gpa.free(value);
@@ -1671,7 +1725,7 @@ test "index migrate creates query-path indexes" {
     const user_ver = try idx.db.row("pragma user_version", .{});
     try std.testing.expect(user_ver != null);
     defer user_ver.?.deinit();
-    try std.testing.expectEqual(@as(i64, 10), user_ver.?.get(i64, 0));
+    try std.testing.expectEqual(@as(i64, 11), user_ver.?.get(i64, 0));
 }
 
 test "index upsertSession and insertStep" {
@@ -1689,7 +1743,7 @@ test "index upsertSession and insertStep" {
     try idx.migrate();
 
     try idx.upsertSession("origin", "s1", null);
-    try idx.insertStep("a" ** 64, "origin", "s1", "t1", null, "b" ** 64, 1000, null, null, null, null);
+    try idx.insertStep("a" ** 64, "origin", "s1", "t1", null, "b" ** 64, 1000, "gpt-5-codex", null, null, null, null);
 
     // Upsert should update head_hash.
     try idx.upsertSession("origin", "s1", "c" ** 64);
@@ -1700,14 +1754,15 @@ test "index upsertSession and insertStep" {
     try std.testing.expectEqualStrings("c" ** 64, row.?.get([]const u8, 0));
 
     const step_row = try idx.db.row(
-        "select git_commit, git_branch, git_dirty from steps where hash=?",
+        "select model, git_commit, git_branch, git_dirty from steps where hash=?",
         .{"a" ** 64},
     );
     try std.testing.expect(step_row != null);
     defer step_row.?.deinit();
-    try std.testing.expect(step_row.?.get(?[]const u8, 0) == null);
+    try std.testing.expectEqualStrings("gpt-5-codex", step_row.?.get([]const u8, 0));
     try std.testing.expect(step_row.?.get(?[]const u8, 1) == null);
-    try std.testing.expect(step_row.?.get(?i64, 2) == null);
+    try std.testing.expect(step_row.?.get(?[]const u8, 2) == null);
+    try std.testing.expect(step_row.?.get(?i64, 3) == null);
 }
 
 test "blame_maps insert and query helpers" {
@@ -1773,8 +1828,8 @@ test "insertStep is idempotent for duplicate turn ids" {
     try idx.migrate();
 
     try idx.upsertSession("origin", "s1", null);
-    try idx.insertStep("a" ** 64, "origin", "s1", "t1", null, "b" ** 64, 1000, null, null, null, null);
-    try idx.insertStep("c" ** 64, "origin", "s1", "t1", "a" ** 64, "d" ** 64, 1001, null, null, null, null);
+    try idx.insertStep("a" ** 64, "origin", "s1", "t1", null, "b" ** 64, 1000, null, null, null, null, null);
+    try idx.insertStep("c" ** 64, "origin", "s1", "t1", "a" ** 64, "d" ** 64, 1001, null, null, null, null, null);
 
     const count_row = try idx.db.row(
         "select count(*) from steps where session_origin=? and session_id=? and turn_id=?",
@@ -1808,7 +1863,7 @@ test "index truncate" {
     try idx.migrate();
 
     try idx.upsertSession("origin", "s1", null);
-    try idx.insertStep("a" ** 64, "origin", "s1", "t1", null, "b" ** 64, 1000, null, null, null, null);
+    try idx.insertStep("a" ** 64, "origin", "s1", "t1", null, "b" ** 64, 1000, null, null, null, null, null);
     try idx.insertObject("a" ** 64, "step", 123);
     try idx.truncate();
 
@@ -1893,9 +1948,9 @@ test "watch cursor queries rows in insertion order with filters" {
 
     try idx.upsertSession("codex", "s1", null);
     try idx.upsertSession("codex", "s2", null);
-    try idx.insertStep("a" ** 64, "codex", "s1", "t1", null, "b" ** 64, 1000, null, null, null, null);
-    try idx.insertStep("c" ** 64, "codex", "s2", "t1", null, "d" ** 64, 1100, null, null, null, null);
-    try idx.insertStep("e" ** 64, "codex", "s1", "t2", "a" ** 64, "f" ** 64, 900, null, null, null, null);
+    try idx.insertStep("a" ** 64, "codex", "s1", "t1", null, "b" ** 64, 1000, null, null, null, null, null);
+    try idx.insertStep("c" ** 64, "codex", "s2", "t1", null, "d" ** 64, 1100, null, null, null, null, null);
+    try idx.insertStep("e" ** 64, "codex", "s1", "t2", "a" ** 64, "f" ** 64, 900, null, null, null, null, null);
 
     const rows = try idx.listStepsAfterCursor(gpa, .{
         .origin = "codex",
@@ -1959,9 +2014,9 @@ test "stats aggregate queries count sessions turns tools and bounded steps" {
 
     try idx.upsertSession("codex", "s1", "b" ** 64);
     try idx.upsertSession("claude", "s2", "c" ** 64);
-    try idx.insertStep("a" ** 64, "codex", "s1", "t1", null, "1" ** 64, 1000, null, null, null, null);
-    try idx.insertStep("b" ** 64, "codex", "s1", "t2", "a" ** 64, "2" ** 64, 1200, null, null, null, null);
-    try idx.insertStep("c" ** 64, "claude", "s2", "t1", null, "3" ** 64, 1100, null, null, null, null);
+    try idx.insertStep("a" ** 64, "codex", "s1", "t1", null, "1" ** 64, 1000, null, null, null, null, null);
+    try idx.insertStep("b" ** 64, "codex", "s1", "t2", "a" ** 64, "2" ** 64, 1200, null, null, null, null, null);
+    try idx.insertStep("c" ** 64, "claude", "s2", "t1", null, "3" ** 64, 1100, null, null, null, null, null);
     try idx.insertToolCall("a" ** 64, 0, "Read", "{}", null);
     try idx.insertToolCall("b" ** 64, 0, "Bash", "{}", "ok");
     try idx.insertToolCall("c" ** 64, 0, "Bash", "{}", "ok");
@@ -2050,7 +2105,7 @@ test "index search entries stay deduplicated and searchable" {
     try idx.migrate();
 
     try idx.upsertSession("claude", "session-1", null);
-    try idx.insertStep("a" ** 64, "claude", "session-1", "turn-1", null, "b" ** 64, 1_700_000_000_000, null, "f" ** 40, "main", true);
+    try idx.insertStep("a" ** 64, "claude", "session-1", "turn-1", null, "b" ** 64, 1_700_000_000_000, null, null, "f" ** 40, "main", true);
     try idx.insertMessage("a" ** 64, 0, "user", "factorial debugging");
     try idx.insertMessage("a" ** 64, 0, "user", "factorial debugging");
     try idx.insertToolCall("a" ** 64, 1, "Bash", "{\"command\":\"echo factorial\"}", "factorial result");

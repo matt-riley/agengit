@@ -44,6 +44,9 @@ pub fn writeHumanRow(
             if (row.git_dirty orelse false) "*" else "",
         });
     }
+    if (row.model) |model| {
+        try stdout.interface.print("  model {s}\n", .{model});
+    }
     try stdout.interface.print("  {s}\n", .{preview});
 }
 

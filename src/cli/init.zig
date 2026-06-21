@@ -440,6 +440,7 @@ fn installJsExtension(
 /// All allocations use `aa` so the caller's arena owns everything.
 fn setClaudeHooks(aa: std.mem.Allocator, root: *std.json.ObjectMap, exe: []const u8) !void {
     var hooks_obj = std.json.ObjectMap.empty;
+    try hooks_obj.put(aa, "SessionStart", try makeClaudeList(aa, exe, &.{ "claude-hook", "session-start" }));
     try hooks_obj.put(aa, "UserPromptSubmit", try makeClaudeList(aa, exe, &.{ "claude-hook", "user" }));
     try hooks_obj.put(aa, "PostToolBatch", try makeClaudeList(aa, exe, &.{"claude-tool-batch-hook"}));
     try hooks_obj.put(aa, "Stop", try makeClaudeList(aa, exe, &.{ "claude-hook", "assistant" }));
@@ -528,6 +529,7 @@ fn makeCodexList(aa: std.mem.Allocator, exe: []const u8, subcmd: []const u8) !st
 /// Merge agit-managed entries into Gemini settings.json.
 fn setGeminiHooks(aa: std.mem.Allocator, root: *std.json.ObjectMap, exe: []const u8) !void {
     var hooks_obj = std.json.ObjectMap.empty;
+    try hooks_obj.put(aa, "BeforeModel", try makeGeminiHook(aa, exe, "gemini-hook"));
     try hooks_obj.put(aa, "AfterTool", try makeGeminiHook(aa, exe, "gemini-hook"));
     try hooks_obj.put(aa, "AfterAgent", try makeGeminiHook(aa, exe, "gemini-hook"));
 
@@ -570,6 +572,7 @@ test "setClaudeHooks installs all managed events on empty root" {
     const hooks = root.get("hooks") orelse return error.MissingHooks;
     try std.testing.expect(hooks == .object);
     try std.testing.expect(hooks.object.get("UserPromptSubmit") != null);
+    try std.testing.expect(hooks.object.get("SessionStart") != null);
     try std.testing.expect(hooks.object.get("PostToolBatch") != null);
     try std.testing.expect(hooks.object.get("Stop") != null);
 
@@ -592,7 +595,7 @@ test "setClaudeHooks is idempotent" {
     try std.testing.expect(hooks.get("PostToolBatch") != null);
     try std.testing.expect(hooks.get("Stop") != null);
     // No duplicate event keys — object map dedups by key.
-    try std.testing.expectEqual(@as(usize, 3), hooks.count());
+    try std.testing.expectEqual(@as(usize, 4), hooks.count());
 }
 
 test "setClaudeHooks preserves user hooks on other event names" {
@@ -695,6 +698,7 @@ test "setGeminiHooks installs all managed events on empty root" {
     try setGeminiHooks(aa, &root, "/bin/agit");
 
     const hooks = root.get("hooks").?.object;
+    try std.testing.expect(hooks.get("BeforeModel").?.array.items.len == 1);
     try std.testing.expect(hooks.get("AfterTool").?.array.items.len == 1);
     try std.testing.expect(hooks.get("AfterAgent").?.array.items.len == 1);
     try std.testing.expectEqualStrings("/bin/agit", root.get("_agit").?.object.get("binary").?.string);

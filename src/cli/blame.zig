@@ -20,6 +20,7 @@ const Options = struct {
 const RenderedLine = struct {
     step: []const u8,
     origin: []const u8,
+    model: ?[]const u8 = null,
     timestamp: i64,
     text: []const u8,
 };
@@ -115,6 +116,7 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
         rendered[i] = .{
             .step = step_hex,
             .origin = if (meta) |m| m.origin else "unknown",
+            .model = if (meta) |m| m.model else null,
             .timestamp = if (meta) |m| m.timestamp else 0,
             .text = lines[i],
         };
@@ -135,9 +137,10 @@ fn writeHuman(stdout: *std.Io.File.Writer, file_path: []const u8, rendered: []co
     var ts_buf: [32]u8 = undefined;
     for (rendered, 0..) |line, i| {
         const ts = status.formatTimestamp(line.timestamp, &ts_buf);
-        try stdout.interface.print("{s}  {s:<8}  {s}  {d:>5}  {s}\n", .{
+        const actor = line.model orelse line.origin;
+        try stdout.interface.print("{s}  {s:<16}  {s}  {d:>5}  {s}\n", .{
             line.step[0..@min(12, line.step.len)],
-            line.origin,
+            actor,
             ts,
             i + 1,
             line.text,
