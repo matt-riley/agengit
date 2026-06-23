@@ -393,6 +393,50 @@ agit completion bash
 ```
 <!-- END COMMANDS -->
 
+## Command VHS demos
+
+| Command | Demo |
+|---|---|
+| `agit init` | ![VHS demo: agit init](docs/vhs/images/init.gif) |
+| `agit observe` | ![VHS demo: agit observe](docs/vhs/images/observe.gif) |
+| `agit uninstall` | ![VHS demo: agit uninstall](docs/vhs/images/uninstall.gif) |
+| `agit doctor` | ![VHS demo: agit doctor](docs/vhs/images/doctor.gif) |
+| `agit fsck` | ![VHS demo: agit fsck](docs/vhs/images/fsck.gif) |
+| `agit gc` | ![VHS demo: agit gc](docs/vhs/images/gc.gif) |
+| `agit push` | ![VHS demo: agit push](docs/vhs/images/push.gif) |
+| `agit pull` | ![VHS demo: agit pull](docs/vhs/images/pull.gif) |
+| `agit export` | ![VHS demo: agit export](docs/vhs/images/export.gif) |
+| `agit import` | ![VHS demo: agit import](docs/vhs/images/import.gif) |
+| `agit status` | ![VHS demo: agit status](docs/vhs/images/status.gif) |
+| `agit timeline` | ![VHS demo: agit timeline](docs/vhs/images/timeline.gif) |
+| `agit eval` | ![VHS demo: agit eval](docs/vhs/images/eval.gif) |
+| `agit sessions` | ![VHS demo: agit sessions](docs/vhs/images/sessions.gif) |
+| `agit log` | ![VHS demo: agit log](docs/vhs/images/log.gif) |
+| `agit restore` | ![VHS demo: agit restore](docs/vhs/images/restore.gif) |
+| `agit show` | ![VHS demo: agit show](docs/vhs/images/show.gif) |
+| `agit diff` | ![VHS demo: agit diff](docs/vhs/images/diff.gif) |
+| `agit between` | ![VHS demo: agit between](docs/vhs/images/between.gif) |
+| `agit recall` | ![VHS demo: agit recall](docs/vhs/images/recall.gif) |
+| `agit grep` | ![VHS demo: agit grep](docs/vhs/images/grep.gif) |
+| `agit blame` | ![VHS demo: agit blame](docs/vhs/images/blame.gif) |
+| `agit watch` | ![VHS demo: agit watch](docs/vhs/images/watch.gif) |
+| `agit stats` | ![VHS demo: agit stats](docs/vhs/images/stats.gif) |
+| `agit cat` | ![VHS demo: agit cat](docs/vhs/images/cat.gif) |
+| `agit privacy scan` | ![VHS demo: agit privacy scan](docs/vhs/images/privacy.gif) |
+| `agit reindex` | ![VHS demo: agit reindex](docs/vhs/images/reindex.gif) |
+| `agit version` | ![VHS demo: agit version](docs/vhs/images/version.gif) |
+| `agit completion` | ![VHS demo: agit completion](docs/vhs/images/completion.gif) |
+
+### Regenerating command VHS demos
+
+All command demos in this README are generated from `.tape` sources under
+`docs/vhs/tapes/`.
+
+```sh
+zig build -Doptimize=ReleaseSafe
+docs/vhs/render-all.sh
+```
+
 ## Roadmap
 
 Experimental today: `agit observe --once jsonl --input observer.jsonl` exercises
