@@ -154,12 +154,13 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
 fn writeHuman(stdout: *std.Io.File.Writer, file_path: []const u8, rendered: []const RenderedLine) !void {
     try stdout.interface.print("blame {s}\n\n", .{file_path});
     var ts_buf: [32]u8 = undefined;
+    var agent_model_buf: [64]u8 = undefined;
     for (rendered, 0..) |line, i| {
         const ts = status.formatTimestamp(line.timestamp, &ts_buf);
-        const actor = line.model orelse line.origin;
-        try stdout.interface.print("{s}  {s:<16}  {s}  {d:>5}  {s}\n", .{
+        const agent_model = if (line.model) |model| std.fmt.bufPrint(&agent_model_buf, "{s} ({s})", .{ line.origin, model }) catch line.origin else line.origin;
+        try stdout.interface.print("{s}  {s:<32}  {s}  {d:>5}  {s}\n", .{
             line.step[0..@min(12, line.step.len)],
-            actor,
+            agent_model,
             ts,
             i + 1,
             line.text,
