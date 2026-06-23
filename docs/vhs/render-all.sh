@@ -6,6 +6,7 @@ VHS_DIR="$ROOT/docs/vhs"
 TAPES_DIR="$VHS_DIR/tapes"
 IMAGES_DIR="$VHS_DIR/images"
 COMMANDS_FILE="$VHS_DIR/commands.tsv"
+RUNTIME_FILE="$VHS_DIR/runtime.env"
 
 if ! command -v vhs >/dev/null 2>&1; then
   echo "vhs is required. Install with: brew install vhs" >&2
@@ -31,7 +32,7 @@ Set Height 720
 Set FontSize 16
 Set TypingSpeed 65ms
 
-Type "source ./docs/vhs/runtime.env"
+Type "source $RUNTIME_FILE"
 Enter
 Sleep 800ms
 Type "cd \$AGIT_REPO_PATH"

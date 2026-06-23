@@ -5,7 +5,7 @@ Set Height 720
 Set FontSize 16
 Set TypingSpeed 65ms
 
-Type "source ./docs/vhs/runtime.env"
+Type "source /Users/mattriley/Documents/projects/personal/agengit/docs/vhs/runtime.env"
 Enter
 Sleep 800ms
 Type "cd $AGIT_REPO_PATH"
