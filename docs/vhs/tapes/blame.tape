@@ -11,7 +11,7 @@ Sleep 800ms
 Type "cd $AGIT_REPO_PATH"
 Enter
 Sleep 700ms
-Type "HOME=$AGIT_HOME $AGIT_BIN blame notes.txt"
+Type "HOME=$AGIT_HOME $AGIT_BIN blame --help"
 Sleep 500ms
 Enter
 Sleep 3s
