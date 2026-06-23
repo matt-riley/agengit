@@ -46,8 +46,15 @@ EOF
 
 HOME="$WORKSPACE/home" "$BIN" observe --once jsonl --input "$WORKSPACE/observer-seed.jsonl" >/dev/null
 
-SESSION_ID="$(HOME="$WORKSPACE/home" "$BIN" sessions --json | jq -r '.data.sessions[] | select(.session_id == "sess-a") | .session_id' | head -n 1)"
-STEP_HASH="$(HOME="$WORKSPACE/home" "$BIN" sessions --json | jq -r '.data.sessions[] | select(.session_id == "sess-a") | .head_hash' | head -n 1)"
+USER_PAYLOAD="$(jq -nc --arg cwd "$WORKSPACE/repo" '{"session_id":"sess-a","turn_id":"turn-1","cwd":$cwd,"hook_event_name":"UserPromptSubmit","model":"gpt-5-codex","prompt":"Refactor notes to support factorial docs"}')"
+STOP_PAYLOAD="$(jq -nc --arg cwd "$WORKSPACE/repo" '{"session_id":"sess-a","turn_id":"turn-1","cwd":$cwd,"hook_event_name":"Stop","model":"gpt-5-codex","last_assistant_message":"Updated notes successfully"}')"
+
+printf '%s\n' "$USER_PAYLOAD" | HOME="$WORKSPACE/home" "$BIN" codex-hook >/dev/null
+printf "hello from model" > notes.txt
+printf '%s\n' "$STOP_PAYLOAD" | HOME="$WORKSPACE/home" "$BIN" codex-hook >/dev/null
+
+SESSION_ID="codex/sess-a"
+STEP_HASH="$(HOME="$WORKSPACE/home" "$BIN" log --json "$SESSION_ID" | jq -r '.data.steps[0].hash' | head -n 1)"
 
 if [[ -z "$SESSION_ID" || -z "$STEP_HASH" ]]; then
   echo "Failed to derive session/hash metadata for VHS tapes." >&2
