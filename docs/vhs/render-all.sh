@@ -6,7 +6,7 @@ VHS_DIR="$ROOT/docs/vhs"
 TAPES_DIR="$VHS_DIR/tapes"
 IMAGES_DIR="$VHS_DIR/images"
 COMMANDS_FILE="$VHS_DIR/commands.tsv"
-RUNTIME_FILE="$VHS_DIR/runtime.env"
+RUNTIME_FILE="./docs/vhs/runtime.env"
 
 if ! command -v vhs >/dev/null 2>&1; then
   echo "vhs is required. Install with: brew install vhs" >&2
@@ -17,12 +17,13 @@ fi
 
 mkdir -p "$TAPES_DIR" "$IMAGES_DIR"
 rm -f "$TAPES_DIR"/*.tape "$IMAGES_DIR"/*.gif
+cd "$ROOT"
 
 while IFS=$'\t' read -r slug command mode; do
   [[ -z "${slug:-}" ]] && continue
 
   tape_file="$TAPES_DIR/$slug.tape"
-  image_file="$IMAGES_DIR/$slug.gif"
+  image_file="./docs/vhs/images/$slug.gif"
 
   cat > "$tape_file" <<EOF
 Output "$image_file"
