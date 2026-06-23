@@ -29,25 +29,28 @@ Set Shell "bash"
 Set Width 1200
 Set Height 720
 Set FontSize 16
-Set TypingSpeed 0ms
+Set TypingSpeed 65ms
 
 Type "source ./docs/vhs/runtime.env"
 Enter
+Sleep 800ms
 Type "cd \$AGIT_REPO_PATH"
 Enter
+Sleep 700ms
 Type "HOME=\$AGIT_HOME $command"
+Sleep 500ms
 Enter
 EOF
 
   if [[ "$mode" == "interrupt" ]]; then
     cat >> "$tape_file" <<'EOF'
-Sleep 2s
+Sleep 3s
 Ctrl+C
 Sleep 1s
 EOF
   else
     cat >> "$tape_file" <<'EOF'
-Sleep 2s
+Sleep 3s
 EOF
   fi
 
