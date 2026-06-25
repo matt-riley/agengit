@@ -50,6 +50,8 @@ Type "source $RUNTIME_FILE"
 Enter
 Type "cd \$AGIT_REPO_PATH"
 Enter
+Type "clear"
+Enter
 Sleep 500ms
 Show
 Type "$command"
