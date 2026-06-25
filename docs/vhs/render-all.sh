@@ -14,6 +14,18 @@ if ! command -v vhs >/dev/null 2>&1; then
 fi
 
 "$VHS_DIR/prepare-runtime.sh"
+# prepare-runtime.sh starts a background fake S3 server for the push/pull
+# tapes; ensure it is always cleaned up, even if rendering fails.
+cleanup_fake_s3() {
+  if [[ -f "$ROOT/docs/vhs/runtime.env" ]]; then
+    # shellcheck disable=SC1090
+    source "$ROOT/docs/vhs/runtime.env"
+    if [[ -n "${AGIT_FAKE_S3_PID:-}" ]]; then
+      kill "$AGIT_FAKE_S3_PID" 2>/dev/null || true
+    fi
+  fi
+}
+trap cleanup_fake_s3 EXIT
 
 mkdir -p "$TAPES_DIR" "$IMAGES_DIR"
 rm -f "$TAPES_DIR"/*.tape "$IMAGES_DIR"/*.gif
@@ -59,5 +71,8 @@ EOF
   vhs "$tape_file" >/dev/null
   echo "Rendered $slug"
 done < "$COMMANDS_FILE"
+
+cleanup_fake_s3
+trap - EXIT
 
 echo "Rendered $(ls -1 "$IMAGES_DIR"/*.gif | wc -l | tr -d ' ') GIFs to $IMAGES_DIR"

@@ -11,8 +11,14 @@ pub fn get(io: std.Io, out_buffer: []u8) ![]const u8 {
 
 /// Allocates and returns the absolute path of the current executable.
 /// Caller owns the returned slice and must free it with `gpa.free`.
-pub fn getAlloc(io: std.Io, gpa: std.mem.Allocator) ![:0]u8 {
-    return std.process.executablePathAlloc(io, gpa);
+pub fn getAlloc(io: std.Io, gpa: std.mem.Allocator) ![]u8 {
+    // executablePathAlloc returns a sentinel-terminated [:0]u8 (len+1 bytes).
+    // Callers treat the result as a plain []u8 and free by slice length, which
+    // would under-free by one byte; return a non-sentinel dupe so the allocated
+    // size matches the freed size.
+    const z = try std.process.executablePathAlloc(io, gpa);
+    defer gpa.free(z);
+    return try gpa.dupe(u8, z);
 }
 
 /// Returns a stable absolute path suitable for long-lived hook configs.

@@ -1,29 +1,29 @@
 init	$AGIT_BIN init	normal
-observe	$AGIT_BIN observe --once jsonl --input $AGIT_OBSERVER_EXTRA	normal
-uninstall	$AGIT_BIN uninstall	normal
 doctor	$AGIT_BIN doctor	normal
-fsck	$AGIT_BIN fsck	normal
-gc	$AGIT_BIN gc --grace-hours 0	normal
-push	$AGIT_BIN push	normal
-pull	$AGIT_BIN pull	normal
-export	$AGIT_BIN export $AGIT_BUNDLE_PATH	normal
-import	$AGIT_BIN import $AGIT_BUNDLE_PATH	normal
 status	$AGIT_BIN status	normal
 timeline	$AGIT_BIN timeline --limit 5	normal
-eval	$AGIT_BIN eval | sed -n '1,30p'	normal
 sessions	$AGIT_BIN sessions	normal
 log	$AGIT_BIN log $AGIT_SESSION_ID	normal
-restore	$AGIT_BIN restore --dry-run --all $AGIT_STEP_HASH	normal
 show	$AGIT_BIN show $AGIT_STEP_HASH	normal
 diff	$AGIT_BIN diff $AGIT_STEP_HASH	normal
 between	$AGIT_BIN between $AGIT_COMMIT_FROM $AGIT_COMMIT_TO	normal
 recall	$AGIT_BIN recall notes	normal
 grep	$AGIT_BIN grep Refactor	normal
 blame	$AGIT_BIN blame notes.txt	normal
-watch	$AGIT_BIN watch --since $AGIT_WATCH_SINCE --interval 250ms	interrupt
 stats	$AGIT_BIN stats	normal
 cat	$AGIT_BIN cat $AGIT_STEP_HASH | sed -n '1,20p'	normal
 privacy	$AGIT_BIN privacy scan	normal
-reindex	$AGIT_BIN reindex	normal
+eval	$AGIT_BIN eval | sed -n '1,30p'	normal
 version	$AGIT_BIN version	normal
 completion	$AGIT_BIN completion bash | sed -n '1,20p'	normal
+observe	$AGIT_BIN observe --once jsonl --input $AGIT_OBSERVER_EXTRA	normal
+watch	$AGIT_BIN watch --since $AGIT_WATCH_SINCE --interval 250ms	interrupt
+fsck	$AGIT_BIN fsck	normal
+gc	$AGIT_BIN gc --grace-hours 0	normal
+reindex	$AGIT_BIN reindex	normal
+restore	$AGIT_BIN restore --dry-run --all $AGIT_STEP_HASH	normal
+export	$AGIT_BIN export $AGIT_BUNDLE_PATH	normal
+import	$AGIT_BIN import $AGIT_BUNDLE_PATH	normal
+push	$AGIT_BIN push	normal
+pull	$AGIT_BIN pull	normal
+uninstall	$AGIT_BIN uninstall	normal
