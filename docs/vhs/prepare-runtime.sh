@@ -116,6 +116,8 @@ EOF
 
 cat > "$RUNTIME_FILE" <<EOF
 export AGIT_BIN="$BIN"
+export PATH="$(dirname "$BIN"):$PATH"
+export HOME="$WORKSPACE/home"
 export AGIT_REPO_PATH="$WORKSPACE/repo"
 export AGIT_HOME="$WORKSPACE/home"
 export AGIT_SESSION_ID="$SESSION_ID"

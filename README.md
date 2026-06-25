@@ -397,35 +397,35 @@ agit completion bash
 
 | Command | Demo |
 |---|---|
-| `agit init` | ![VHS demo: agit init](docs/vhs/images/init.gif) |
-| `agit observe` | ![VHS demo: agit observe](docs/vhs/images/observe.gif) |
-| `agit uninstall` | ![VHS demo: agit uninstall](docs/vhs/images/uninstall.gif) |
-| `agit doctor` | ![VHS demo: agit doctor](docs/vhs/images/doctor.gif) |
-| `agit fsck` | ![VHS demo: agit fsck](docs/vhs/images/fsck.gif) |
-| `agit gc` | ![VHS demo: agit gc](docs/vhs/images/gc.gif) |
-| `agit push` | ![VHS demo: agit push](docs/vhs/images/push.gif) |
-| `agit pull` | ![VHS demo: agit pull](docs/vhs/images/pull.gif) |
-| `agit export` | ![VHS demo: agit export](docs/vhs/images/export.gif) |
-| `agit import` | ![VHS demo: agit import](docs/vhs/images/import.gif) |
-| `agit status` | ![VHS demo: agit status](docs/vhs/images/status.gif) |
-| `agit timeline` | ![VHS demo: agit timeline](docs/vhs/images/timeline.gif) |
-| `agit eval` | ![VHS demo: agit eval](docs/vhs/images/eval.gif) |
-| `agit sessions` | ![VHS demo: agit sessions](docs/vhs/images/sessions.gif) |
-| `agit log` | ![VHS demo: agit log](docs/vhs/images/log.gif) |
-| `agit restore` | ![VHS demo: agit restore](docs/vhs/images/restore.gif) |
-| `agit show` | ![VHS demo: agit show](docs/vhs/images/show.gif) |
-| `agit diff` | ![VHS demo: agit diff](docs/vhs/images/diff.gif) |
-| `agit between` | ![VHS demo: agit between](docs/vhs/images/between.gif) |
-| `agit recall` | ![VHS demo: agit recall](docs/vhs/images/recall.gif) |
-| `agit grep` | ![VHS demo: agit grep](docs/vhs/images/grep.gif) |
-| `agit blame` | ![VHS demo: agit blame](docs/vhs/images/blame.gif) |
-| `agit watch` | ![VHS demo: agit watch](docs/vhs/images/watch.gif) |
-| `agit stats` | ![VHS demo: agit stats](docs/vhs/images/stats.gif) |
-| `agit cat` | ![VHS demo: agit cat](docs/vhs/images/cat.gif) |
-| `agit privacy scan` | ![VHS demo: agit privacy scan](docs/vhs/images/privacy.gif) |
-| `agit reindex` | ![VHS demo: agit reindex](docs/vhs/images/reindex.gif) |
-| `agit version` | ![VHS demo: agit version](docs/vhs/images/version.gif) |
-| `agit completion` | ![VHS demo: agit completion](docs/vhs/images/completion.gif) |
+| `agit init` | <video src="docs/vhs/images/init.mp4" autoplay loop muted playsinline></video> |
+| `agit observe` | <video src="docs/vhs/images/observe.mp4" autoplay loop muted playsinline></video> |
+| `agit uninstall` | <video src="docs/vhs/images/uninstall.mp4" autoplay loop muted playsinline></video> |
+| `agit doctor` | <video src="docs/vhs/images/doctor.mp4" autoplay loop muted playsinline></video> |
+| `agit fsck` | <video src="docs/vhs/images/fsck.mp4" autoplay loop muted playsinline></video> |
+| `agit gc` | <video src="docs/vhs/images/gc.mp4" autoplay loop muted playsinline></video> |
+| `agit push` | <video src="docs/vhs/images/push.mp4" autoplay loop muted playsinline></video> |
+| `agit pull` | <video src="docs/vhs/images/pull.mp4" autoplay loop muted playsinline></video> |
+| `agit export` | <video src="docs/vhs/images/export.mp4" autoplay loop muted playsinline></video> |
+| `agit import` | <video src="docs/vhs/images/import.mp4" autoplay loop muted playsinline></video> |
+| `agit status` | <video src="docs/vhs/images/status.mp4" autoplay loop muted playsinline></video> |
+| `agit timeline` | <video src="docs/vhs/images/timeline.mp4" autoplay loop muted playsinline></video> |
+| `agit eval` | <video src="docs/vhs/images/eval.mp4" autoplay loop muted playsinline></video> |
+| `agit sessions` | <video src="docs/vhs/images/sessions.mp4" autoplay loop muted playsinline></video> |
+| `agit log` | <video src="docs/vhs/images/log.mp4" autoplay loop muted playsinline></video> |
+| `agit restore` | <video src="docs/vhs/images/restore.mp4" autoplay loop muted playsinline></video> |
+| `agit show` | <video src="docs/vhs/images/show.mp4" autoplay loop muted playsinline></video> |
+| `agit diff` | <video src="docs/vhs/images/diff.mp4" autoplay loop muted playsinline></video> |
+| `agit between` | <video src="docs/vhs/images/between.mp4" autoplay loop muted playsinline></video> |
+| `agit recall` | <video src="docs/vhs/images/recall.mp4" autoplay loop muted playsinline></video> |
+| `agit grep` | <video src="docs/vhs/images/grep.mp4" autoplay loop muted playsinline></video> |
+| `agit blame` | <video src="docs/vhs/images/blame.mp4" autoplay loop muted playsinline></video> |
+| `agit watch` | <video src="docs/vhs/images/watch.mp4" autoplay loop muted playsinline></video> |
+| `agit stats` | <video src="docs/vhs/images/stats.mp4" autoplay loop muted playsinline></video> |
+| `agit cat` | <video src="docs/vhs/images/cat.mp4" autoplay loop muted playsinline></video> |
+| `agit privacy scan` | <video src="docs/vhs/images/privacy.mp4" autoplay loop muted playsinline></video> |
+| `agit reindex` | <video src="docs/vhs/images/reindex.mp4" autoplay loop muted playsinline></video> |
+| `agit version` | <video src="docs/vhs/images/version.mp4" autoplay loop muted playsinline></video> |
+| `agit completion` | <video src="docs/vhs/images/completion.mp4" autoplay loop muted playsinline></video> |
 
 ### Regenerating command VHS demos
 
