@@ -10,6 +10,8 @@ Type "source ./docs/vhs/runtime.env"
 Enter
 Type "cd $AGIT_REPO_PATH"
 Enter
+Type "clear"
+Enter
 Sleep 500ms
 Show
 Type "agit completion bash | sed -n '1,20p'"
