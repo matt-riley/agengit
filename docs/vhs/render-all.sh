@@ -31,7 +31,7 @@ mkdir -p "$TAPES_DIR" "$IMAGES_DIR"
 rm -f "$TAPES_DIR"/*.tape "$IMAGES_DIR"/*.gif "$IMAGES_DIR"/*.mp4
 cd "$ROOT"
 
-while IFS=$'\t' read -r slug command mode; do
+while IFS=$'\t' read -r slug command mode setup; do
   [[ -z "${slug:-}" ]] && continue
 
   tape_file="$TAPES_DIR/$slug.tape"
@@ -50,6 +50,19 @@ Type "source $RUNTIME_FILE"
 Enter
 Type "cd \$AGIT_REPO_PATH"
 Enter
+EOF
+
+  # Optional hidden setup: commands (4th column, ';;' separated) run before the
+  # clear so they don't appear in the recording but seed any required state.
+  if [[ -n "${setup:-}" ]]; then
+    IFS=$'\n' read -r -d '' -a _setup_cmds <<< "${setup//;;/$'\n'}" || true
+    for _cmd in "${_setup_cmds[@]}"; do
+      [[ -z "$_cmd" ]] && continue
+      printf 'Type "%s"\nEnter\nSleep 300ms\n' "$_cmd" >> "$tape_file"
+    done
+  fi
+
+  cat >> "$tape_file" <<EOF
 Type "clear"
 Enter
 Sleep 500ms

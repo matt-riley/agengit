@@ -14,7 +14,7 @@ Type "clear"
 Enter
 Sleep 500ms
 Show
-Type "agit log $AGIT_SESSION_ID"
+Type "agit log $AGIT_LOG_SESSION_ID"
 Sleep 500ms
 Enter
 Sleep 3s

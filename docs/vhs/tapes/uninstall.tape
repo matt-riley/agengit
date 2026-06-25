@@ -8,8 +8,11 @@ Set TypingSpeed 65ms
 Hide
 Type "source ./docs/vhs/runtime.env"
 Enter
-Type "cd $AGIT_REPO_PATH"
+Type "cd \$AGIT_REPO_PATH"
 Enter
+Type "agit init"
+Enter
+Sleep 300ms
 Type "clear"
 Enter
 Sleep 500ms
