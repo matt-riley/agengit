@@ -3,7 +3,7 @@ doctor	agit doctor	normal
 status	agit status	normal
 timeline	agit timeline --limit 5	normal
 sessions	agit sessions	normal
-log	agit log $AGIT_SESSION_ID	normal
+log	agit log $AGIT_LOG_SESSION_ID	normal
 show	agit show $AGIT_STEP_HASH	normal
 diff	agit diff $AGIT_STEP_HASH	normal
 between	agit between $AGIT_COMMIT_FROM $AGIT_COMMIT_TO	normal
@@ -26,4 +26,4 @@ export	agit export $AGIT_BUNDLE_PATH	normal
 import	agit import $AGIT_BUNDLE_PATH	normal
 push	agit push	normal
 pull	agit pull	normal
-uninstall	agit uninstall	normal
+uninstall	agit uninstall	normal	agit init

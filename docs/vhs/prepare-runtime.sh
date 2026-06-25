@@ -59,6 +59,14 @@ printf '%s\n' "$USER_PAYLOAD" | HOME="$WORKSPACE/home" "$BIN" codex-hook >/dev/n
 printf "hello from model" > notes.txt
 printf '%s\n' "$STOP_PAYLOAD" | HOME="$WORKSPACE/home" "$BIN" codex-hook >/dev/null
 
+# Create a dedicated, stable session for the `agit log` demo so it can be
+# logged without depending on cross-tape shell state.
+LOG_DEMO_PAYLOAD="$(jq -nc --arg cwd "$WORKSPACE/repo" '{"session_id":"demo-sess","turn_id":"turn-log","cwd":$cwd,"hook_event_name":"UserPromptSubmit","model":"gpt-5-codex","prompt":"Show the agit log demo"}')"
+LOG_DEMO_STOP="$(jq -nc --arg cwd "$WORKSPACE/repo" '{"session_id":"demo-sess","turn_id":"turn-log","cwd":$cwd,"hook_event_name":"Stop","model":"gpt-5-codex","last_assistant_message":"Demo session complete"}')"
+printf '%s\n' "$LOG_DEMO_PAYLOAD" | HOME="$WORKSPACE/home" "$BIN" codex-hook >/dev/null
+printf '%s\n' "$LOG_DEMO_STOP" | HOME="$WORKSPACE/home" "$BIN" codex-hook >/dev/null
+LOG_SESSION_ID="codex/demo-sess"
+
 SESSION_ID="codex/sess-a"
 STEP_HASH="$(HOME="$WORKSPACE/home" "$BIN" log --json "$SESSION_ID" | jq -r '.data.steps[0].hash' | head -n 1)"
 
@@ -121,6 +129,7 @@ export HOME="$WORKSPACE/home"
 export AGIT_REPO_PATH="$WORKSPACE/repo"
 export AGIT_HOME="$WORKSPACE/home"
 export AGIT_SESSION_ID="$SESSION_ID"
+export AGIT_LOG_SESSION_ID="$LOG_SESSION_ID"
 export AGIT_STEP_HASH="$STEP_HASH"
 export AGIT_COMMIT_FROM="$COMMIT_FROM"
 export AGIT_COMMIT_TO="$COMMIT_TO"
