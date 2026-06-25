@@ -156,6 +156,10 @@ fn scanObjects(
 
     while (try walker.next(io)) |entry| {
         if (entry.kind != .file) continue;
+        // Loose objects live strictly under <2-hex-shard>/<62-hex>. The pack/
+        // subtree holds compacted .pack files handled by scanPackedObjects;
+        // skip it here so its non-shard layout isn't flagged as corruption.
+        if (std.mem.startsWith(u8, entry.path, "pack/")) continue;
         stats.object_files += 1;
 
         if (entry.path.len != 65 or entry.path[2] != '/') {
