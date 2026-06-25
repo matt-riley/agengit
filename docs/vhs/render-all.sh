@@ -28,30 +28,31 @@ cleanup_fake_s3() {
 trap cleanup_fake_s3 EXIT
 
 mkdir -p "$TAPES_DIR" "$IMAGES_DIR"
-rm -f "$TAPES_DIR"/*.tape "$IMAGES_DIR"/*.gif
+rm -f "$TAPES_DIR"/*.tape "$IMAGES_DIR"/*.gif "$IMAGES_DIR"/*.mp4
 cd "$ROOT"
 
 while IFS=$'\t' read -r slug command mode; do
   [[ -z "${slug:-}" ]] && continue
 
   tape_file="$TAPES_DIR/$slug.tape"
-  image_file="./docs/vhs/images/$slug.gif"
+  video_file="./docs/vhs/images/$slug.mp4"
 
   cat > "$tape_file" <<EOF
-Output "$image_file"
+Output "$video_file"
 Set Shell "bash"
 Set Width 1200
 Set Height 720
 Set FontSize 16
 Set TypingSpeed 65ms
 
+Hide
 Type "source $RUNTIME_FILE"
 Enter
-Sleep 800ms
 Type "cd \$AGIT_REPO_PATH"
 Enter
-Sleep 700ms
-Type "HOME=\$AGIT_HOME $command"
+Sleep 500ms
+Show
+Type "$command"
 Sleep 500ms
 Enter
 EOF
@@ -75,4 +76,4 @@ done < "$COMMANDS_FILE"
 cleanup_fake_s3
 trap - EXIT
 
-echo "Rendered $(ls -1 "$IMAGES_DIR"/*.gif | wc -l | tr -d ' ') GIFs to $IMAGES_DIR"
+echo "Rendered $(ls -1 "$IMAGES_DIR"/*.mp4 | wc -l | tr -d ' ') videos to $IMAGES_DIR"

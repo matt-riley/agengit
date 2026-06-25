@@ -1,17 +1,18 @@
-Output "./docs/vhs/images/eval.gif"
+Output "./docs/vhs/images/eval.mp4"
 Set Shell "bash"
 Set Width 1200
 Set Height 720
 Set FontSize 16
 Set TypingSpeed 65ms
 
+Hide
 Type "source ./docs/vhs/runtime.env"
 Enter
-Sleep 800ms
 Type "cd $AGIT_REPO_PATH"
 Enter
-Sleep 700ms
-Type "HOME=$AGIT_HOME $AGIT_BIN eval | sed -n '1,30p'"
+Sleep 500ms
+Show
+Type "agit eval | sed -n '1,30p'"
 Sleep 500ms
 Enter
 Sleep 3s

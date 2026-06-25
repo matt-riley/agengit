@@ -306,6 +306,10 @@ fn readFileAllocOrNull(io: std.Io, gpa: std.mem.Allocator, path: []const u8) !?[
 
 fn loadLatestCapture(gpa: std.mem.Allocator, store: *store_mod.Store) !?LatestCapture {
     const row = try store.index.mostRecentStep(gpa) orelse return null;
+    // LatestCapture keeps only a subset of TimelineRow; free the fields it
+    // drops (model, preview) so the dupes from mostRecentStep don't leak.
+    if (row.model) |m| gpa.free(m);
+    if (row.preview) |p| gpa.free(p);
     return .{
         .hash = row.hash,
         .origin = row.origin,
