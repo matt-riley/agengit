@@ -397,35 +397,35 @@ agit completion bash
 
 | Command | Demo |
 |---|---|
-| `agit init` | <video src="docs/vhs/images/init.mp4?v3" autoplay loop muted playsinline></video> |
-| `agit observe` | <video src="docs/vhs/images/observe.mp4?v3" autoplay loop muted playsinline></video> |
-| `agit uninstall` | <video src="docs/vhs/images/uninstall.mp4?v3" autoplay loop muted playsinline></video> |
-| `agit doctor` | <video src="docs/vhs/images/doctor.mp4?v3" autoplay loop muted playsinline></video> |
-| `agit fsck` | <video src="docs/vhs/images/fsck.mp4?v3" autoplay loop muted playsinline></video> |
-| `agit gc` | <video src="docs/vhs/images/gc.mp4?v3" autoplay loop muted playsinline></video> |
-| `agit push` | <video src="docs/vhs/images/push.mp4?v3" autoplay loop muted playsinline></video> |
-| `agit pull` | <video src="docs/vhs/images/pull.mp4?v3" autoplay loop muted playsinline></video> |
-| `agit export` | <video src="docs/vhs/images/export.mp4?v3" autoplay loop muted playsinline></video> |
-| `agit import` | <video src="docs/vhs/images/import.mp4?v3" autoplay loop muted playsinline></video> |
-| `agit status` | <video src="docs/vhs/images/status.mp4?v3" autoplay loop muted playsinline></video> |
-| `agit timeline` | <video src="docs/vhs/images/timeline.mp4?v3" autoplay loop muted playsinline></video> |
-| `agit eval` | <video src="docs/vhs/images/eval.mp4?v3" autoplay loop muted playsinline></video> |
-| `agit sessions` | <video src="docs/vhs/images/sessions.mp4?v3" autoplay loop muted playsinline></video> |
-| `agit log` | <video src="docs/vhs/images/log.mp4?v3" autoplay loop muted playsinline></video> |
-| `agit restore` | <video src="docs/vhs/images/restore.mp4?v3" autoplay loop muted playsinline></video> |
-| `agit show` | <video src="docs/vhs/images/show.mp4?v3" autoplay loop muted playsinline></video> |
-| `agit diff` | <video src="docs/vhs/images/diff.mp4?v3" autoplay loop muted playsinline></video> |
-| `agit between` | <video src="docs/vhs/images/between.mp4?v3" autoplay loop muted playsinline></video> |
-| `agit recall` | <video src="docs/vhs/images/recall.mp4?v3" autoplay loop muted playsinline></video> |
-| `agit grep` | <video src="docs/vhs/images/grep.mp4?v3" autoplay loop muted playsinline></video> |
-| `agit blame` | <video src="docs/vhs/images/blame.mp4?v3" autoplay loop muted playsinline></video> |
-| `agit watch` | <video src="docs/vhs/images/watch.mp4?v3" autoplay loop muted playsinline></video> |
-| `agit stats` | <video src="docs/vhs/images/stats.mp4?v3" autoplay loop muted playsinline></video> |
-| `agit cat` | <video src="docs/vhs/images/cat.mp4?v3" autoplay loop muted playsinline></video> |
-| `agit privacy scan` | <video src="docs/vhs/images/privacy.mp4?v3" autoplay loop muted playsinline></video> |
-| `agit reindex` | <video src="docs/vhs/images/reindex.mp4?v3" autoplay loop muted playsinline></video> |
-| `agit version` | <video src="docs/vhs/images/version.mp4?v3" autoplay loop muted playsinline></video> |
-| `agit completion` | <video src="docs/vhs/images/completion.mp4?v3" autoplay loop muted playsinline></video> |
+| `agit init` | <video src="docs/vhs/images/init.mp4" autoplay loop muted playsinline></video> |
+| `agit observe` | <video src="docs/vhs/images/observe.mp4" autoplay loop muted playsinline></video> |
+| `agit uninstall` | <video src="docs/vhs/images/uninstall.mp4" autoplay loop muted playsinline></video> |
+| `agit doctor` | <video src="docs/vhs/images/doctor.mp4" autoplay loop muted playsinline></video> |
+| `agit fsck` | <video src="docs/vhs/images/fsck.mp4" autoplay loop muted playsinline></video> |
+| `agit gc` | <video src="docs/vhs/images/gc.mp4" autoplay loop muted playsinline></video> |
+| `agit push` | <video src="docs/vhs/images/push.mp4" autoplay loop muted playsinline></video> |
+| `agit pull` | <video src="docs/vhs/images/pull.mp4" autoplay loop muted playsinline></video> |
+| `agit export` | <video src="docs/vhs/images/export.mp4" autoplay loop muted playsinline></video> |
+| `agit import` | <video src="docs/vhs/images/import.mp4" autoplay loop muted playsinline></video> |
+| `agit status` | <video src="docs/vhs/images/status.mp4" autoplay loop muted playsinline></video> |
+| `agit timeline` | <video src="docs/vhs/images/timeline.mp4" autoplay loop muted playsinline></video> |
+| `agit eval` | <video src="docs/vhs/images/eval.mp4" autoplay loop muted playsinline></video> |
+| `agit sessions` | <video src="docs/vhs/images/sessions.mp4" autoplay loop muted playsinline></video> |
+| `agit log` | <video src="docs/vhs/images/log.mp4" autoplay loop muted playsinline></video> |
+| `agit restore` | <video src="docs/vhs/images/restore.mp4" autoplay loop muted playsinline></video> |
+| `agit show` | <video src="docs/vhs/images/show.mp4" autoplay loop muted playsinline></video> |
+| `agit diff` | <video src="docs/vhs/images/diff.mp4" autoplay loop muted playsinline></video> |
+| `agit between` | <video src="docs/vhs/images/between.mp4" autoplay loop muted playsinline></video> |
+| `agit recall` | <video src="docs/vhs/images/recall.mp4" autoplay loop muted playsinline></video> |
+| `agit grep` | <video src="docs/vhs/images/grep.mp4" autoplay loop muted playsinline></video> |
+| `agit blame` | <video src="docs/vhs/images/blame.mp4" autoplay loop muted playsinline></video> |
+| `agit watch` | <video src="docs/vhs/images/watch.mp4" autoplay loop muted playsinline></video> |
+| `agit stats` | <video src="docs/vhs/images/stats.mp4" autoplay loop muted playsinline></video> |
+| `agit cat` | <video src="docs/vhs/images/cat.mp4" autoplay loop muted playsinline></video> |
+| `agit privacy scan` | <video src="docs/vhs/images/privacy.mp4" autoplay loop muted playsinline></video> |
+| `agit reindex` | <video src="docs/vhs/images/reindex.mp4" autoplay loop muted playsinline></video> |
+| `agit version` | <video src="docs/vhs/images/version.mp4" autoplay loop muted playsinline></video> |
+| `agit completion` | <video src="docs/vhs/images/completion.mp4" autoplay loop muted playsinline></video> |
 
 ### Regenerating command VHS demos
 

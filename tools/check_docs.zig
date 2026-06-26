@@ -373,6 +373,10 @@ fn extractMarkdownTarget(raw: []const u8) ?[]const u8 {
 }
 
 fn classifyLink(target: []const u8) ?LinkKind {
+    if (target.len > 0 and target[0] == '/') return null;
+    const tag_name_end = std.mem.indexOfAny(u8, target, " \t/>") orelse target.len;
+    const tag_name = target[0..tag_name_end];
+    if (std.mem.eql(u8, tag_name, "video") or std.mem.eql(u8, tag_name, "source")) return null;
     if (std.mem.startsWith(u8, target, "mailto:")) return .mailto;
     if (std.mem.startsWith(u8, target, "http://") or std.mem.startsWith(u8, target, "https://")) return .external;
     if (target.len == 0) return null;
