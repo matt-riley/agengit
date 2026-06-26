@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.25.1](https://github.com/matt-riley/agengit/compare/v1.25.0...v1.25.1) (2026-06-26)
+
+
+### Bug Fixes
+
+* ignore video links in docs checker ([3bb854d](https://github.com/matt-riley/agengit/commit/3bb854d3f7670ab8f2d2ff8fde4fd5f878e0b204))
+
 ## [1.25.0](https://github.com/matt-riley/agengit/compare/v1.24.0...v1.25.0) (2026-06-26)
 
 
