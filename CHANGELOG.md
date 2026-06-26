@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.25.0](https://github.com/matt-riley/agengit/compare/v1.24.0...v1.25.0) (2026-06-26)
+
+
+### Features
+
+* show agent and model in blame output ([086865c](https://github.com/matt-riley/agengit/commit/086865cc8182f1e591dd2f54ea7c65a7fd9a86f3))
+* switch VHS demos from gif to mp4, fix agit status leak ([cd1e597](https://github.com/matt-riley/agengit/commit/cd1e597af762a2465e152b2711b81f43a71a1611))
+
+
+### Bug Fixes
+
+* hide VHS setup (source/cd) from demo videos ([0306e7c](https://github.com/matt-riley/agengit/commit/0306e7c1ab9e6ba3e62c8534fb6b866d70a54b60))
+* make blame VHS show agent and model attribution ([c665187](https://github.com/matt-riley/agengit/commit/c6651870357fe8a155ad13a80d26dfb9b8ad6940))
+* re-render log.mp4 (was showing 'session not found') ([10f399d](https://github.com/matt-riley/agengit/commit/10f399dbaef23492bea116b178c4e58b510c22ce))
+* regenerate VHS demo gifs without error messages ([2689822](https://github.com/matt-riley/agengit/commit/268982295b083e432bebdbab299f897057acf950))
+* remove absolute paths from VHS tapes ([1441845](https://github.com/matt-riley/agengit/commit/1441845d9a895e87f78ef91327186c5d4e9b9aa8))
+* repair log and uninstall demo videos ([4720794](https://github.com/matt-riley/agengit/commit/47207944e243dabf0023e1b5683ea8991dec4db7))
+* update blame.gif to show help text (fixture lacks blame data) ([13784b9](https://github.com/matt-riley/agengit/commit/13784b9ba12af443c832d126d3903a3196710ed1))
+* use absolute path for runtime.env in VHS tapes ([22b31c4](https://github.com/matt-riley/agengit/commit/22b31c42878faa8f4fb206ab3906962ef3eee332))
+
 ## [1.24.0](https://github.com/matt-riley/agengit/compare/v1.23.0...v1.24.0) (2026-06-21)
 
 
