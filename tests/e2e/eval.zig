@@ -332,6 +332,43 @@ test "eval/json includes per-step signals with --include-steps" {
     try std.testing.expect(second_signals.get("error_results").?.integer >= 1);
 }
 
+test "eval/json backward-compat: without --include-steps step_assessments is empty" {
+    var sandbox = try harness.Sandbox.init(std.testing.allocator);
+    defer sandbox.deinit();
+
+    try sandbox.writeRepoFile(".agit/.keep", "");
+    try recordCodexTurn(
+        &sandbox,
+        "eval-compat",
+        "turn-1",
+        "Add a feature and test it",
+        "bash",
+        "zig build test",
+        "All tests passed",
+        "Added the feature and verified with tests.",
+    );
+
+    var result = try sandbox.run(&.{ "eval", "--json", "--session", "codex/eval-compat", "--no-lookahead" }, null);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(u8, 0), result.exit_code);
+
+    var parsed = try parseJson(result.stdout);
+    defer parsed.deinit();
+    try expectEnvelope(parsed.value, "eval");
+
+    const data = parsed.value.object.get("data").?.object;
+    // Without --include-steps, step_assessments must be an empty array.
+    const step_assessments = data.get("step_assessments").?.array.items;
+    try std.testing.expectEqual(@as(usize, 0), step_assessments.len);
+
+    // All standard eval fields must still be present.
+    try std.testing.expect(data.get("eval_hash") != null);
+    try std.testing.expect(data.get("in_scope_assessment") != null);
+    try std.testing.expect(data.get("follow_up_assessment") != null);
+    try std.testing.expect(data.get("current_assessment") != null);
+    try std.testing.expect(data.get("scope") != null);
+}
+
 test "eval/json --list returns stored evaluations" {
     var sandbox = try harness.Sandbox.init(std.testing.allocator);
     defer sandbox.deinit();
@@ -370,6 +407,48 @@ test "eval/json --list returns stored evaluations" {
     try std.testing.expectEqual(@as(usize, 64), first_eval.get("eval_hash").?.string.len);
     try std.testing.expectEqualStrings("session", first_eval.get("scope_type").?.string);
     try std.testing.expectEqualStrings("codex/eval-list", first_eval.get("scope_key").?.string);
+}
+
+test "eval/json --list --origin filters by agent origin" {
+    var sandbox = try harness.Sandbox.init(std.testing.allocator);
+    defer sandbox.deinit();
+
+    try sandbox.writeRepoFile(".agit/.keep", "");
+    // Record a session that will be evaluated (origin: codex).
+    try recordCodexTurn(
+        &sandbox,
+        "eval-origin-a",
+        "turn-1",
+        "Add a feature and test it",
+        "bash",
+        "zig build test",
+        "All tests passed",
+        "Feature added and tested.",
+    );
+
+    // Run eval to persist a codex-scoped evaluation.
+    var eval_a = try sandbox.run(&.{ "eval", "--json", "--session", "codex/eval-origin-a", "--no-lookahead" }, null);
+    defer eval_a.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(u8, 0), eval_a.exit_code);
+
+    // List with --origin codex filter.
+    var result = try sandbox.run(&.{ "eval", "--json", "--list", "--origin", "codex" }, null);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(u8, 0), result.exit_code);
+
+    var parsed = try parseJson(result.stdout);
+    defer parsed.deinit();
+    try expectEnvelope(parsed.value, "eval");
+
+    const data = parsed.value.object.get("data").?.object;
+    const evals = data.get("evals").?.array.items;
+    try std.testing.expect(evals.len >= 1);
+
+    // Every returned eval must have a scope_key starting with codex/.
+    for (evals) |eval_val| {
+        const scope_key = eval_val.object.get("scope_key").?.string;
+        try std.testing.expect(std.mem.startsWith(u8, scope_key, "codex/"));
+    }
 }
 
 fn recordCodexTurn(

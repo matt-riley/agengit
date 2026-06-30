@@ -84,6 +84,90 @@ test "steps/json includes step objects with --include-step-objects" {
     _ = diff.get("changes").?.array;
 }
 
+test "steps/json --no-diffs omits diff when flag is set" {
+    var sandbox = try harness.Sandbox.init(std.testing.allocator);
+    defer sandbox.deinit();
+
+    try sandbox.writeRepoFile(".agit/.keep", "");
+    try recordCodexTurn(
+        &sandbox,
+        "steps-nodiff",
+        "turn-1",
+        "Add a feature and test it",
+        "bash",
+        "echo hello",
+        "hello",
+        "Done.",
+    );
+
+    // --include-step-objects with --no-diffs: step present, diff should be null.
+    var result = try sandbox.run(&.{ "steps", "--json", "--include-step-objects", "--no-diffs", "steps-nodiff" }, null);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(u8, 0), result.exit_code);
+
+    var parsed = try parseJson(result.stdout);
+    defer parsed.deinit();
+    try expectEnvelope(parsed.value, "steps");
+
+    const data = parsed.value.object.get("data").?.object;
+    const steps = data.get("steps").?.array.items;
+    try std.testing.expectEqual(@as(usize, 1), steps.len);
+
+    const step = steps[0].object;
+    // step object should be present (--include-step-objects is set).
+    try std.testing.expect(step.get("step") != null);
+    // diff should be null because --no-diffs suppresses diff computation.
+    try std.testing.expect(step.get("diff") != null);
+    try std.testing.expect(step.get("diff").? == .null);
+}
+
+test "steps/json returns multiple steps ordered by timestamp" {
+    var sandbox = try harness.Sandbox.init(std.testing.allocator);
+    defer sandbox.deinit();
+
+    try sandbox.writeRepoFile(".agit/.keep", "");
+    try recordCodexTurn(
+        &sandbox,
+        "steps-multi",
+        "turn-1",
+        "First task",
+        "bash",
+        "echo one",
+        "one",
+        "First done.",
+    );
+    try recordCodexTurn(
+        &sandbox,
+        "steps-multi",
+        "turn-2",
+        "Second task",
+        "bash",
+        "echo two",
+        "two",
+        "Second done.",
+    );
+
+    var result = try sandbox.run(&.{ "steps", "--json", "steps-multi" }, null);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(u8, 0), result.exit_code);
+
+    var parsed = try parseJson(result.stdout);
+    defer parsed.deinit();
+    try expectEnvelope(parsed.value, "steps");
+
+    const data = parsed.value.object.get("data").?.object;
+    const steps = data.get("steps").?.array.items;
+    try std.testing.expectEqual(@as(usize, 2), steps.len);
+
+    // Steps should be ordered by timestamp ascending.
+    const ts1 = steps[0].object.get("timestamp").?.integer;
+    const ts2 = steps[1].object.get("timestamp").?.integer;
+    try std.testing.expect(ts1 <= ts2);
+    // Turn IDs should be in order.
+    try std.testing.expectEqualStrings("turn-1", steps[0].object.get("turn_id").?.string);
+    try std.testing.expectEqualStrings("turn-2", steps[1].object.get("turn_id").?.string);
+}
+
 fn recordCodexTurn(
     sandbox: *harness.Sandbox,
     session_id: []const u8,

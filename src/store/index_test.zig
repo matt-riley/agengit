@@ -7,6 +7,10 @@ const freeSessionStatsRows = index_mod.freeSessionStatsRows;
 const freeToolCountRows = index_mod.freeToolCountRows;
 const freeStepRows = index_mod.freeStepRows;
 const freeSearchRows = index_mod.freeSearchRows;
+const freeEvalSummaryRows = index_mod.Index.freeEvalSummaryRows;
+const EvalSummaryRow = index_mod.Index.EvalSummaryRow;
+const StepRow = index_mod.StepRow;
+const freeStepRow = index_mod.freeStepRow;
 
 test "index open and migrate" {
     var tmp = std.testing.tmpDir(.{});
@@ -644,4 +648,367 @@ test "migration 6 backfills search entries for existing indexes" {
     defer freeSearchRows(gpa, rows);
 
     try std.testing.expectEqual(@as(usize, 3), rows.len);
+}
+
+// ── listEvaluations unit tests ─────────────────────────────────────────────
+// These cover the new `listEvaluations` function, which is the storage-layer
+// backing for `agit eval --list --json`. They exercise the SQL query, origin
+// filter, session-id filter, ordering, and the empty-store edge case.
+
+/// Helper: open a migrated index in a tmp dir, with stable db_path buffers.
+/// Uses two separate path buffers to avoid @memcpy aliasing between realPath
+/// output and bufPrintZ input.
+fn openTestIndex(realpath_buf: *[std.fs.max_path_bytes]u8, db_path_buf: *[std.fs.max_path_bytes + 12]u8, tmp: *std.testing.TmpDir) !Index {
+    const io = std.testing.io;
+    const n = try tmp.dir.realPath(io, realpath_buf);
+    const db_path = try std.fmt.bufPrintZ(db_path_buf, "{s}/index.db", .{realpath_buf[0..n]});
+    const idx = try Index.open(db_path);
+    try idx.migrate();
+    return idx;
+}
+
+test "listEvaluations returns empty when no evals stored" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var realpath_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var db_path_buf: [std.fs.max_path_bytes + 12]u8 = undefined;
+    const idx = try openTestIndex(&realpath_buf, &db_path_buf, &tmp);
+    defer idx.close();
+
+    const rows = try idx.listEvaluations(std.testing.allocator, null, null, 100);
+    defer freeEvalSummaryRows(std.testing.allocator, rows);
+
+    try std.testing.expectEqual(@as(usize, 0), rows.len);
+}
+
+test "listEvaluations returns evals most recent first" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var realpath_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var db_path_buf: [std.fs.max_path_bytes + 12]u8 = undefined;
+    const idx = try openTestIndex(&realpath_buf, &db_path_buf, &tmp);
+    defer idx.close();
+
+    try idx.insertEvaluation("a" ** 64, "session", "codex/s1", "good", "e" ** 64, 1000);
+    try idx.insertEvaluation("b" ** 64, "session", "codex/s2", "bad", "f" ** 64, 3000);
+    try idx.insertEvaluation("c" ** 64, "session", "codex/s3", "mixed", "g" ** 64, 2000);
+
+    const rows = try idx.listEvaluations(std.testing.allocator, null, null, 100);
+    defer freeEvalSummaryRows(std.testing.allocator, rows);
+
+    try std.testing.expectEqual(@as(usize, 3), rows.len);
+    // Most recent first: b(3000) > c(2000) > a(1000).
+    try std.testing.expectEqualStrings("b" ** 64, rows[0].eval_hash);
+    try std.testing.expectEqualStrings("codex/s2", rows[0].scope_key);
+    try std.testing.expectEqualStrings("bad", rows[0].classification);
+    try std.testing.expectEqual(@as(i64, 3000), rows[0].evaluated_at);
+
+    try std.testing.expectEqualStrings("c" ** 64, rows[1].eval_hash);
+    try std.testing.expectEqualStrings("mixed", rows[1].classification);
+
+    try std.testing.expectEqualStrings("a" ** 64, rows[2].eval_hash);
+    try std.testing.expectEqualStrings("good", rows[2].classification);
+}
+
+test "listEvaluations filters by origin (scope_key prefix)" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var realpath_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var db_path_buf: [std.fs.max_path_bytes + 12]u8 = undefined;
+    const idx = try openTestIndex(&realpath_buf, &db_path_buf, &tmp);
+    defer idx.close();
+
+    try idx.insertEvaluation("a" ** 64, "session", "codex/s1", "good", "e" ** 64, 1000);
+    try idx.insertEvaluation("b" ** 64, "session", "claude/s2", "bad", "f" ** 64, 2000);
+    try idx.insertEvaluation("c" ** 64, "session", "codex/s3", "mixed", "g" ** 64, 3000);
+
+    const rows = try idx.listEvaluations(std.testing.allocator, "codex", null, 100);
+    defer freeEvalSummaryRows(std.testing.allocator, rows);
+
+    // Only codex-origin evals (scope_key starts with "codex/") should match.
+    try std.testing.expectEqual(@as(usize, 2), rows.len);
+    try std.testing.expectEqualStrings("c" ** 64, rows[0].eval_hash);
+    try std.testing.expectEqualStrings("codex/s3", rows[0].scope_key);
+    try std.testing.expectEqualStrings("a" ** 64, rows[1].eval_hash);
+    try std.testing.expectEqualStrings("codex/s1", rows[1].scope_key);
+}
+
+test "listEvaluations filters by session scope_key" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var realpath_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var db_path_buf: [std.fs.max_path_bytes + 12]u8 = undefined;
+    const idx = try openTestIndex(&realpath_buf, &db_path_buf, &tmp);
+    defer idx.close();
+
+    try idx.insertEvaluation("a" ** 64, "session", "codex/s1", "good", "e" ** 64, 1000);
+    try idx.insertEvaluation("b" ** 64, "session", "codex/s2", "bad", "f" ** 64, 2000);
+    try idx.insertEvaluation("c" ** 64, "session", "codex/s1", "mixed", "g" ** 64, 3000);
+
+    // The session_id parameter matches against scope_key directly (which is
+    // "origin/session_id" for session-scoped evals).
+    const rows = try idx.listEvaluations(std.testing.allocator, null, "codex/s1", 100);
+    defer freeEvalSummaryRows(std.testing.allocator, rows);
+
+    try std.testing.expectEqual(@as(usize, 2), rows.len);
+    try std.testing.expectEqualStrings("c" ** 64, rows[0].eval_hash);
+    try std.testing.expectEqualStrings("codex/s1", rows[0].scope_key);
+    try std.testing.expectEqualStrings("a" ** 64, rows[1].eval_hash);
+}
+
+test "listEvaluations respects limit" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var realpath_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var db_path_buf: [std.fs.max_path_bytes + 12]u8 = undefined;
+    const idx = try openTestIndex(&realpath_buf, &db_path_buf, &tmp);
+    defer idx.close();
+
+    // Insert 5 evals with different hashes and increasing timestamps.
+    for (0..5) |i| {
+        var hash: [64]u8 = undefined;
+        @memset(&hash, @as(u8, 'a' + @as(u8, @intCast(i))));
+        try idx.insertEvaluation(&hash, "session", "codex/s1", "good", "e" ** 64, @as(i64, @intCast(i + 1)));
+    }
+
+    const rows = try idx.listEvaluations(std.testing.allocator, null, null, 3);
+    defer freeEvalSummaryRows(std.testing.allocator, rows);
+
+    try std.testing.expectEqual(@as(usize, 3), rows.len);
+}
+
+test "listEvaluations returns all fields" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var realpath_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var db_path_buf: [std.fs.max_path_bytes + 12]u8 = undefined;
+    const idx = try openTestIndex(&realpath_buf, &db_path_buf, &tmp);
+    defer idx.close();
+
+    try idx.insertEvaluation("a" ** 64, "session", "codex/s1", "good", "e" ** 64, 1000);
+
+    const rows = try idx.listEvaluations(std.testing.allocator, null, null, 100);
+    defer freeEvalSummaryRows(std.testing.allocator, rows);
+
+    try std.testing.expectEqual(@as(usize, 1), rows.len);
+    const r = rows[0];
+    try std.testing.expectEqualStrings("a" ** 64, r.eval_hash);
+    try std.testing.expectEqualStrings("session", r.scope_type);
+    try std.testing.expectEqualStrings("codex/s1", r.scope_key);
+    try std.testing.expectEqualStrings("good", r.classification);
+    try std.testing.expectEqualStrings("e" ** 64, r.captured_evidence_hash);
+    try std.testing.expectEqual(@as(i64, 1000), r.evaluated_at);
+}
+
+// ── StepRow new fields round-trip tests ─────────────────────────────────────
+// `listSteps` now SELECTs `model`, `outcome`, `git_commit`, `git_branch` from
+// the steps table. These tests verify all fields survive the insert+query
+// cycle and that nullable fields return null when absent.
+
+test "listSteps returns model, outcome, git_commit, git_branch fields" {
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var realpath_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var db_path_buf: [std.fs.max_path_bytes + 12]u8 = undefined;
+    const idx = try openTestIndex(&realpath_buf, &db_path_buf, &tmp);
+    defer idx.close();
+
+    try idx.upsertSession("codex", "s1", null);
+    try idx.insertStep(
+        "a" ** 64,
+        "codex",
+        "s1",
+        "turn-1",
+        null,
+        "b" ** 64,
+        1000,
+        "claude-sonnet-4",
+        "success",
+        "abc123",
+        "main",
+        true,
+        null,
+    );
+
+    const rows = try idx.listSteps(gpa, "codex", "s1");
+    defer freeStepRows(gpa, rows);
+
+    try std.testing.expectEqual(@as(usize, 1), rows.len);
+    const row = rows[0];
+    try std.testing.expectEqualStrings("a" ** 64, row.hash);
+    try std.testing.expectEqualStrings("turn-1", row.turn_id);
+    try std.testing.expectEqual(@as(i64, 1000), row.timestamp);
+    try std.testing.expectEqualStrings("claude-sonnet-4", row.model.?);
+    try std.testing.expectEqualStrings("success", row.outcome.?);
+    try std.testing.expectEqualStrings("abc123", row.git_commit.?);
+    try std.testing.expectEqualStrings("main", row.git_branch.?);
+    try std.testing.expectEqual(true, row.git_dirty.?);
+}
+
+test "listSteps returns null for nullable fields when not set" {
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var realpath_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var db_path_buf: [std.fs.max_path_bytes + 12]u8 = undefined;
+    const idx = try openTestIndex(&realpath_buf, &db_path_buf, &tmp);
+    defer idx.close();
+
+    try idx.upsertSession("codex", "s1", null);
+    try idx.insertStep(
+        "c" ** 64,
+        "codex",
+        "s1",
+        "turn-1",
+        null,
+        "d" ** 64,
+        2000,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+    );
+
+    const rows = try idx.listSteps(gpa, "codex", "s1");
+    defer freeStepRows(gpa, rows);
+
+    try std.testing.expectEqual(@as(usize, 1), rows.len);
+    try std.testing.expect(rows[0].model == null);
+    try std.testing.expect(rows[0].outcome == null);
+    try std.testing.expect(rows[0].git_commit == null);
+    try std.testing.expect(rows[0].git_branch == null);
+    try std.testing.expect(rows[0].git_dirty == null);
+}
+
+test "listSteps returns steps ordered by timestamp ascending" {
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var realpath_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var db_path_buf: [std.fs.max_path_bytes + 12]u8 = undefined;
+    const idx = try openTestIndex(&realpath_buf, &db_path_buf, &tmp);
+    defer idx.close();
+
+    try idx.upsertSession("codex", "s1", null);
+    // Insert out of order to verify sort.
+    try idx.insertStep("c" ** 64, "codex", "s1", "turn-3", "b" ** 64, "x" ** 64, 3000, null, null, null, null, null, null);
+    try idx.insertStep("a" ** 64, "codex", "s1", "turn-1", null, "y" ** 64, 1000, null, null, null, null, null, null);
+    try idx.insertStep("b" ** 64, "codex", "s1", "turn-2", "a" ** 64, "z" ** 64, 2000, null, null, null, null, null, null);
+
+    const rows = try idx.listSteps(gpa, "codex", "s1");
+    defer freeStepRows(gpa, rows);
+
+    try std.testing.expectEqual(@as(usize, 3), rows.len);
+    try std.testing.expectEqualStrings("a" ** 64, rows[0].hash);
+    try std.testing.expectEqualStrings("b" ** 64, rows[1].hash);
+    try std.testing.expectEqualStrings("c" ** 64, rows[2].hash);
+}
+
+test "listSteps returns empty slice for non-existent session" {
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var realpath_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var db_path_buf: [std.fs.max_path_bytes + 12]u8 = undefined;
+    const idx = try openTestIndex(&realpath_buf, &db_path_buf, &tmp);
+    defer idx.close();
+
+    try idx.upsertSession("codex", "s1", null);
+    // No steps inserted.
+
+    const rows = try idx.listSteps(gpa, "codex", "nonexistent");
+    defer freeStepRows(gpa, rows);
+
+    try std.testing.expectEqual(@as(usize, 0), rows.len);
+}
+
+// ── listEvaluations edge cases ──────────────────────────────────────────────
+
+test "listEvaluations: insertEvaluation deduplicates same hash (insert or ignore)" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var realpath_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var db_path_buf: [std.fs.max_path_bytes + 12]u8 = undefined;
+    const idx = try openTestIndex(&realpath_buf, &db_path_buf, &tmp);
+    defer idx.close();
+
+    // Insert the same eval hash twice with different classifications — only
+    // the first insert should succeed; the second is silently ignored.
+    try idx.insertEvaluation("a" ** 64, "session", "codex/s1", "good", "e" ** 64, 1000);
+    try idx.insertEvaluation("a" ** 64, "session", "codex/s1", "bad", "f" ** 64, 2000);
+
+    const rows = try idx.listEvaluations(std.testing.allocator, null, null, 100);
+    defer freeEvalSummaryRows(std.testing.allocator, rows);
+
+    try std.testing.expectEqual(@as(usize, 1), rows.len);
+    // The first insert wins (insert or ignore).
+    try std.testing.expectEqualStrings("good", rows[0].classification);
+    try std.testing.expectEqual(@as(i64, 1000), rows[0].evaluated_at);
+}
+
+test "listEvaluations: filtering by both origin and session_id returns intersection" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var realpath_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var db_path_buf: [std.fs.max_path_bytes + 12]u8 = undefined;
+    const idx = try openTestIndex(&realpath_buf, &db_path_buf, &tmp);
+    defer idx.close();
+
+    try idx.insertEvaluation("a" ** 64, "session", "codex/s1", "good", "e" ** 64, 1000);
+    try idx.insertEvaluation("b" ** 64, "session", "codex/s2", "bad", "f" ** 64, 2000);
+    try idx.insertEvaluation("c" ** 64, "session", "claude/s1", "mixed", "g" ** 64, 3000);
+
+    // origin=codex AND session_id=codex/s1 should return only the first eval.
+    const rows = try idx.listEvaluations(std.testing.allocator, "codex", "codex/s1", 100);
+    defer freeEvalSummaryRows(std.testing.allocator, rows);
+
+    try std.testing.expectEqual(@as(usize, 1), rows.len);
+    try std.testing.expectEqualStrings("a" ** 64, rows[0].eval_hash);
+}
+
+test "listEvaluations: origin filter only matches session-scoped evals" {
+    // Non-session evals (commit, range, window) have scope_type != 'session'.
+    // The origin filter uses scope_key LIKE 'origin/%' which only matches
+    // session-scoped evals. This test verifies commit-scoped evals are excluded.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var realpath_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var db_path_buf: [std.fs.max_path_bytes + 12]u8 = undefined;
+    const idx = try openTestIndex(&realpath_buf, &db_path_buf, &tmp);
+    defer idx.close();
+
+    // A commit-scoped eval with scope_key "abc123" (no origin/ prefix).
+    try idx.insertEvaluation("a" ** 64, "commit", "abc123", "good", "e" ** 64, 1000);
+    // A session-scoped eval with scope_key "codex/s1".
+    try idx.insertEvaluation("b" ** 64, "session", "codex/s1", "bad", "f" ** 64, 2000);
+
+    // Filter by origin=codex: only the session eval should match.
+    const rows = try idx.listEvaluations(std.testing.allocator, "codex", null, 100);
+    defer freeEvalSummaryRows(std.testing.allocator, rows);
+
+    try std.testing.expectEqual(@as(usize, 1), rows.len);
+    try std.testing.expectEqualStrings("session", rows[0].scope_type);
+    try std.testing.expectEqualStrings("b" ** 64, rows[0].eval_hash);
+
+    // Without origin filter, both should appear.
+    const all_rows = try idx.listEvaluations(std.testing.allocator, null, null, 100);
+    defer freeEvalSummaryRows(std.testing.allocator, all_rows);
+
+    try std.testing.expectEqual(@as(usize, 2), all_rows.len);
 }

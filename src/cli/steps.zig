@@ -240,3 +240,91 @@ fn parseOptions(iter: *std.process.Args.Iterator, stdout: *std.Io.File.Writer) !
     }
     return options;
 }
+
+// ── buildJsonChanges unit tests ───────────────────────────────────────────
+// `buildJsonChanges` converts internal ComparedEntry slices into JSON-friendly
+// JsonChange structs, filtering out unchanged entries. Each test verifies the
+// filtering and field-mapping logic.
+
+test "buildJsonChanges: empty input returns empty slice" {
+    const gpa = std.testing.allocator;
+    const entries: []const inspect_mod.ComparedEntry = &.{};
+    const result = try buildJsonChanges(gpa, entries);
+    defer gpa.free(result);
+    try std.testing.expectEqual(@as(usize, 0), result.len);
+}
+
+test "buildJsonChanges: filters out unchanged entries" {
+    const gpa = std.testing.allocator;
+    const old_entry = inspect_mod.ComparedEntry{
+        .kind = .unchanged,
+        .path = "keep.zig",
+        .old_entry = .{ .path = "keep.zig", .blob = "a" ** 64, .mode = "file", .size = 10 },
+        .new_entry = .{ .path = "keep.zig", .blob = "a" ** 64, .mode = "file", .size = 10 },
+    };
+    const added_entry = inspect_mod.ComparedEntry{
+        .kind = .added,
+        .path = "new.zig",
+        .new_entry = .{ .path = "new.zig", .blob = "b" ** 64, .mode = "file", .size = 20 },
+    };
+    const entries = [_]inspect_mod.ComparedEntry{ old_entry, added_entry };
+
+    const result = try buildJsonChanges(gpa, &entries);
+    defer gpa.free(result);
+
+    try std.testing.expectEqual(@as(usize, 1), result.len);
+    try std.testing.expectEqualStrings("added", result[0].kind);
+    try std.testing.expectEqualStrings("new.zig", result[0].path);
+    try std.testing.expect(result[0].old_blob == null);
+    try std.testing.expectEqualStrings("b" ** 64, result[0].new_blob.?);
+    try std.testing.expect(result[0].old_size == null);
+    try std.testing.expectEqual(@as(u64, 20), result[0].new_size.?);
+}
+
+test "buildJsonChanges: maps added, modified, and deleted entries correctly" {
+    const gpa = std.testing.allocator;
+    const entries = [_]inspect_mod.ComparedEntry{
+        .{
+            .kind = .added,
+            .path = "added.zig",
+            .new_entry = .{ .path = "added.zig", .blob = "b" ** 64, .mode = "file", .size = 5 },
+        },
+        .{
+            .kind = .modified,
+            .path = "mod.zig",
+            .old_entry = .{ .path = "mod.zig", .blob = "c" ** 64, .mode = "file", .size = 10 },
+            .new_entry = .{ .path = "mod.zig", .blob = "d" ** 64, .mode = "file", .size = 15 },
+        },
+        .{
+            .kind = .deleted,
+            .path = "del.zig",
+            .old_entry = .{ .path = "del.zig", .blob = "e" ** 64, .mode = "file", .size = 20 },
+        },
+    };
+
+    const result = try buildJsonChanges(gpa, &entries);
+    defer gpa.free(result);
+
+    try std.testing.expectEqual(@as(usize, 3), result.len);
+
+    // added
+    try std.testing.expectEqualStrings("added", result[0].kind);
+    try std.testing.expectEqualStrings("added.zig", result[0].path);
+    try std.testing.expect(result[0].old_blob == null);
+    try std.testing.expectEqualStrings("b" ** 64, result[0].new_blob.?);
+
+    // modified
+    try std.testing.expectEqualStrings("modified", result[1].kind);
+    try std.testing.expectEqualStrings("mod.zig", result[1].path);
+    try std.testing.expectEqualStrings("c" ** 64, result[1].old_blob.?);
+    try std.testing.expectEqualStrings("d" ** 64, result[1].new_blob.?);
+    try std.testing.expectEqual(@as(u64, 10), result[1].old_size.?);
+    try std.testing.expectEqual(@as(u64, 15), result[1].new_size.?);
+
+    // deleted
+    try std.testing.expectEqualStrings("deleted", result[2].kind);
+    try std.testing.expectEqualStrings("del.zig", result[2].path);
+    try std.testing.expectEqualStrings("e" ** 64, result[2].old_blob.?);
+    try std.testing.expect(result[2].new_blob == null);
+    try std.testing.expectEqual(@as(u64, 20), result[2].old_size.?);
+}
