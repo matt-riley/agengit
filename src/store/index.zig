@@ -740,16 +740,23 @@ pub const Index = struct {
             list.deinit(gpa);
         }
 
+        // Build an optional origin prefix for scope_key matching.
+        // Session-scoped evals have scope_key = "origin/session_id".
+        // Non-session scopes (commit, range, window) do not contain an origin,
+        // so an origin filter only matches session scopes.
+        const origin_prefix = if (origin) |o| try std.fmt.allocPrint(gpa, "{s}/%", .{o}) else null;
+        defer if (origin_prefix) |p| gpa.free(p);
+
         var rs = try self.db.rows(
             \\select hash, scope_type, scope_key, classification, captured_evidence_hash, evaluated_at
             \\from evaluations
-            \\where (? is null or scope_type = ?)
+            \\where (? is null or (scope_type = 'session' and scope_key like ?) or (scope_type != 'session' and 1 = 0))
             \\  and (? is null or (scope_type = 'session' and scope_key = ?) or (scope_type != 'session' and scope_key = ?))
             \\order by evaluated_at desc
             \\limit ?
         , .{
             origin,
-            origin,
+            origin_prefix orelse "",
             session_id,
             session_id,
             session_id,
