@@ -44,6 +44,7 @@ test {
     _ = @import("grep/content.zig");
     _ = @import("recall/path_recall.zig");
     _ = @import("eval.zig");
+    _ = @import("steps.zig");
     _ = @import("investigation/views.zig");
     _ = @import("portable_bundle.zig");
     _ = @import("remote_sync.zig");

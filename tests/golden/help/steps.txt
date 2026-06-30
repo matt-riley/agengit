@@ -1,0 +1,24 @@
+USAGE:
+    agit steps --json [OPTIONS] [SESSION_ID]
+
+DESCRIPTION:
+    Show all steps in a session with full step data and per-step diffs in a single JSON envelope.
+
+OPTIONS:
+    --json
+        Render steps as structured JSON (required).
+    --include-step-objects
+        Include full step message and tool_call bodies (default: metadata only).
+    --no-diffs
+        Skip per-step diff computation (default: include diffs).
+    -h, --help
+        Display this help and exit.
+
+EXAMPLES:
+    # show steps with metadata only
+    agit steps --json
+    # show steps with full step objects and diffs
+    agit steps --json --include-step-objects
+    # show steps for a specific session
+    agit steps --json session-abc123
+

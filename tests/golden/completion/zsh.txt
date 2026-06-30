@@ -18,6 +18,7 @@ _agit() {
         'eval:Evaluate captured agent sessions'
         'sessions:List recorded agent sessions'
         'log:Show step history for a session'
+        'steps:Show full session steps with diffs in one envelope'
         'restore:Restore files from a recorded snapshot'
         'show:Show details of a step'
         'diff:Show captured file diffs'
@@ -140,6 +141,8 @@ _agit() {
                         '--until[Attach the given upper date bound to the evaluation scope.]:YYYY-MM-DD' \
                         '--lookahead[Scan later captured evidence for follow-up failure signals, such as 24h or 7d. Defaults to 24h.]:DURATION' \
                         '--no-lookahead[Disable follow-up signal scanning.]' \
+                        '--include-steps[Include per-step quality signal data in the JSON output.]' \
+                        '--list[List all stored evaluation objects instead of computing a new one.]' \
                         '--help[Display this help and exit.]'
                     ;;
                 sessions)
@@ -150,6 +153,13 @@ _agit() {
                 log)
                     _arguments \
                         '--json[Render the session log as structured JSON.]' \
+                        '--help[Display this help and exit.]'
+                    ;;
+                steps)
+                    _arguments \
+                        '--json[Render steps as structured JSON (required).]' \
+                        '--include-step-objects[Include full step message and tool_call bodies (default: metadata only).]' \
+                        '--no-diffs[Skip per-step diff computation (default: include diffs).]' \
                         '--help[Display this help and exit.]'
                     ;;
                 restore)

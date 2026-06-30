@@ -282,6 +282,96 @@ test "eval/json pattern associations come from scoped evidence" {
     try std.testing.expectEqual(@as(i64, 1), patterns[0].object.get("support").?.integer);
 }
 
+test "eval/json includes per-step signals with --include-steps" {
+    var sandbox = try harness.Sandbox.init(std.testing.allocator);
+    defer sandbox.deinit();
+
+    try sandbox.writeRepoFile(".agit/.keep", "");
+    try recordCodexTurn(
+        &sandbox,
+        "eval-steps",
+        "turn-1",
+        "Add JSON output and run zig build test",
+        "bash",
+        "zig build test",
+        "All tests passed",
+        "Implemented JSON output and verified tests passed.",
+    );
+    try recordCodexTurn(
+        &sandbox,
+        "eval-steps",
+        "turn-2",
+        "Fix a thing",
+        "bash",
+        "zig build test",
+        "error: something broke",
+        "Will fix it.",
+    );
+
+    var result = try sandbox.run(&.{ "eval", "--json", "--session", "codex/eval-steps", "--include-steps", "--no-lookahead" }, null);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(u8, 0), result.exit_code);
+
+    var parsed = try parseJson(result.stdout);
+    defer parsed.deinit();
+    try expectEnvelope(parsed.value, "eval");
+
+    const data = parsed.value.object.get("data").?.object;
+    const step_assessments = data.get("step_assessments").?.array.items;
+    try std.testing.expectEqual(@as(usize, 2), step_assessments.len);
+
+    // First step should have verification and tool calls
+    const first = step_assessments[0].object;
+    try std.testing.expectEqual(@as(usize, 64), first.get("hash").?.string.len);
+    const first_signals = first.get("signals").?.object;
+    try std.testing.expect(first_signals.get("tool_calls").?.integer >= 1);
+
+    // Second step should have error_results
+    const second = step_assessments[1].object;
+    const second_signals = second.get("signals").?.object;
+    try std.testing.expect(second_signals.get("error_results").?.integer >= 1);
+}
+
+test "eval/json --list returns stored evaluations" {
+    var sandbox = try harness.Sandbox.init(std.testing.allocator);
+    defer sandbox.deinit();
+
+    try sandbox.writeRepoFile(".agit/.keep", "");
+    try recordCodexTurn(
+        &sandbox,
+        "eval-list",
+        "turn-1",
+        "Add a feature",
+        "bash",
+        "echo done",
+        "done",
+        "Feature added.",
+    );
+
+    // Run eval to create a stored evaluation object.
+    var eval_result = try sandbox.run(&.{ "eval", "--json", "--session", "codex/eval-list", "--no-lookahead" }, null);
+    defer eval_result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(u8, 0), eval_result.exit_code);
+
+    // Now list evaluations.
+    var result = try sandbox.run(&.{ "eval", "--json", "--list" }, null);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(u8, 0), result.exit_code);
+
+    var parsed = try parseJson(result.stdout);
+    defer parsed.deinit();
+    try expectEnvelope(parsed.value, "eval");
+
+    const data = parsed.value.object.get("data").?.object;
+    const evals = data.get("evals").?.array.items;
+    try std.testing.expect(evals.len >= 1);
+
+    const first_eval = evals[0].object;
+    try std.testing.expectEqual(@as(usize, 64), first_eval.get("eval_hash").?.string.len);
+    try std.testing.expectEqualStrings("session", first_eval.get("scope_type").?.string);
+    try std.testing.expectEqualStrings("codex/eval-list", first_eval.get("scope_key").?.string);
+}
+
 fn recordCodexTurn(
     sandbox: *harness.Sandbox,
     session_id: []const u8,

@@ -21,6 +21,7 @@ pub fn freeStepRow(gpa: std.mem.Allocator, r: StepRow) void {
     if (r.parent_hash) |p| gpa.free(p);
     gpa.free(r.tree_hash);
     if (r.model) |value| gpa.free(value);
+    if (r.outcome) |value| gpa.free(value);
     if (r.git_commit) |value| gpa.free(value);
     if (r.git_branch) |value| gpa.free(value);
 }

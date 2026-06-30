@@ -26,6 +26,8 @@ const EvalOptions = struct {
     since_ms: ?i64 = null,
     until_ms_exclusive: ?i64 = null,
     lookahead_ms: i64 = default_lookahead_ms,
+    include_steps: bool = false,
+    list: bool = false,
 };
 
 const SessionTarget = struct {
@@ -78,8 +80,40 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
         return;
     }
 
+    if (options.list and
+        (options.session != null or options.commit_rev != null or options.range_spec != null or
+            options.since_ms != null or options.until_ms_exclusive != null))
+    {
+        try status.writeDiagnostic(&stdout, options.format, usage.name, .{
+            .code = "invalid_argument",
+            .message = "--list is mutually exclusive with evaluation scope flags (--session, --commit, --range, --since, --until).",
+        });
+        try stdout.flush();
+        return;
+    }
+
     var store = try status.openStoreOrExit(io, gpa, &stdout, options.format, usage.name);
     defer store.deinit(io);
+
+    // --list mode: dump stored evaluation summaries
+    if (options.list) {
+        if (options.format != .json) {
+            try status.writeDiagnostic(&stdout, options.format, usage.name, .{
+                .code = "format_required",
+                .message = "--list requires --json.",
+            });
+            try stdout.flush();
+            return;
+        }
+        const rows = try store.index.listEvaluations(gpa, options.origin, null, 1000);
+        defer store_mod.freeEvalSummaryRows(gpa, rows);
+
+        try output_mod.writeEnvelope(&stdout, usage.name, .{
+            .evals = rows,
+        });
+        try stdout.flush();
+        return;
+    }
 
     const resolved_scope = try resolveEvaluationScope(io, gpa, &store, options, &stdout);
     defer {
@@ -143,6 +177,26 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
     const eval_obj_hash = try store.writeEval(io, gpa, eval_obj);
     const eval_hash_hex = eval_obj_hash.toHex();
 
+    // Compute per-step signal assessments when --include-steps is set.
+    const StepAssessment = struct {
+        hash: []const u8,
+        turn_id: []const u8,
+        timestamp: i64,
+        signals: eval_mod.SignalCounts,
+    };
+    var step_assessments: std.ArrayList(StepAssessment) = .empty;
+    defer step_assessments.deinit(gpa);
+    if (options.include_steps) {
+        for (scoped_steps.inputs, 0..) |input, i| {
+            try step_assessments.append(gpa, .{
+                .hash = input.hash,
+                .turn_id = resolved_scope.rows[i].turn_id,
+                .timestamp = input.timestamp,
+                .signals = eval_mod.collectStepSignals(input),
+            });
+        }
+    }
+
     switch (options.format) {
         .json => try output_mod.writeEnvelope(&stdout, usage.name, .{
             .scope = scope,
@@ -152,6 +206,7 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, iter: *std.process.Args.Iterator)
             .follow_up_assessment = follow_up,
             .current_assessment = current,
             .patterns = patterns,
+            .step_assessments = step_assessments.items,
         }),
         .human => try writeHuman(&stdout, scope, in_scope, follow_up, current, patterns),
     }
@@ -683,6 +738,10 @@ fn parseOptions(iter: *std.process.Args.Iterator, stdout: *std.Io.File.Writer) !
             };
         } else if (std.mem.eql(u8, arg, "--no-lookahead")) {
             options.lookahead_ms = 0;
+        } else if (std.mem.eql(u8, arg, "--include-steps")) {
+            options.include_steps = true;
+        } else if (std.mem.eql(u8, arg, "--list")) {
+            options.list = true;
         } else if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
             try help_mod.renderUsage(stdout, usage);
             try stdout.flush();

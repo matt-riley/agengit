@@ -34,6 +34,7 @@ const cli = struct {
     const eval_cmd = @import("cli/eval.zig");
     const sessions = @import("cli/sessions.zig");
     const log_cmd = @import("cli/log.zig");
+    const steps_cmd = @import("cli/steps.zig");
     const restore = @import("cli/restore.zig");
     const show = @import("cli/show.zig");
     const diff = @import("cli/diff.zig");
@@ -68,6 +69,7 @@ const SubCommand = enum {
     eval,
     sessions,
     log,
+    steps,
     restore,
     show,
     diff,
@@ -170,6 +172,7 @@ pub fn main(init: std.process.Init) !void {
         .eval => try cli.eval_cmd.run(init.io, init.gpa, &iter),
         .sessions => try cli.sessions.run(init.io, init.gpa, &iter),
         .log => try cli.log_cmd.run(init.io, init.gpa, &iter),
+        .steps => try cli.steps_cmd.run(init.io, init.gpa, &iter),
         .restore => try cli.restore.run(init.io, init.gpa, &iter),
         .show => try cli.show.run(init.io, init.gpa, &iter),
         .diff => try cli.diff.run(init.io, init.gpa, &iter),

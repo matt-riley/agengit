@@ -23,6 +23,10 @@ OPTIONS:
         Scan later captured evidence for follow-up failure signals, such as 24h or 7d. Defaults to 24h.
     --no-lookahead
         Disable follow-up signal scanning.
+    --include-steps
+        Include per-step quality signal data in the JSON output.
+    --list
+        List all stored evaluation objects instead of computing a new one.
     -h, --help
         Display this help and exit.
 
@@ -33,8 +37,10 @@ EXAMPLES:
     agit eval --json --session codex/session-abc
     # evaluate activity inferred around a commit
     agit eval --json --commit HEAD
-    # evaluate a session with later failure-signal lookahead
-    agit eval --session codex/session-abc --lookahead 24h
+    # evaluate a session with per-step signals
+    agit eval --json --session codex/session-abc --include-steps
+    # list all stored evaluation objects
+    agit eval --json --list
 
 NOTES:
     Eval classifications are evidence-based signals from captured history, not proof of code correctness or production success.

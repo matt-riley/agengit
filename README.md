@@ -244,6 +244,16 @@ Show step history for a session.
 agit log
 ```
 
+### `agit steps`
+Show all steps in a session with full step data and per-step diffs in a single JSON envelope.
+
+**Synopsis:** `agit steps --json [OPTIONS] [SESSION_ID]`
+
+```sh
+# show steps with metadata only
+agit steps --json
+```
+
 ### `agit restore`
 Restore captured files from a step snapshot into the working tree. Whole-tree restores require --all; existing files are skipped unless --force is set.
 

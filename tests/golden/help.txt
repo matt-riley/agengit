@@ -22,6 +22,7 @@ Commands:
   eval          Evaluate captured agent sessions
   sessions      List recorded agent sessions
   log           Show step history for a session
+  steps         Show full session steps with diffs in one envelope
   restore       Restore files from a recorded snapshot
   show          Show details of a step
   diff          Show captured file diffs

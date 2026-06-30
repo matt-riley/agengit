@@ -715,6 +715,77 @@ pub const Index = struct {
         return buf;
     }
 
+    /// Eval summary row returned by listEvaluations.
+    pub const EvalSummaryRow = struct {
+        eval_hash: []const u8,
+        scope_type: []const u8,
+        scope_key: []const u8,
+        classification: []const u8,
+        captured_evidence_hash: []const u8,
+        evaluated_at: i64,
+    };
+
+    /// List all evaluation objects in the store, most recent first.
+    /// Caller must free each returned row's fields and the slice with freeEvalSummaryRows.
+    pub fn listEvaluations(
+        self: Index,
+        gpa: std.mem.Allocator,
+        origin: ?[]const u8,
+        session_id: ?[]const u8,
+        limit: usize,
+    ) ![]const EvalSummaryRow {
+        var list: std.ArrayList(EvalSummaryRow) = .empty;
+        errdefer {
+            for (list.items) |r| freeEvalSummaryRow(gpa, r);
+            list.deinit(gpa);
+        }
+
+        var rs = try self.db.rows(
+            \\select hash, scope_type, scope_key, classification, captured_evidence_hash, evaluated_at
+            \\from evaluations
+            \\where (? is null or scope_type = ?)
+            \\  and (? is null or (scope_type = 'session' and scope_key = ?) or (scope_type != 'session' and scope_key = ?))
+            \\order by evaluated_at desc
+            \\limit ?
+        , .{
+            origin,
+            origin,
+            session_id,
+            session_id,
+            session_id,
+            @as(i64, @intCast(limit)),
+        });
+        defer rs.deinit();
+
+        while (rs.next()) |row| {
+            try list.append(gpa, .{
+                .eval_hash = try gpa.dupe(u8, row.get([]const u8, 0)),
+                .scope_type = try gpa.dupe(u8, row.get([]const u8, 1)),
+                .scope_key = try gpa.dupe(u8, row.get([]const u8, 2)),
+                .classification = try gpa.dupe(u8, row.get([]const u8, 3)),
+                .captured_evidence_hash = try gpa.dupe(u8, row.get([]const u8, 4)),
+                .evaluated_at = row.get(i64, 5),
+            });
+        }
+        if (rs.err) |err| return err;
+        return list.toOwnedSlice(gpa);
+    }
+
+    /// Free a single EvalSummaryRow.
+    pub fn freeEvalSummaryRow(gpa: std.mem.Allocator, row: EvalSummaryRow) void {
+        gpa.free(row.eval_hash);
+        gpa.free(row.scope_type);
+        gpa.free(row.scope_key);
+        gpa.free(row.classification);
+        gpa.free(row.captured_evidence_hash);
+    }
+
+    /// Free a slice of EvalSummaryRows.
+    pub fn freeEvalSummaryRows(gpa: std.mem.Allocator, rows: []const EvalSummaryRow) void {
+        for (rows) |row| freeEvalSummaryRow(gpa, row);
+        gpa.free(rows);
+    }
+
     /// Return all session-level scopes whose latest evaluation classification matches.
     pub fn listSessionsByEvalClassification(
         self: Index,
@@ -1261,7 +1332,7 @@ pub const Index = struct {
         }
 
         var rs = try self.db.rows(
-            \\select hash, turn_id, parent_hash, tree_hash, timestamp, model, git_commit, git_branch, coalesce(git_dirty, -1)
+            \\select hash, turn_id, parent_hash, tree_hash, timestamp, model, outcome, git_commit, git_branch, coalesce(git_dirty, -1)
             \\from steps
             \\where (? is null or session_origin = ?)
             \\  and (? is null or session_id = ?)
@@ -1284,9 +1355,10 @@ pub const Index = struct {
                 .tree_hash = try gpa.dupe(u8, row.get([]const u8, 3)),
                 .timestamp = row.get(i64, 4),
                 .model = if (row.get(?[]const u8, 5)) |model| try gpa.dupe(u8, model) else null,
-                .git_commit = if (row.get(?[]const u8, 6)) |commit| try gpa.dupe(u8, commit) else null,
-                .git_branch = if (row.get(?[]const u8, 7)) |branch| try gpa.dupe(u8, branch) else null,
-                .git_dirty = dirtyFromInt(row.get(i64, 8)),
+                .outcome = if (row.get(?[]const u8, 6)) |outcome| try gpa.dupe(u8, outcome) else null,
+                .git_commit = if (row.get(?[]const u8, 7)) |commit| try gpa.dupe(u8, commit) else null,
+                .git_branch = if (row.get(?[]const u8, 8)) |branch| try gpa.dupe(u8, branch) else null,
+                .git_dirty = dirtyFromInt(row.get(i64, 9)),
             });
         }
         if (rs.err) |err| return err;
@@ -1332,7 +1404,7 @@ pub const Index = struct {
             list.deinit(gpa);
         }
         var rs = try self.db.rows(
-            \\select hash, turn_id, parent_hash, tree_hash, timestamp, model, git_commit, git_branch, coalesce(git_dirty, -1)
+            \\select hash, turn_id, parent_hash, tree_hash, timestamp, model, outcome, git_commit, git_branch, coalesce(git_dirty, -1)
             \\from steps where session_origin=? and session_id=?
             \\order by timestamp asc
         , .{ origin, session_id });
@@ -1345,9 +1417,10 @@ pub const Index = struct {
                 .tree_hash = try gpa.dupe(u8, row.get([]const u8, 3)),
                 .timestamp = row.get(i64, 4),
                 .model = if (row.get(?[]const u8, 5)) |model| try gpa.dupe(u8, model) else null,
-                .git_commit = if (row.get(?[]const u8, 6)) |commit| try gpa.dupe(u8, commit) else null,
-                .git_branch = if (row.get(?[]const u8, 7)) |branch| try gpa.dupe(u8, branch) else null,
-                .git_dirty = dirtyFromInt(row.get(i64, 8)),
+                .outcome = if (row.get(?[]const u8, 6)) |outcome| try gpa.dupe(u8, outcome) else null,
+                .git_commit = if (row.get(?[]const u8, 7)) |commit| try gpa.dupe(u8, commit) else null,
+                .git_branch = if (row.get(?[]const u8, 8)) |branch| try gpa.dupe(u8, branch) else null,
+                .git_dirty = dirtyFromInt(row.get(i64, 9)),
             });
         }
         if (rs.err) |err| return err;
