@@ -813,3 +813,101 @@ test "countSessions: empty slice returns 0" {
     const rows = [_]store_mod.TimelineRow{};
     try std.testing.expectEqual(@as(i64, 0), countSessions(&rows));
 }
+
+// ── currentClassification unit tests ───────────────────────────────────────
+// `currentClassification` applies the follow-up downgrade logic: if follow-up
+// signals exist, a "good" session is downgraded to "mixed"; other
+// classifications are returned as-is.
+
+test "currentClassification: no follow-up signals returns in-scope classification" {
+    const no_signals = eval_mod.FollowUpAssessment{
+        .classification_delta = "none",
+        .signals = &.{},
+    };
+    try std.testing.expectEqualStrings("good", currentClassification("good", no_signals));
+    try std.testing.expectEqualStrings("mixed", currentClassification("mixed", no_signals));
+    try std.testing.expectEqualStrings("bad", currentClassification("bad", no_signals));
+    try std.testing.expectEqualStrings("unknown", currentClassification("unknown", no_signals));
+}
+
+test "currentClassification: follow-up signals downgrade good to mixed" {
+    const signals = [_]eval_mod.FollowUpSignal{
+        .{ .kind = "failure_report", .session_id = "s1", .step_hash = "h1", .phrase = "workflow failed" },
+    };
+    const with_signals = eval_mod.FollowUpAssessment{
+        .classification_delta = "downgrade",
+        .signals = &signals,
+    };
+    // "good" is the only classification that changes — it becomes "mixed".
+    try std.testing.expectEqualStrings("mixed", currentClassification("good", with_signals));
+    // Non-good classifications pass through unchanged even with signals.
+    try std.testing.expectEqualStrings("mixed", currentClassification("mixed", with_signals));
+    try std.testing.expectEqualStrings("bad", currentClassification("bad", with_signals));
+}
+
+// ── scopeToEvalScope unit tests ────────────────────────────────────────────
+// `scopeToEvalScope` converts the CLI Scope struct into the eval module's
+// EvalScope struct. This test verifies all fields are mapped correctly for
+// each scope kind, including nullable fields.
+
+test "scopeToEvalScope: maps session scope fields correctly" {
+    const scope = Scope{
+        .kind = "session",
+        .origin = "codex",
+        .session_id = "abc123",
+        .session_count = 1,
+        .step_count = 5,
+    };
+    const eval_scope = scopeToEvalScope(scope);
+    try std.testing.expectEqualStrings("session", eval_scope.kind);
+    try std.testing.expectEqualStrings("codex", eval_scope.origin.?);
+    try std.testing.expectEqualStrings("abc123", eval_scope.session_id.?);
+    try std.testing.expect(eval_scope.rev == null);
+    try std.testing.expect(eval_scope.range == null);
+    try std.testing.expect(eval_scope.since == null);
+    try std.testing.expect(eval_scope.until == null);
+}
+
+test "scopeToEvalScope: maps commit scope with rev" {
+    const scope = Scope{
+        .kind = "commit",
+        .origin = "codex",
+        .rev = "HEAD",
+        .session_count = 1,
+        .step_count = 3,
+    };
+    const eval_scope = scopeToEvalScope(scope);
+    try std.testing.expectEqualStrings("commit", eval_scope.kind);
+    try std.testing.expectEqualStrings("codex", eval_scope.origin.?);
+    try std.testing.expect(eval_scope.session_id == null);
+    try std.testing.expectEqualStrings("HEAD", eval_scope.rev.?);
+}
+
+test "scopeToEvalScope: maps window scope with since and until" {
+    const scope = Scope{
+        .kind = "window",
+        .origin = null,
+        .since = "2025-01-01",
+        .until = "2025-02-01",
+        .session_count = 3,
+        .step_count = 10,
+    };
+    const eval_scope = scopeToEvalScope(scope);
+    try std.testing.expectEqualStrings("window", eval_scope.kind);
+    try std.testing.expect(eval_scope.origin == null);
+    try std.testing.expectEqualStrings("2025-01-01", eval_scope.since.?);
+    try std.testing.expectEqualStrings("2025-02-01", eval_scope.until.?);
+}
+
+test "scopeToEvalScope: maps range scope" {
+    const scope = Scope{
+        .kind = "range",
+        .origin = "codex",
+        .range = "abc..def",
+        .session_count = 2,
+        .step_count = 8,
+    };
+    const eval_scope = scopeToEvalScope(scope);
+    try std.testing.expectEqualStrings("range", eval_scope.kind);
+    try std.testing.expectEqualStrings("abc..def", eval_scope.range.?);
+}
