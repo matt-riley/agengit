@@ -152,6 +152,13 @@ pub fn freeFollowUpAssessment(gpa: std.mem.Allocator, assessment: FollowUpAssess
     gpa.free(assessment.signals);
 }
 
+/// Collect quality signals for a single step (no cross-step state).
+/// Returns the SignalCounts for this step in isolation.
+pub fn collectStepSignals(step: SessionStep) SignalCounts {
+    const collected = collectSignals(&[_]SessionStep{step});
+    return collected.counts;
+}
+
 pub fn evaluateSession(gpa: std.mem.Allocator, steps: []const SessionStep) !Assessment {
     const signals = collectSignals(steps);
     const dimensions = Dimensions{

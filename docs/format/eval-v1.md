@@ -74,3 +74,74 @@ When multiple eval objects exist for the same scope, the one with the latest
 `agit reindex` walks `objects/` and inserts `eval` rows into the
 `evaluations` table from the parsed eval objects.  Because `captured_evidence_hash`
 is deterministic, the reconstructed rows match the original ones exactly.
+
+## Listing evaluations: `--list`
+
+`agit eval --list --json` lists all stored evaluation objects without
+computing a new one:
+
+```sh
+agit eval --json --list
+```
+
+The JSON envelope includes an `evals` array with eval summary rows:
+
+```json
+{
+  "schema_version": "cli-json-v1",
+  "command": "eval",
+  "data": {
+    "evals": [
+      {
+        "eval_hash": "<64-hex>",
+        "scope_type": "session",
+        "scope_key": "codex/session-abc",
+        "classification": "good",
+        "captured_evidence_hash": "<64-hex>",
+        "evaluated_at": 1700000000000
+      }
+    ]
+  }
+}
+```
+
+The `--list` flag requires `--json` and is mutually exclusive with evaluation
+scope flags (`--session`, `--commit`, `--range`, `--since`, `--until`).
+
+## Per-step signals: `--include-steps`
+
+When `--include-steps` is passed, the JSON output includes a
+`step_assessments` array with per-step quality signal counts:
+
+```json
+{
+  "step_assessments": [
+    {
+      "hash": "<64-hex>",
+      "turn_id": "turn-1",
+      "timestamp": 1700000000000,
+      "signals": {
+        "concrete_terms": 6,
+        "success_criteria_phrases": 1,
+        "tool_calls": 3,
+        "related_tool_calls": 2,
+        "error_results": 0,
+        "recovered_errors": 0,
+        "repeated_failures": 0,
+        "verification_commands": 1,
+        "final_summary_terms": 2,
+        "repeated_commands": 0,
+        "steps": 1
+      }
+    }
+  ]
+}
+```
+
+Each entry contains the step's hash, turn_id, timestamp, and the
+`SignalCounts` struct with raw quality signals for that step in isolation
+(without cross-step state like error recovery chains).
+
+The `step_assessments` array is always present in the JSON output (empty
+when `--include-steps` is not set). Consumers should check the array length
+to determine if per-step data was requested.

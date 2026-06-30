@@ -202,12 +202,15 @@ pub const eval_usage = help_mod.UsageSpec{
         .{ .long = "until", .value_name = "YYYY-MM-DD", .description = "Attach the given upper date bound to the evaluation scope." },
         .{ .long = "lookahead", .value_name = "DURATION", .description = "Scan later captured evidence for follow-up failure signals, such as 24h or 7d. Defaults to 24h." },
         .{ .long = "no-lookahead", .description = "Disable follow-up signal scanning." },
+        .{ .long = "include-steps", .description = "Include per-step quality signal data in the JSON output." },
+        .{ .long = "list", .description = "List all stored evaluation objects instead of computing a new one." },
     },
     .examples = &.{
         .{ .description = "evaluate the most recent recorded session", .command = "" },
         .{ .description = "evaluate one session as structured JSON", .command = "--json --session codex/session-abc" },
         .{ .description = "evaluate activity inferred around a commit", .command = "--json --commit HEAD" },
-        .{ .description = "evaluate a session with later failure-signal lookahead", .command = "--session codex/session-abc --lookahead 24h" },
+        .{ .description = "evaluate a session with per-step signals", .command = "--json --session codex/session-abc --include-steps" },
+        .{ .description = "list all stored evaluation objects", .command = "--json --list" },
     },
     .notes = "Eval classifications are evidence-based signals from captured history, not proof of code correctness or production success.",
 };
@@ -234,6 +237,22 @@ pub const log_usage = help_mod.UsageSpec{
     .examples = &.{
         .{ .description = "show most recent session steps", .command = "" },
         .{ .description = "show steps for a specific session", .command = "session-abc123" },
+    },
+};
+
+pub const steps_usage = help_mod.UsageSpec{
+    .name = "steps",
+    .synopsis = "--json [OPTIONS] [SESSION_ID]",
+    .description = "Show all steps in a session with full step data and per-step diffs in a single JSON envelope.",
+    .options = &.{
+        .{ .long = "json", .description = "Render steps as structured JSON (required)." },
+        .{ .long = "include-step-objects", .description = "Include full step message and tool_call bodies (default: metadata only)." },
+        .{ .long = "no-diffs", .description = "Skip per-step diff computation (default: include diffs)." },
+    },
+    .examples = &.{
+        .{ .description = "show steps with metadata only", .command = "--json" },
+        .{ .description = "show steps with full step objects and diffs", .command = "--json --include-step-objects" },
+        .{ .description = "show steps for a specific session", .command = "--json session-abc123" },
     },
 };
 
@@ -482,6 +501,7 @@ pub const public_commands = [_]help_mod.CommandSpec{
     .{ .name = "eval", .summary = "Evaluate captured agent sessions", .usage = &eval_usage },
     .{ .name = "sessions", .summary = "List recorded agent sessions", .usage = &sessions_usage },
     .{ .name = "log", .summary = "Show step history for a session", .usage = &log_usage },
+    .{ .name = "steps", .summary = "Show full session steps with diffs in one envelope", .usage = &steps_usage },
     .{ .name = "restore", .summary = "Restore files from a recorded snapshot", .usage = &restore_usage },
     .{ .name = "show", .summary = "Show details of a step", .usage = &show_usage },
     .{ .name = "diff", .summary = "Show captured file diffs", .usage = &diff_usage },

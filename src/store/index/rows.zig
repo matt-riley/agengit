@@ -13,6 +13,7 @@ pub const StepRow = struct {
     tree_hash: []const u8,
     timestamp: i64,
     model: ?[]const u8 = null,
+    outcome: ?[]const u8 = null,
     git_commit: ?[]const u8 = null,
     git_branch: ?[]const u8 = null,
     git_dirty: ?bool = null,
