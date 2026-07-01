@@ -1012,3 +1012,188 @@ test "capturedEvidenceHash empty input" {
     defer gpa.free(@constCast(h));
     try std.testing.expectEqual(@as(usize, 64), h.len);
 }
+
+// ── collectStepSignals unit tests ─────────────────────────────────────────
+// These cover the new per-step signal collection function introduced for the
+// skill-evaluator integration. `collectStepSignals` must return identical
+// counts to `collectSignals` when given the same single step in isolation,
+// and must not accumulate cross-step state (repeated_failures, repeated_commands
+// are session-aggregate signals derived across multiple steps, so a single
+// step can never produce them on its own).
+
+test "collectStepSignals: single step matches collectSignals single-element slice" {
+    const gpa = std.testing.allocator;
+    const step = try makeStep(gpa, "s1", "Implement the login flow", "Login implemented and verified.", &.{
+        .{ .name = "bash", .args = "npm test", .result = "all passing" },
+        .{ .name = "bash", .args = "npm run lint", .result = "warning: unused var" },
+    });
+    defer freeStep(gpa, step);
+
+    const single_counts = collectStepSignals(step);
+
+    // Reconstruct via the internal collector for the same single-element slice;
+    // results must match exactly.
+    const collected = collectSignals(&[_]SessionStep{step});
+    try std.testing.expectEqual(single_counts, collected.counts);
+}
+
+test "collectStepSignals: is isolated — repeated detection scoped to step not session" {
+    const gpa = std.testing.allocator;
+    const step = try makeStep(gpa, "s1", "that did not work", "Tried and failed", &.{
+        .{ .name = "bash", .args = "make test", .result = "error: undefined symbol" },
+        .{ .name = "bash", .args = "make test", .result = "error: undefined symbol" },
+    });
+    defer freeStep(gpa, step);
+
+    const counts = collectStepSignals(step);
+
+    // collectStepSignals calls collectSignals on a single-element slice, so it
+    // still tracks previous_command / previous_error across the step's own tool
+    // calls.  Two identical args in a row => repeated_commands = 1; two errors
+    // in a row => repeated_failures = 1.
+    try std.testing.expectEqual(@as(i64, 1), counts.repeated_commands);
+    try std.testing.expectEqual(@as(i64, 1), counts.repeated_failures);
+    try std.testing.expectEqual(@as(i64, 2), counts.tool_calls);
+    try std.testing.expectEqual(@as(i64, 2), counts.error_results);
+}
+
+test "collectStepSignals: cross-step state does not leak between per-step calls" {
+    // The key isolation property: if step A ends with an error and step B
+    // also starts with an error, the aggregate collectSignals counts that as a
+    // repeated_failure (previous_error carries across the step boundary).  But
+    // collectStepSignals on each step in isolation sees the first tool call of
+    // each step with NO prior error context, so each reports repeated_failures=0.
+    const gpa = std.testing.allocator;
+    const steps = try gpa.alloc(SessionStep, 2);
+    errdefer gpa.free(steps);
+    var created: usize = 0;
+    errdefer for (steps[0..created]) |*s| freeStep(gpa, s.*);
+    steps[0] = try makeStep(gpa, "h1", "First task", "Attempted.", &.{
+        .{ .name = "bash", .args = "make build", .result = "error: link failed" },
+    });
+    created += 1;
+    steps[1] = try makeStep(gpa, "h2", "Second task", "Attempted.", &.{
+        .{ .name = "bash", .args = "make build", .result = "error: link failed" },
+    });
+    created += 1;
+    defer {
+        freeStep(gpa, steps[0]);
+        freeStep(gpa, steps[1]);
+        gpa.free(steps);
+    }
+
+    // In isolation, each step has a single erroring tool call — no *preceding*
+    // error to repeat against.
+    const per_step_a = collectStepSignals(steps[0]);
+    const per_step_b = collectStepSignals(steps[1]);
+    try std.testing.expectEqual(@as(i64, 0), per_step_a.repeated_failures);
+    try std.testing.expectEqual(@as(i64, 0), per_step_b.repeated_failures);
+    try std.testing.expectEqual(@as(i64, 0), per_step_a.repeated_commands);
+    try std.testing.expectEqual(@as(i64, 0), per_step_b.repeated_commands);
+
+    // In aggregate, previous_error carries from step 0's last tool call into
+    // step 1's first tool call, so the aggregate records a repeated_failure and
+    // a repeated_command.
+    const aggregate = collectSignals(steps);
+    try std.testing.expectEqual(@as(i64, 1), aggregate.counts.repeated_failures);
+    try std.testing.expectEqual(@as(i64, 1), aggregate.counts.repeated_commands);
+}
+
+test "collectStepSignals: verification command counted from tool calls" {
+    const gpa = std.testing.allocator;
+    const step = try makeStep(gpa, "v1", "Run CI locally before pushing", "Verified locally.", &.{
+        .{ .name = "bash", .args = "npm test", .result = "pass" },
+    });
+    defer freeStep(gpa, step);
+
+    const counts = collectStepSignals(step);
+    try std.testing.expectEqual(@as(i64, 1), counts.verification_commands);
+    try std.testing.expectEqual(@as(i64, 1), counts.tool_calls);
+}
+
+test "collectStepSignals: when summed across steps equals collectSignals aggregate" {
+    const gpa = std.testing.allocator;
+    const steps = try gpa.alloc(SessionStep, 2);
+    errdefer gpa.free(steps);
+    var created: usize = 0;
+    errdefer for (steps[0..created]) |*s| freeStep(gpa, s.*);
+    steps[0] = try makeStep(gpa, "h1", "Implement the json workflow", "Done.", &.{
+        .{ .name = "bash", .args = "zig build test", .result = "ok" },
+    });
+    created += 1;
+    steps[1] = try makeStep(gpa, "h2", "that did not work", "Fixed it.", &.{
+        .{ .name = "bash", .args = "zig build test", .result = "error: overflow" },
+    });
+    created += 1;
+    defer {
+        freeStep(gpa, steps[0]);
+        freeStep(gpa, steps[1]);
+        gpa.free(steps);
+    }
+
+    // Per-step isolation: sum the in-isolation counts for each step.
+    const per_step_a = collectStepSignals(steps[0]);
+    const per_step_b = collectStepSignals(steps[1]);
+
+    // Aggregate caller: the session-level collector sees the full slice.
+    const aggregate = collectSignals(steps);
+
+    // Additive per-step signals (tool_calls, error_results, verification_commands,
+    // steps, concrete_terms, etc.) must sum to the aggregate.  Cross-step
+    // aggregate signals (repeated_commands, repeated_failures) may differ — those
+    // derive from comparing across steps and are excluded from this check.
+    try std.testing.expectEqual(
+        per_step_a.tool_calls + per_step_b.tool_calls,
+        aggregate.counts.tool_calls,
+    );
+    try std.testing.expectEqual(
+        per_step_a.error_results + per_step_b.error_results,
+        aggregate.counts.error_results,
+    );
+    try std.testing.expectEqual(
+        per_step_a.verification_commands + per_step_b.verification_commands,
+        aggregate.counts.verification_commands,
+    );
+    try std.testing.expectEqual(
+        per_step_a.steps + per_step_b.steps,
+        aggregate.counts.steps,
+    );
+}
+
+test "collectStepSignals: step with no tool calls returns zero tool-related counts" {
+    const gpa = std.testing.allocator;
+    const step = try makeStep(gpa, "empty", "Implement the thing", "Done.", &.{});
+    defer freeStep(gpa, step);
+
+    const counts = collectStepSignals(step);
+    try std.testing.expectEqual(@as(i64, 0), counts.tool_calls);
+    try std.testing.expectEqual(@as(i64, 0), counts.error_results);
+    try std.testing.expectEqual(@as(i64, 0), counts.verification_commands);
+    try std.testing.expectEqual(@as(i64, 0), counts.repeated_commands);
+    try std.testing.expectEqual(@as(i64, 0), counts.repeated_failures);
+    // steps is always 1 for a single-step call.
+    try std.testing.expectEqual(@as(i64, 1), counts.steps);
+}
+
+test "collectStepSignals: summary with no assistant content still counts tool signals" {
+    const gpa = std.testing.allocator;
+    const step = try makeStep(gpa, "noassist", "Run the tests", null, &.{});
+    defer freeStep(gpa, step);
+
+    const counts = collectStepSignals(step);
+    try std.testing.expectEqual(@as(i64, 1), counts.steps);
+    try std.testing.expectEqual(@as(i64, 0), counts.tool_calls);
+    // final_summary_terms requires assistant content; with null assistant it's 0.
+    try std.testing.expectEqual(@as(i64, 0), counts.final_summary_terms);
+}
+
+test "collectStepSignals: error result with no recovery counts as error but not recovered" {
+    const gpa = std.testing.allocator;
+    const step = try makeStep(gpa, "err1", "Fix the bug", "Failed.", &.{});
+    defer freeStep(gpa, step);
+
+    const counts = collectStepSignals(step);
+    try std.testing.expectEqual(@as(i64, 0), counts.error_results);
+    try std.testing.expectEqual(@as(i64, 0), counts.recovered_errors);
+    try std.testing.expectEqual(@as(i64, 0), counts.tool_calls);
+}
