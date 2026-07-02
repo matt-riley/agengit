@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.26.1](https://github.com/matt-riley/agengit/compare/v1.26.0...v1.26.1) (2026-07-02)
+
+
+### Bug Fixes
+
+* **ci:** pin validation-macos runner to macos-15 ([#100](https://github.com/matt-riley/agengit/issues/100)) ([6ae029e](https://github.com/matt-riley/agengit/commit/6ae029ef0fd11485e363f13246e0f08831d545ca))
+
 ## [1.26.0](https://github.com/matt-riley/agengit/compare/v1.25.1...v1.26.0) (2026-07-01)
 
 
