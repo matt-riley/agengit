@@ -120,7 +120,9 @@ jobs:
       packages: read
     uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@071c2c2bbe410f73126d3cefd0a0b6812b3565f6 # v2
     with:
-      runner: macos-latest
+      # Pin to macos-15 until macOS 26 (Tahoe) / Xcode 26.4 compatibility
+      # is resolved upstream. See https://codeberg.org/ziglang/zig/issues/31658
+      runner: macos-15
       lint: true
       test: true
       concurrency-suffix: validation-macos
