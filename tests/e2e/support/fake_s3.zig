@@ -19,6 +19,9 @@ pub const Server = struct {
         const script_len = try std.Io.Dir.cwd().realPathFile(io, "tests/e2e/support/fake_s3_server.py", &script_buf);
         const script_path = script_buf[0..script_len];
 
+        // TEMP DEBUG (remove before merging PRs): surface spawn context.
+        std.debug.print("[fs3] spawning python; script={s} storage={s} ready={s}\n", .{ script_path, storage_root, ready_file });
+
         var child = try std.process.spawn(io, .{
             .argv = &.{ "/usr/bin/env", "python3", script_path, storage_root, ready_file },
             .stdin = .ignore,
@@ -33,7 +36,10 @@ pub const Server = struct {
         // afterwards would trip Child.wait's assertion.
         errdefer child.kill(io);
 
-        const endpoint = try waitForReady(gpa, io, ready_file);
+        // TEMP DEBUG (remove before merging PRs): record pid for liveness probes.
+        std.debug.print("[fs3] spawned pid={d}\n", .{child.id.?});
+
+        const endpoint = try waitForReady(gpa, io, ready_file, &child);
 
         return .{
             .child = child,
@@ -57,7 +63,7 @@ pub const Server = struct {
 /// Polls for the port file written by the server once it binds. Deadline-based
 /// rather than capped by iteration count: timer slippage under a heavily
 /// loaded test runner must not shorten the ready window.
-fn waitForReady(gpa: std.mem.Allocator, io: std.Io, ready_file: []const u8) ![]u8 {
+fn waitForReady(gpa: std.mem.Allocator, io: std.Io, ready_file: []const u8, child: *std.process.Child) ![]u8 {
     const started = std.Io.Timestamp.now(io, .real);
     while (started.untilNow(io, .real).toMilliseconds() < 10_000) {
         const contents = std.Io.Dir.cwd().readFileAlloc(io, ready_file, gpa, .unlimited) catch |err| switch (err) {
@@ -71,6 +77,26 @@ fn waitForReady(gpa: std.mem.Allocator, io: std.Io, ready_file: []const u8) ![]u
         }
 
         std.Io.sleep(io, std.Io.Duration.fromMilliseconds(25), .awake) catch {};
+    }
+    // TEMP DEBUG (remove before merging PRs): report final liveness verdict.
+    if (child.id) |pid| {
+        const pid_text = try std.fmt.allocPrint(gpa, "{d}", .{pid});
+        const ps = std.process.run(gpa, io, .{ .argv = &.{ "/bin/ps", "-o", "state,pid,ppid,etime,command", "-p", pid_text } }) catch null;
+        if (ps) |res| {
+            defer gpa.free(res.stdout);
+            defer gpa.free(res.stderr);
+            std.debug.print("[fs3] TIMEOUT after pid={d} ready_file={s}\n[fs3]   term={any}\n[fs3]   stdout: {s}\n[fs3]   stderr: {s}\n", .{
+                pid,
+                ready_file,
+                res.term,
+                res.stdout,
+                res.stderr,
+            });
+        } else {
+            std.debug.print("[fs3] TIMEOUT after spawn; ps probe failed to run\n", .{});
+        }
+    } else {
+        std.debug.print("[fs3] TIMEOUT but child already reaped (id == null)\n", .{});
     }
     return error.FakeServerTimeout;
 }

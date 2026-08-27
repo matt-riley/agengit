@@ -5,7 +5,7 @@ store so you can inspect what happened between commits.
 
 ## Status
 
-Current CLI version: `1.26.1`. <!-- x-release-please-version -->
+Current CLI version: `1.26.2`. <!-- x-release-please-version -->
 
 The project is usable but still evolving. Command output and on-disk details may
 change before a long-term stable format is declared.
