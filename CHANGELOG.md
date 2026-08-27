@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.26.2](https://github.com/matt-riley/agengit/compare/v1.26.1...v1.26.2) (2026-08-27)
+
+
+### Bug Fixes
+
+* **test:** stop fake s3 e2e crashes under load ([f0081fa](https://github.com/matt-riley/agengit/commit/f0081fa342e8a65f9708f630dda2afea917f2ff2))
+
 ## [1.26.1](https://github.com/matt-riley/agengit/compare/v1.26.0...v1.26.1) (2026-07-02)
 
 
