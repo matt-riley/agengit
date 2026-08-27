@@ -19,9 +19,6 @@ pub const Server = struct {
         const script_len = try std.Io.Dir.cwd().realPathFile(io, "tests/e2e/support/fake_s3_server.py", &script_buf);
         const script_path = script_buf[0..script_len];
 
-        // TEMP DEBUG (remove before merging PRs): surface spawn context.
-        std.debug.print("[fs3] spawning python; script={s} storage={s} ready={s}\n", .{ script_path, storage_root, ready_file });
-
         var child = try std.process.spawn(io, .{
             .argv = &.{ "/usr/bin/env", "python3", script_path, storage_root, ready_file },
             .stdin = .ignore,
@@ -35,9 +32,6 @@ pub const Server = struct {
         // kill() blocks until the child exits and reaps it; calling wait()
         // afterwards would trip Child.wait's assertion.
         errdefer child.kill(io);
-
-        // TEMP DEBUG (remove before merging PRs): record pid for liveness probes.
-        std.debug.print("[fs3] spawned pid={d}\n", .{child.id.?});
 
         const endpoint = try waitForReady(gpa, io, ready_file, &child);
 
@@ -63,9 +57,15 @@ pub const Server = struct {
 /// Polls for the port file written by the server once it binds. Deadline-based
 /// rather than capped by iteration count: timer slippage under a heavily
 /// loaded test runner must not shorten the ready window.
+///
+/// 45s rather than something tighter: on fresh GitHub-hosted macOS runners,
+/// the first exec of a freshly-booted VM's python3 can be held up for many
+/// seconds by Gatekeeper/codesign checks before the interpreter even starts
+/// running the script, well before the server binds a port. That's dead time
+/// unrelated to test-runner load, so the deadline has to absorb it.
 fn waitForReady(gpa: std.mem.Allocator, io: std.Io, ready_file: []const u8, child: *std.process.Child) ![]u8 {
     const started = std.Io.Timestamp.now(io, .real);
-    while (started.untilNow(io, .real).toMilliseconds() < 10_000) {
+    while (started.untilNow(io, .real).toMilliseconds() < 45_000) {
         const contents = std.Io.Dir.cwd().readFileAlloc(io, ready_file, gpa, .unlimited) catch |err| switch (err) {
             error.FileNotFound => null,
             else => return err,
@@ -78,7 +78,8 @@ fn waitForReady(gpa: std.mem.Allocator, io: std.Io, ready_file: []const u8, chil
 
         std.Io.sleep(io, std.Io.Duration.fromMilliseconds(25), .awake) catch {};
     }
-    // TEMP DEBUG (remove before merging PRs): report final liveness verdict.
+    // Report the child's final liveness state so a timeout is diagnosable
+    // from CI logs alone, without needing to reproduce locally.
     if (child.id) |pid| {
         const pid_text = try std.fmt.allocPrint(gpa, "{d}", .{pid});
         const ps = std.process.run(gpa, io, .{ .argv = &.{ "/bin/ps", "-o", "state,pid,ppid,etime,command", "-p", pid_text } }) catch null;
