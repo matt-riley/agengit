@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.26.3](https://github.com/matt-riley/agengit/compare/v1.26.2...v1.26.3) (2026-08-27)
+
+
+### Bug Fixes
+
+* **test:** give fake S3 server startup enough time on macOS CI ([5168544](https://github.com/matt-riley/agengit/commit/5168544a2606ce7afd8bf48e621de4634d7d5233))
+
 ## [1.26.2](https://github.com/matt-riley/agengit/compare/v1.26.1...v1.26.2) (2026-08-27)
 
 
