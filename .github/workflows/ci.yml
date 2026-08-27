@@ -17,12 +17,12 @@ jobs:
       code_changed: ${{ steps.changes.outputs.code }}
       workflow_changed: ${{ steps.changes.outputs.workflow }}
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
 
       - id: changes
-        uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
           filters: |
             workflow:
@@ -46,7 +46,7 @@ jobs:
       version: ${{ steps.detect.outputs.version }}
       tag_name: ${{ steps.detect.outputs.tag_name }}
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.sha }}
 
@@ -82,11 +82,11 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
-          go-version: "1.26.5"
+          go-version: "1.27.0"
           cache: false
 
       - name: Install actionlint
@@ -103,7 +103,7 @@ jobs:
     permissions:
       contents: read
       packages: read
-    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@9461001818caa7d1925854445cf053d0a0aac316 # v2
+    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@2aa90cd79663d10959d67faf89a3ecce29392f6a # v2
     with:
       runner: ubuntu-latest
       lint: true
@@ -118,7 +118,7 @@ jobs:
     permissions:
       contents: read
       packages: read
-    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@9461001818caa7d1925854445cf053d0a0aac316 # v2
+    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@2aa90cd79663d10959d67faf89a3ecce29392f6a # v2
     with:
       # Pin to macos-15 until macOS 26 (Tahoe) / Xcode 26.4 compatibility
       # is resolved upstream. See https://codeberg.org/ziglang/zig/issues/31658
@@ -134,7 +134,7 @@ jobs:
     permissions:
       contents: read
       packages: read
-    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@9461001818caa7d1925854445cf053d0a0aac316 # v2
+    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@2aa90cd79663d10959d67faf89a3ecce29392f6a # v2
     with:
       runner: ubuntu-latest
       test: true
@@ -151,7 +151,7 @@ jobs:
       contents: read
       packages: read
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4
 
@@ -179,7 +179,7 @@ jobs:
     permissions:
       contents: read
       packages: read
-    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@9461001818caa7d1925854445cf053d0a0aac316 # v2
+    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@2aa90cd79663d10959d67faf89a3ecce29392f6a # v2
     with:
       runner: ubuntu-latest
       test: true
@@ -194,7 +194,7 @@ jobs:
     permissions:
       contents: read
       packages: read
-    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@9461001818caa7d1925854445cf053d0a0aac316 # v2
+    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@2aa90cd79663d10959d67faf89a3ecce29392f6a # v2
     with:
       runner: ubuntu-latest
       test: true
@@ -219,7 +219,7 @@ jobs:
           - { target: aarch64-macos, archive: agit-aarch64-macos.tar.gz }
           - { target: x86_64-macos, archive: agit-x86_64-macos.tar.gz }
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4
 
@@ -258,7 +258,7 @@ jobs:
       issues: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.sha }}
 
