@@ -84,7 +84,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version: "1.27.0"
           cache: false
@@ -103,7 +103,7 @@ jobs:
     permissions:
       contents: read
       packages: read
-    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@2aa90cd79663d10959d67faf89a3ecce29392f6a # v2
+    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@4ff76b1a606b1fbba163119a65bf7b05f91ab9b6 # v3
     with:
       runner: ubuntu-latest
       lint: true
@@ -118,7 +118,7 @@ jobs:
     permissions:
       contents: read
       packages: read
-    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@2aa90cd79663d10959d67faf89a3ecce29392f6a # v2
+    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@4ff76b1a606b1fbba163119a65bf7b05f91ab9b6 # v3
     with:
       # Pin to macos-15 until macOS 26 (Tahoe) / Xcode 26.4 compatibility
       # is resolved upstream. See https://codeberg.org/ziglang/zig/issues/31658
@@ -134,7 +134,7 @@ jobs:
     permissions:
       contents: read
       packages: read
-    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@2aa90cd79663d10959d67faf89a3ecce29392f6a # v2
+    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@4ff76b1a606b1fbba163119a65bf7b05f91ab9b6 # v3
     with:
       runner: ubuntu-latest
       test: true
@@ -179,7 +179,7 @@ jobs:
     permissions:
       contents: read
       packages: read
-    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@2aa90cd79663d10959d67faf89a3ecce29392f6a # v2
+    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@4ff76b1a606b1fbba163119a65bf7b05f91ab9b6 # v3
     with:
       runner: ubuntu-latest
       test: true
@@ -194,7 +194,7 @@ jobs:
     permissions:
       contents: read
       packages: read
-    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@2aa90cd79663d10959d67faf89a3ecce29392f6a # v2
+    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@4ff76b1a606b1fbba163119a65bf7b05f91ab9b6 # v3
     with:
       runner: ubuntu-latest
       test: true
