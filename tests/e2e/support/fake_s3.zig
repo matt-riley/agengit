@@ -23,19 +23,17 @@ pub const Server = struct {
             .argv = &.{ "/usr/bin/env", "python3", script_path, storage_root, ready_file },
             .stdin = .ignore,
             .stdout = .ignore,
-            .stderr = .pipe,
+            // Inherited rather than piped: nothing drains the pipe, and an
+            // unread pipe hides interpreter failures forever. A healthy
+            // server prints nothing, so there is no log noise either way.
+            .stderr = .inherit,
             .create_no_window = true,
         });
-        errdefer {
-            child.kill(io);
-            _ = child.wait(io) catch {};
-        }
+        // kill() blocks until the child exits and reaps it; calling wait()
+        // afterwards would trip Child.wait's assertion.
+        errdefer child.kill(io);
 
-        const endpoint = waitForReady(gpa, io, ready_file, &child) catch |err| {
-            child.kill(io);
-            _ = child.wait(io) catch {};
-            return err;
-        };
+        const endpoint = try waitForReady(gpa, io, ready_file);
 
         return .{
             .child = child,
@@ -56,9 +54,12 @@ pub const Server = struct {
     }
 };
 
-fn waitForReady(gpa: std.mem.Allocator, io: std.Io, ready_file: []const u8, _: *std.process.Child) ![]u8 {
-    var attempts: usize = 0;
-    while (attempts < 200) : (attempts += 1) {
+/// Polls for the port file written by the server once it binds. Deadline-based
+/// rather than capped by iteration count: timer slippage under a heavily
+/// loaded test runner must not shorten the ready window.
+fn waitForReady(gpa: std.mem.Allocator, io: std.Io, ready_file: []const u8) ![]u8 {
+    const started = std.Io.Timestamp.now(io, .real);
+    while (started.untilNow(io, .real).toMilliseconds() < 10_000) {
         const contents = std.Io.Dir.cwd().readFileAlloc(io, ready_file, gpa, .unlimited) catch |err| switch (err) {
             error.FileNotFound => null,
             else => return err,
@@ -69,7 +70,7 @@ fn waitForReady(gpa: std.mem.Allocator, io: std.Io, ready_file: []const u8, _: *
             return std.fmt.allocPrint(gpa, "http://127.0.0.1:{d}", .{port});
         }
 
-        std.Io.sleep(io, std.Io.Duration.fromMilliseconds(10), .awake) catch {};
+        std.Io.sleep(io, std.Io.Duration.fromMilliseconds(25), .awake) catch {};
     }
     return error.FakeServerTimeout;
 }
