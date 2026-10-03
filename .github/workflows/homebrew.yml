@@ -1,0 +1,29 @@
+name: Homebrew
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  homebrew:
+    permissions:
+      contents: read
+    name: Update homebrew tap
+    uses: matt-riley/matt-riley-ci/.github/workflows/homebrew-formula.yml@cb986078a5bd4775e5fb05348f3618e41fedf4de # v4
+    with:
+      test-args: version
+      tag: ${{ github.ref_name }}
+      tap-repo: matt-riley/homebrew-tools
+      formula-name: agit
+      class-name: Agit
+      desc: AI-agent version control
+      homepage: https://github.com/matt-riley/agengit
+      license: GPL-3.0-only
+      binary: agit
+      archive-x86_64-macos: agit-x86_64-macos.tar.gz
+      archive-aarch64-macos: agit-aarch64-macos.tar.gz
+      archive-x86_64-linux: agit-x86_64-linux.tar.gz
+      archive-aarch64-linux: agit-aarch64-linux.tar.gz
+    secrets:
+      homebrew-tap-token: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN || secrets.TAP_TOKEN }}
