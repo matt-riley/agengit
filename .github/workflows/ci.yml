@@ -97,50 +97,56 @@ jobs:
           "$(go env GOPATH)/bin/actionlint" .github/workflows/*.yml
 
   validation-linux:
+    concurrency:
+      group: ${{ github.workflow }}:${{ github.ref }}:validation-linux
+      cancel-in-progress: true
     name: Validation (ubuntu-latest)
     needs: [detect-changes, detect-release-commit]
     if: ${{ needs.detect-changes.outputs.code_changed == 'true' && needs.detect-release-commit.outputs.is_release_commit != 'true' }}
     permissions:
       contents: read
       packages: read
-    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@4ff76b1a606b1fbba163119a65bf7b05f91ab9b6 # v3
+    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@cb986078a5bd4775e5fb05348f3618e41fedf4de # v4
     with:
       runner: ubuntu-latest
       lint: true
       test: true
       fmt: true
-      concurrency-suffix: validation-linux
 
   validation-macos:
+    concurrency:
+      group: ${{ github.workflow }}:${{ github.ref }}:validation-macos
+      cancel-in-progress: true
     name: Validation (macos-latest)
     needs: [detect-changes, detect-release-commit]
     if: ${{ needs.detect-changes.outputs.code_changed == 'true' && needs.detect-release-commit.outputs.is_release_commit != 'true' }}
     permissions:
       contents: read
       packages: read
-    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@4ff76b1a606b1fbba163119a65bf7b05f91ab9b6 # v3
+    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@cb986078a5bd4775e5fb05348f3618e41fedf4de # v4
     with:
       # Pin to macos-15 until macOS 26 (Tahoe) / Xcode 26.4 compatibility
       # is resolved upstream. See https://codeberg.org/ziglang/zig/issues/31658
       runner: macos-15
       lint: true
       test: true
-      concurrency-suffix: validation-macos
 
   sanitizers:
+    concurrency:
+      group: ${{ github.workflow }}:${{ github.ref }}:sanitizers
+      cancel-in-progress: true
     name: Sanitizers
     needs: [detect-changes, detect-release-commit]
     if: ${{ needs.detect-changes.outputs.code_changed == 'true' && needs.detect-release-commit.outputs.is_release_commit != 'true' }}
     permissions:
       contents: read
       packages: read
-    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@4ff76b1a606b1fbba163119a65bf7b05f91ab9b6 # v3
+    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@cb986078a5bd4775e5fb05348f3618e41fedf4de # v4
     with:
       runner: ubuntu-latest
       test: true
       task-env: |
         TEST_SUITE=sanitizers
-      concurrency-suffix: sanitizers
 
   fuzz:
     name: Fuzz hook payloads
@@ -173,34 +179,38 @@ jobs:
           if-no-files-found: ignore
 
   store-roundtrip:
+    concurrency:
+      group: ${{ github.workflow }}:${{ github.ref }}:store-roundtrip
+      cancel-in-progress: true
     name: Store roundtrip
     needs: [detect-changes, detect-release-commit]
     if: ${{ needs.detect-changes.outputs.code_changed == 'true' && needs.detect-release-commit.outputs.is_release_commit != 'true' }}
     permissions:
       contents: read
       packages: read
-    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@4ff76b1a606b1fbba163119a65bf7b05f91ab9b6 # v3
+    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@cb986078a5bd4775e5fb05348f3618e41fedf4de # v4
     with:
       runner: ubuntu-latest
       test: true
       task-env: |
         TEST_SUITE=store-roundtrip
-      concurrency-suffix: store-roundtrip
 
   smoke-doctor:
+    concurrency:
+      group: ${{ github.workflow }}:${{ github.ref }}:smoke-doctor
+      cancel-in-progress: true
     name: Smoke doctor
     needs: [detect-changes, detect-release-commit]
     if: ${{ needs.detect-changes.outputs.code_changed == 'true' && needs.detect-release-commit.outputs.is_release_commit != 'true' }}
     permissions:
       contents: read
       packages: read
-    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@4ff76b1a606b1fbba163119a65bf7b05f91ab9b6 # v3
+    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@cb986078a5bd4775e5fb05348f3618e41fedf4de # v4
     with:
       runner: ubuntu-latest
       test: true
       task-env: |
         TEST_SUITE=smoke-doctor
-      concurrency-suffix: smoke-doctor
 
   cross-compile:
     name: Cross-compile (${{ matrix.target }})
@@ -351,22 +361,22 @@ jobs:
             --silent
 
   homebrew:
-    name: Update homebrew tap
+    name: Start Homebrew publisher
     needs: [detect-release-commit, publish-release]
     if: ${{ needs.detect-release-commit.outputs.is_release_commit == 'true' }}
-    uses: matt-riley/matt-riley-ci/.github/workflows/homebrew-formula.yml@071c2c2bbe410f73126d3cefd0a0b6812b3565f6
-    with:
-      tag: ${{ needs.detect-release-commit.outputs.tag_name }}
-      tap-repo: matt-riley/homebrew-tools
-      formula-name: agit
-      class-name: Agit
-      desc: AI-agent version control
-      homepage: https://github.com/matt-riley/agengit
-      license: GPL-3.0-only
-      binary: agit
-      archive-x86_64-macos: agit-x86_64-macos.tar.gz
-      archive-aarch64-macos: agit-aarch64-macos.tar.gz
-      archive-x86_64-linux: agit-x86_64-linux.tar.gz
-      archive-aarch64-linux: agit-aarch64-linux.tar.gz
-    secrets:
-      homebrew-tap-token: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN || secrets.TAP_TOKEN }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Start tag publisher when release creation uses GITHUB_TOKEN
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.detect-release-commit.outputs.tag_name }}
+          RELEASE_TOKEN_AVAILABLE: ${{ secrets.RELEASE_PLEASE_TOKEN != '' }}
+        run: |
+          if [ "$RELEASE_TOKEN_AVAILABLE" = true ]; then
+            echo 'The release token starts the Homebrew publisher automatically.'
+          else
+            gh workflow run homebrew.yml --repo "$GITHUB_REPOSITORY" --ref "$TAG"
+          fi
