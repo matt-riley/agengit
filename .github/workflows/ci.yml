@@ -86,7 +86,7 @@ jobs:
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: "1.27.1"
+          go-version: "1.27.2"
           cache: false
 
       - name: Install actionlint
@@ -106,7 +106,7 @@ jobs:
     permissions:
       contents: read
       packages: read
-    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@cb986078a5bd4775e5fb05348f3618e41fedf4de # v4
+    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@0a310f1286537ed4fd000af4b35cd6459b00448d # v4
     with:
       runner: ubuntu-latest
       lint: true
@@ -123,7 +123,7 @@ jobs:
     permissions:
       contents: read
       packages: read
-    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@cb986078a5bd4775e5fb05348f3618e41fedf4de # v4
+    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@0a310f1286537ed4fd000af4b35cd6459b00448d # v4
     with:
       # Pin to macos-15 until macOS 26 (Tahoe) / Xcode 26.4 compatibility
       # is resolved upstream. See https://codeberg.org/ziglang/zig/issues/31658
@@ -141,7 +141,7 @@ jobs:
     permissions:
       contents: read
       packages: read
-    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@cb986078a5bd4775e5fb05348f3618e41fedf4de # v4
+    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@0a310f1286537ed4fd000af4b35cd6459b00448d # v4
     with:
       runner: ubuntu-latest
       test: true
@@ -172,7 +172,7 @@ jobs:
 
       - name: Upload crash corpus
         if: ${{ github.event_name == 'schedule' && always() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: crash-corpus
           path: dist/crash-corpus
@@ -188,7 +188,7 @@ jobs:
     permissions:
       contents: read
       packages: read
-    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@cb986078a5bd4775e5fb05348f3618e41fedf4de # v4
+    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@0a310f1286537ed4fd000af4b35cd6459b00448d # v4
     with:
       runner: ubuntu-latest
       test: true
@@ -205,7 +205,7 @@ jobs:
     permissions:
       contents: read
       packages: read
-    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@cb986078a5bd4775e5fb05348f3618e41fedf4de # v4
+    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@0a310f1286537ed4fd000af4b35cd6459b00448d # v4
     with:
       runner: ubuntu-latest
       test: true
@@ -252,7 +252,7 @@ jobs:
 
       - name: Upload release archive
         if: ${{ needs.detect-release-commit.outputs.is_release_commit == 'true' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: release-${{ matrix.target }}
           path: dist/${{ matrix.archive }}
@@ -273,7 +273,7 @@ jobs:
           ref: ${{ github.sha }}
 
       - name: Download release archives
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           pattern: release-*
           merge-multiple: true
