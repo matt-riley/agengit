@@ -106,7 +106,7 @@ jobs:
     permissions:
       contents: read
       packages: read
-    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@0a310f1286537ed4fd000af4b35cd6459b00448d # v4
+    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@e802c1e932579d1e840f6dd4f8316458d1f96983 # v4
     with:
       runner: ubuntu-latest
       lint: true
@@ -123,7 +123,7 @@ jobs:
     permissions:
       contents: read
       packages: read
-    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@0a310f1286537ed4fd000af4b35cd6459b00448d # v4
+    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@e802c1e932579d1e840f6dd4f8316458d1f96983 # v4
     with:
       # Pin to macos-15 until macOS 26 (Tahoe) / Xcode 26.4 compatibility
       # is resolved upstream. See https://codeberg.org/ziglang/zig/issues/31658
@@ -141,7 +141,7 @@ jobs:
     permissions:
       contents: read
       packages: read
-    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@0a310f1286537ed4fd000af4b35cd6459b00448d # v4
+    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@e802c1e932579d1e840f6dd4f8316458d1f96983 # v4
     with:
       runner: ubuntu-latest
       test: true
@@ -188,7 +188,7 @@ jobs:
     permissions:
       contents: read
       packages: read
-    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@0a310f1286537ed4fd000af4b35cd6459b00448d # v4
+    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@e802c1e932579d1e840f6dd4f8316458d1f96983 # v4
     with:
       runner: ubuntu-latest
       test: true
@@ -205,7 +205,7 @@ jobs:
     permissions:
       contents: read
       packages: read
-    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@0a310f1286537ed4fd000af4b35cd6459b00448d # v4
+    uses: matt-riley/matt-riley-ci/.github/workflows/ci.yml@e802c1e932579d1e840f6dd4f8316458d1f96983 # v4
     with:
       runner: ubuntu-latest
       test: true
