@@ -10,7 +10,7 @@ jobs:
     permissions:
       contents: read
     name: Update homebrew tap
-    uses: matt-riley/matt-riley-ci/.github/workflows/homebrew-formula.yml@f846763f763247cb0140e3dd08002280b001f6cf # v4
+    uses: matt-riley/matt-riley-ci/.github/workflows/homebrew-formula.yml@002d16c00bc74ebced433f0a16187c9b13451194 # v4
     with:
       test-args: version
       tag: ${{ github.ref_name }}
